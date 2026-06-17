@@ -1,0 +1,43 @@
+import { useState } from 'react'
+import DocumentsTab from '../components/DocumentsTab'
+import VisitorsTab from '../components/VisitorsTab'
+import ConfigTab from '../components/ConfigTab'
+import AgentsTab from '../components/AgentsTab'
+import HitlTab from '../components/HitlTab'
+import { s } from '../styles'
+
+export default function TenantDashboard({ agentToken, username, onLogout }) {
+  const [tab, setTab] = useState('documents')
+
+  return (
+    <div style={s.page}>
+      <div style={s.header}>
+        <h1 style={s.pageTitle}>Tenant 대시보드</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 13, color: '#718096' }}>{username}</span>
+          <button style={s.btnSm} onClick={onLogout}>로그아웃</button>
+        </div>
+      </div>
+
+      <div style={s.tabs}>
+        {['documents', 'visitors', 'config', 'agents', 'hitl'].map(t => (
+          <button
+            key={t}
+            style={s.tab(tab === t)}
+            onClick={() => setTab(t)}
+          >
+            {{ documents: '📄 문서', visitors: '👤 Visitors', config: '⚙️ 설정', agents: '👥 팀원', hitl: '🎧 HITL 상담' }[t]}
+          </button>
+        ))}
+      </div>
+
+      <div style={s.tabContent}>
+        {tab === 'documents' && <DocumentsTab agentToken={agentToken} />}
+        {tab === 'visitors' && <VisitorsTab agentToken={agentToken} />}
+        {tab === 'config' && <ConfigTab agentToken={agentToken} />}
+        {tab === 'agents' && <AgentsTab agentToken={agentToken} />}
+        {tab === 'hitl' && <HitlTab agentToken={agentToken} />}
+      </div>
+    </div>
+  )
+}

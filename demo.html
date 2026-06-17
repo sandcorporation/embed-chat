@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Widget 테스트 페이지</title>
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f7fafc;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: #2d3748;
+      color: #fff;
+      padding: 14px 24px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .layout {
+      display: flex;
+      flex: 1;
+      gap: 0;
+      overflow: hidden;
+      height: calc(100vh - 49px);
+    }
+
+    /* ── 왼쪽 패널 ── */
+    .panel {
+      width: 320px;
+      flex-shrink: 0;
+      background: #fff;
+      border-right: 1px solid #e2e8f0;
+      padding: 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    .panel h2 {
+      font-size: 13px;
+      font-weight: 700;
+      color: #4a5568;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #4a5568;
+    }
+
+    input {
+      padding: 8px 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    input:focus {
+      border-color: #4299e1;
+    }
+
+    .hint {
+      font-size: 11px;
+      color: #a0aec0;
+      font-family: inherit;
+    }
+
+    button {
+      padding: 10px;
+      background: #4299e1;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button:hover {
+      background: #3182ce;
+    }
+
+    button:disabled {
+      background: #bee3f8;
+      cursor: not-allowed;
+    }
+
+    .token-box {
+      background: #f0fff4;
+      border: 1px solid #c6f6d5;
+      border-radius: 6px;
+      padding: 10px;
+      font-size: 11px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: #276749;
+      word-break: break-all;
+      display: none;
+    }
+
+    .error-box {
+      background: #fff5f5;
+      border: 1px solid #fed7d7;
+      border-radius: 6px;
+      padding: 10px;
+      font-size: 12px;
+      color: #c53030;
+      display: none;
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid #e2e8f0;
+    }
+
+    /* ── 오른쪽 위젯 영역 ── */
+    .preview {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #edf2f7;
+      position: relative;
+    }
+
+    .placeholder {
+      text-align: center;
+      color: #a0aec0;
+      font-size: 14px;
+      user-select: none;
+    }
+
+    .placeholder svg {
+      display: block;
+      margin: 0 auto 12px;
+      opacity: 0.3;
+    }
+
+    iframe#widget-frame {
+      width: 400px;
+      height: 640px;
+      border: none;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+      display: none;
+      background: #fff;
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>📦 Widget 테스트 페이지 — dev</header>
+
+  <div class="layout">
+
+    <!-- 설정 패널 -->
+    <div class="panel">
+      <h2>설정</h2>
+
+      <label>
+        Tenant Key
+        <input id="tenant-key" type="password" placeholder="sk-xxxx…" autocomplete="off">
+        <span class="hint">Operator 대시보드 → Tenant 생성 시 발급된 TENANT_KEY</span>
+      </label>
+
+      <label>
+        Visitor ID
+        <input id="visitor-id" type="text" placeholder="visitor-001">
+        <span class="hint">방문자 식별자 — 동일 ID면 이전 대화 이어짐</span>
+      </label>
+
+      <hr class="divider">
+
+      <button id="open-btn" onclick="openWidget()">위젯 열기</button>
+
+      <div id="token-box" class="token-box"></div>
+      <div id="error-box" class="error-box"></div>
+    </div>
+
+    <!-- 위젯 프리뷰 -->
+    <div class="preview">
+      <div id="placeholder" class="placeholder">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        Tenant Key를 입력하고 위젯 열기를 누르세요
+      </div>
+      <iframe id="widget-frame" title="Chat Widget"></iframe>
+    </div>
+
+  </div>
+
+  <script>
+    // 기본 Visitor ID: 랜덤 UUID
+    document.getElementById('visitor-id').value =
+      'visitor-' + crypto.randomUUID().slice(0, 8)
+
+    async function openWidget() {
+      const btn = document.getElementById('open-btn')
+      const tenantKey = document.getElementById('tenant-key').value.trim()
+      const visitorId = document.getElementById('visitor-id').value.trim()
+      const tokenBox = document.getElementById('token-box')
+      const errorBox = document.getElementById('error-box')
+      const frame = document.getElementById('widget-frame')
+      const placeholder = document.getElementById('placeholder')
+
+      tokenBox.style.display = 'none'
+      errorBox.style.display = 'none'
+
+      if (!tenantKey) {
+        showError('Tenant Key를 입력하세요.')
+        return
+      }
+      if (!visitorId) {
+        showError('Visitor ID를 입력하세요.')
+        return
+      }
+
+      btn.disabled = true
+      btn.textContent = '토큰 발급 중…'
+
+      try {
+        const res = await fetch('http://localhost/api/embed/token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${tenantKey}`,
+          },
+          body: JSON.stringify({ visitor_id: visitorId, visitor_context: {} }),
+        })
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body.detail || `HTTP ${res.status}`)
+        }
+
+        const { embed_token } = await res.json()
+
+        tokenBox.textContent = `embed_token: ${embed_token}`
+        tokenBox.style.display = 'block'
+
+        frame.src = `http://localhost/embed/?token=${embed_token}`
+        frame.style.display = 'block'
+        placeholder.style.display = 'none'
+
+        btn.textContent = '위젯 재시작'
+      } catch (err) {
+        showError(err.message)
+      } finally {
+        btn.disabled = false
+        if (btn.textContent === '토큰 발급 중…') btn.textContent = '위젯 열기'
+      }
+    }
+
+    function showError(msg) {
+      const box = document.getElementById('error-box')
+      box.textContent = msg
+      box.style.display = 'block'
+    }
+  </script>
+
+</body>
+
+</html>

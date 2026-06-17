@@ -1,0 +1,124 @@
+const { test, expect, request } = require('@playwright/test')
+
+const ADMIN_URL = process.env.ADMIN_URL || 'http://localhost:5174'
+const WIDGET_URL = process.env.WIDGET_URL || 'http://localhost:5173'
+const API_URL = process.env.API_URL || 'http://localhost:8000'
+
+const HITL_SYSTEM_PROMPT =
+  "You are a helpful customer service AI assistant. " +
+  "When a user requests a human agent or uses the Korean word '상담원', " +
+  "you MUST set needs_hitl=true. For all other requests respond helpfully with needs_hitl=false."
+
+async function setupHitlTest() {
+  const api = await request.newContext({ baseURL: API_URL })
+
+  const opRes = await api.post('/api/operator/auth/login', {
+    data: {
+      username: process.env.E2E_OPERATOR_USERNAME || 'admin',
+      password: process.env.E2E_OPERATOR_PASSWORD || 'admin123',
+    },
+  })
+  const { access_token: opToken } = await opRes.json()
+
+  const tenantRes = await api.post('/api/operator/tenants/', {
+    headers: { Authorization: `Bearer ${opToken}` },
+    data: { name: `HITL E2E ${Date.now()}` },
+  })
+  const tenant = await tenantRes.json()
+
+  // 에이전트 로그인 후 HITL 유도 시스템 프롬프트 설정
+  const agentRes = await api.post('/api/tenant/agents/auth/login', {
+    data: {
+      tenant_name: tenant.name,
+      username: tenant.agent_username,
+      password: tenant.agent_temp_password,
+    },
+  })
+  const { access_token: agentToken } = await agentRes.json()
+
+  await api.patch('/api/tenant/config/', {
+    headers: { Authorization: `Bearer ${agentToken}` },
+    data: {
+      model_id: 'qwen2.5:3b',
+      system_prompt: HITL_SYSTEM_PROMPT,
+    },
+  })
+
+  const embedRes = await api.post('/api/embed/token', {
+    headers: { Authorization: `Bearer ${tenant.tenant_key}` },
+    data: { visitor_id: 'hitl-visitor', visitor_context: {} },
+  })
+  const { embed_token } = await embedRes.json()
+
+  await api.dispose()
+
+  return {
+    tenantKey: tenant.tenant_key,
+    tenantName: tenant.name,
+    agentUsername: tenant.agent_username,
+    agentPassword: tenant.agent_temp_password,
+  }
+}
+
+// 방문자별 EmbedToken을 새로 발급한다 (테스트 간 visitor/세션 격리용).
+async function mintEmbedToken(tenantKey, visitorId) {
+  const api = await request.newContext({ baseURL: API_URL })
+  const res = await api.post('/api/embed/token', {
+    headers: { Authorization: `Bearer ${tenantKey}` },
+    data: { visitor_id: visitorId, visitor_context: {} },
+  })
+  const { embed_token } = await res.json()
+  await api.dispose()
+  return embed_token
+}
+
+// 위젯으로 HITL을 트리거하고 시스템 메시지가 뜰 때까지 기다린다.
+// E2E 스택의 LLM은 결정적 Fake이므로 '상담원' 메시지는 항상 escalation된다(재시도 불필요).
+async function escalateViaWidget(page, tenantKey) {
+  const token = await mintEmbedToken(tenantKey, `hitl-${Date.now()}`)
+  await page.goto(`${WIDGET_URL}/embed/?token=${token}`)
+  const textarea = page.locator('textarea[placeholder="메시지를 입력하세요..."]')
+  await expect(textarea).toBeEnabled({ timeout: 10000 })
+
+  await textarea.fill('상담원 연결해 주세요')
+  await page.click('button:has-text("전송")')
+  await expect(page.locator('[data-role="system"]')).toBeVisible({ timeout: 20000 })
+}
+
+test.describe('HITL 전체 플로우', () => {
+  // 위젯→실제 qwen→escalation→SSE 전 구간 + bounded retry(최대 4 세션)를 고려해 타임아웃을 늘린다
+  test.describe.configure({ timeout: 150000 })
+
+  let ctx
+
+  test.beforeAll(async () => {
+    ctx = await setupHitlTest()
+  })
+
+  test('방문자가 상담원 요청 시 HITL 시작 메시지가 위젯에 표시된다', async ({ page }) => {
+    // escalateViaWidget이 [data-role="system"] 가시성을 보장하므로 별도 단언 불필요
+    await escalateViaWidget(page, ctx.tenantKey)
+    await expect(page.locator('[data-role="system"]')).toBeVisible()
+  })
+
+  test('어드민 에이전트가 에스컬레이션을 확인하고 클레임할 수 있다', async ({ page }) => {
+    // 이 테스트는 자체 escalation을 만들어 다른 테스트에 의존하지 않는다 (독립성)
+    await escalateViaWidget(page, ctx.tenantKey)
+
+    await page.goto(`${ADMIN_URL}/admin-ui/tenant`)
+    await page.fill('input[placeholder="Tenant 이름"]', ctx.tenantName)
+    await page.fill('input[placeholder="사용자명"]', ctx.agentUsername)
+    await page.fill('input[placeholder="비밀번호"]', ctx.agentPassword)
+    await page.click('button[type="submit"]')
+    await expect(page.locator('button:has-text("📄 문서")')).toBeVisible({ timeout: 10000 })
+
+    await page.click('button:has-text("HITL")')
+
+    // 여러 escalation이 있을 수 있으므로 first()로 하나를 claim한다
+    const claimBtn = page.locator('button:has-text("수락하기")').first()
+    await expect(claimBtn).toBeVisible({ timeout: 10000 })
+    await claimBtn.click()
+
+    await expect(page.locator('button:has-text("AI에게 넘기기")').first()).toBeVisible({ timeout: 5000 })
+  })
+})

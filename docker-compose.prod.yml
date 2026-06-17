@@ -1,0 +1,97 @@
+include:
+  - path: docker-compose.yml
+
+services:
+  widget-init:
+    build:
+      context: ./widget
+    volumes:
+      - widget_dist:/output
+    restart: "no"
+
+  admin-init:
+    build:
+      context: ./admin
+    volumes:
+      - admin_dist:/output
+    restart: "no"
+
+  ollama:
+    image: ollama/ollama
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - OLLAMA_FLASH_ATTENTION=0
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "ollama", "list" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  ollama-init:
+    image: ollama/ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    command: [ "pull", "bge-m3" ]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    restart: unless-stopped
+    volumes:
+      - ./media:/app/media
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  worker:
+    restart: unless-stopped
+    volumes:
+      - ./media:/app/media
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./backend/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./backend/staticfiles:/app/staticfiles:ro
+      - widget_dist:/app/widget:ro
+      - admin_dist:/app/admin:ro
+    depends_on:
+      widget-init:
+        condition: service_completed_successfully
+      admin-init:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+
+volumes:
+  widget_dist:
+  admin_dist:
+  ollama_data:

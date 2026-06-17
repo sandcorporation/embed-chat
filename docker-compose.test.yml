@@ -1,0 +1,236 @@
+services:
+  # ── 공용 인프라 ──────────────────────────────────────────────────────────
+  ollama-test:
+    image: ollama/ollama
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - OLLAMA_FLASH_ATTENTION=0
+    volumes:
+      - ollama_test_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  ollama-test-init:
+    image: ollama/ollama
+    volumes:
+      - ollama_test_data:/root/.ollama
+    environment:
+      OLLAMA_HOST: http://ollama-test:11434
+    entrypoint: ["/bin/sh", "-c"]
+    # chat LLM은 fake-llm으로 대체됐고 단위 테스트도 LLM을 fake하므로 임베딩(bge-m3)만 받는다
+    command: ["ollama pull bge-m3"]
+    depends_on:
+      ollama-test:
+        condition: service_healthy
+    restart: "no"
+
+  db-test:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: embed_chat
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis-test:
+    image: redis:7-alpine
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── PaddleOCR 서비스 (GPU, 테스트용) ────────────────────────────────────────
+  paddle-ocr-test:
+    build:
+      context: ./paddle_service
+      dockerfile: Dockerfile
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - paddle_models_test:/root/.paddleocr
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 300s
+
+  # ── E2E용 결정적 Fake LLM (OpenAI 호환) ─────────────────────────────────────
+  fake-llm:
+    build:
+      context: ./fake_llm
+      dockerfile: Dockerfile
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8090/health').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── 백엔드 단위/통합 테스트 ───────────────────────────────────────────────
+  test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.test
+    command: python -m pytest tests/ -v --tb=short
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DB_HOST: db-test
+      DB_NAME: embed_chat
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      REDIS_URL: redis://redis-test:6379/0
+      SECRET_KEY: test-secret-key-not-for-production
+      OPEN_ROUTER_BASE_URL: http://ollama-test:11434/v1
+      OPEN_ROUTER_API_KEY: ollama
+      OPEN_ROUTER_DEFAULT_MODEL: qwen2.5:3b
+      OLLAMA_BASE_URL: http://ollama-test:11434
+      PADDLE_OCR_URL: http://paddle-ocr-test:8080
+    depends_on:
+      db-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      ollama-test-init:
+        condition: service_completed_successfully
+      paddle-ocr-test:
+        condition: service_healthy
+
+  # ── E2E용 Django API ─────────────────────────────────────────────────────
+  api-e2e:
+    build:
+      context: ./backend
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py create_test_operator &&
+             gunicorn config.wsgi:application --worker-class=gevent --workers=4 --bind 0.0.0.0:8000"
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DB_HOST: db-test
+      DB_NAME: embed_chat
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      REDIS_URL: redis://redis-test:6379/0
+      SECRET_KEY: e2e-secret-key-not-for-production
+      OPEN_ROUTER_BASE_URL: http://fake-llm:8090/v1
+      OPEN_ROUTER_API_KEY: fake
+      OPEN_ROUTER_DEFAULT_MODEL: fake-llm
+      OLLAMA_BASE_URL: http://ollama-test:11434
+      PADDLE_OCR_URL: http://paddle-ocr-test:8080
+      E2E_OPERATOR_USERNAME: admin
+      E2E_OPERATOR_PASSWORD: admin123
+    volumes:
+      - media-e2e:/app/media
+    depends_on:
+      db-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      ollama-test-init:
+        condition: service_completed_successfully
+      paddle-ocr-test:
+        condition: service_healthy
+      fake-llm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/api/operator/auth/login || true"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  # ── E2E용 Admin UI ───────────────────────────────────────────────────────
+  admin-e2e:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile.e2e
+    environment:
+      VITE_PROXY_TARGET: http://api-e2e:8000
+    depends_on:
+      - api-e2e
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5174/ || true"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── E2E용 Widget UI ──────────────────────────────────────────────────────
+  widget-e2e:
+    build:
+      context: ./widget
+      dockerfile: Dockerfile.e2e
+    environment:
+      VITE_PROXY_TARGET: http://api-e2e:8000
+    depends_on:
+      - api-e2e
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5173/ || true"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── E2E용 Celery Worker ───────────────────────────────────────────────────
+  worker-e2e:
+    build:
+      context: ./backend
+    command: celery -A config worker --loglevel=info
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DB_HOST: db-test
+      DB_NAME: embed_chat
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      REDIS_URL: redis://redis-test:6379/0
+      SECRET_KEY: e2e-secret-key-not-for-production
+      OPEN_ROUTER_BASE_URL: http://fake-llm:8090/v1
+      OPEN_ROUTER_API_KEY: fake
+      OPEN_ROUTER_DEFAULT_MODEL: fake-llm
+      OLLAMA_BASE_URL: http://ollama-test:11434
+      PADDLE_OCR_URL: http://paddle-ocr-test:8080
+    volumes:
+      - media-e2e:/app/media
+    depends_on:
+      api-e2e:
+        condition: service_healthy
+      fake-llm:
+        condition: service_healthy
+
+  # ── Playwright E2E 테스트 러너 ───────────────────────────────────────────
+  e2e:
+    build:
+      context: ./e2e
+    environment:
+      ADMIN_URL: http://admin-e2e:5174
+      WIDGET_URL: http://widget-e2e:5173
+      API_URL: http://api-e2e:8000
+      E2E_OPERATOR_USERNAME: admin
+      E2E_OPERATOR_PASSWORD: admin123
+    depends_on:
+      api-e2e:
+        condition: service_healthy
+      admin-e2e:
+        condition: service_healthy
+      widget-e2e:
+        condition: service_healthy
+      worker-e2e:
+        condition: service_started
+
+volumes:
+  ollama_test_data:
+  media-e2e:
+  paddle_models_test:
