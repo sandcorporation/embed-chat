@@ -101,6 +101,28 @@ class GraphStore:
             result = session.run(query, tenant_id=self.tenant_id, doc=document_id)
             return [dict(record) for record in result]
 
+    def all_text_units(self) -> list:
+        """이 tenant의 모든 Text Unit(unit_id, content)을 반환한다 (재임베딩용)."""
+        query = "MATCH (t:TextUnit {tenant_id: $tenant_id}) RETURN t.unit_id AS unit_id, t.content AS content"
+        with _get_driver().session() as session:
+            return [dict(r) for r in session.run(query, tenant_id=self.tenant_id)]
+
+    def set_text_unit_embedding(self, unit_id: str, embedding: list) -> None:
+        """Text Unit의 임베딩만 교체한다 (content 등은 보존)."""
+        with _get_driver().session() as session:
+            session.run(
+                "MATCH (t:TextUnit {tenant_id: $tenant_id, unit_id: $uid}) SET t.embedding = $emb",
+                tenant_id=self.tenant_id, uid=unit_id, emb=embedding,
+            )
+
+    def recreate_vector_indexes(self, dimensions: int) -> None:
+        """per-Tenant 벡터 인덱스를 새 차원으로 재생성한다(임베딩 모델 변경 시)."""
+        with _get_driver().session() as session:
+            session.run(f"DROP INDEX {self._tu_index()} IF EXISTS")
+            session.run(f"DROP INDEX {self._m_index()} IF EXISTS")
+        self.ensure_vector_index(dimensions=dimensions)
+        self.ensure_mention_vector_index(dimensions=dimensions)
+
     def vector_search(self, query_embedding: list, top_k: int = 5) -> list:
         """쿼리 임베딩으로 이 tenant의 최근접 Text Unit을 반환한다 (tenant 스코프)."""
         query = (

@@ -55,3 +55,16 @@ def rebuild_graph_communities(self, tenant_id: str):
     from apps.rag.community_builder import rebuild_communities
 
     rebuild_communities(tenant_id)
+
+
+@app.task(
+    bind=True,
+    max_retries=3,
+    autoretry_for=(httpx.ReadTimeout, httpx.ConnectError),
+    default_retry_delay=60,
+)
+def reembed_tenant_task(self, tenant_id: str):
+    """Embedding Provider 변경 시 재임베딩 재구축(구조 보존, 무중단 swap)."""
+    from apps.rag.reembed import reembed_tenant
+
+    reembed_tenant(tenant_id)

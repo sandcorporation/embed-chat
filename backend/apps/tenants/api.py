@@ -294,9 +294,15 @@ def get_config(request):
     return _config_out(request.auth.tenant.config)
 
 
+def _embed_signature(config):
+    # 벡터 공간을 정하는 요소들. 키 변경만으로는 재임베딩하지 않는다.
+    return (config.embed_provider_type, config.embed_base_url, config.embed_model, config.embed_dim)
+
+
 @tenant_router.patch("/config/", response=TenantConfigOut)
 def update_config(request, body: TenantConfigIn):
     config = request.auth.tenant.config
+    _old_embed = _embed_signature(config)
     for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message", "brand_name", "hitl_enabled", "require_identity_verification", "llm_provider_type", "llm_base_url", "extraction_model", "embed_provider_type", "embed_base_url", "embed_model", "embed_dim"):
         value = getattr(body, field)
         if value is not None:
@@ -308,6 +314,11 @@ def update_config(request, body: TenantConfigIn):
     if body.embed_api_key is not None:
         config.embed_api_key = encrypt_secret(body.embed_api_key)
     config.save()
+
+    # Embedding Provider(벡터 공간) 변경 시 재임베딩 재구축을 트리거한다(LLM 변경은 제외).
+    if _embed_signature(config) != _old_embed:
+        from apps.rag.tasks import reembed_tenant_task
+        reembed_tenant_task.delay(str(config.tenant_id))
     return _config_out(config)
 
 
