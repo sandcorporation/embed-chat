@@ -70,6 +70,59 @@ def test_hitl_with_response_streams_transition_then_escalates(
     assert Escalation.objects.filter(session=session).exists()
 
 
+# ── Issue 88: HITL 토글 (불리언으로 그래프 분기) ──────────────────────────────
+
+@pytest.mark.django_db
+def test_hitl_disabled_never_escalates_and_answers(tenant_with_key, fake_chat_llm):
+    """hitl_enabled=False면 fake가 needs_hitl을 강제해도 escalation 없이 AI가 답한다.
+
+    그래프 토폴로지가 escalation 분기 없이 로드되어 needs_hitl을 구조적으로 무시한다.
+    """
+    from apps.agent.graph import run_chat_agent
+    from apps.agent.nodes import HITLResponse
+    from apps.chat.models import ChatSession, ChatMessage
+    from apps.escalation.models import Escalation
+    from apps.tenants.models import TenantConfig
+
+    tenant, _ = tenant_with_key
+    config = TenantConfig.objects.get(tenant=tenant)
+    config.hitl_enabled = False
+    config.save()
+
+    session = _make_session(tenant)
+    # 평소라면 escalation 될 강제 verdict지만, HITL-OFF 그래프는 무시해야 한다
+    fake_chat_llm.override = lambda m: HITLResponse(
+        response="제가 도와드리겠습니다", needs_hitl=True, hitl_reason="forced"
+    )
+
+    run_chat_agent(session, "상담원 연결해 주세요")
+
+    session.refresh_from_db()
+    assert session.is_hitl is False
+    assert not Escalation.objects.filter(session=session).exists()
+    assert ChatMessage.objects.filter(
+        session=session, role=ChatMessage.ROLE_ASSISTANT, content="제가 도와드리겠습니다"
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_hitl_enabled_toggle_settable_via_config_api(client, tenant_agent_token):
+    """Tenant가 어드민 config API로 hitl_enabled를 끄고 다시 조회할 수 있다(기본 True)."""
+    g0 = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}")
+    assert g0.json()["hitl_enabled"] is True
+
+    r = client.patch(
+        "/api/tenant/config/",
+        {"hitl_enabled": False},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert r.status_code == 200
+
+    g1 = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}")
+    assert g1.json()["hitl_enabled"] is False
+
+
 # ── Issue 21: Escalation 모델 + LangGraph Structured Output ───────────────
 
 

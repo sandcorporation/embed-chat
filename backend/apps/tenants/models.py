@@ -92,6 +92,8 @@ class TenantConfig(models.Model):
     welcome_message = models.TextField(blank=True, default="")
     # 식별 Visitor의 visitor_id 위조를 막는 HMAC 신원검증 요구(opt-in). 기본 꺼짐.
     require_identity_verification = models.BooleanField(default=False)
+    # HITL(사람 상담원 전환) 사용 여부. 꺼지면 에이전트 그래프가 escalation 분기 없이 로드된다.
+    hitl_enabled = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

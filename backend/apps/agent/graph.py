@@ -7,6 +7,7 @@ from apps.agent.nodes import (
     local_search_node,
     global_search_node,
     call_llm_structured,
+    call_llm_plain,
     create_escalation_node,
     save_messages_node,
 )
@@ -61,14 +62,17 @@ def _create_checkpointer():
     return saver, conn
 
 
-def build_graph(checkpointer=None):
+def build_graph(checkpointer=None, hitl_enabled=True):
+    """hitl_enabled 불리언으로 토폴로지+call_llm 스키마를 다르게 컴파일한다(issue 88).
+
+    HITL-OFF는 response-only call_llm → save_messages 직행이며 escalation 노드가 없어,
+    needs_hitl을 구조적으로 표현할 수 없다(전환 멘트 누수 차단).
+    """
     graph = StateGraph(ChatState)
 
     graph.add_node("route_search", route_search_node)
     graph.add_node("local_search", local_search_node)
     graph.add_node("global_search", global_search_node)
-    graph.add_node("call_llm", call_llm_structured)
-    graph.add_node("create_escalation", create_escalation_node)
     graph.add_node("save_messages", save_messages_node)
 
     graph.add_edge(START, "route_search")
@@ -76,13 +80,21 @@ def build_graph(checkpointer=None):
         "local_search": "local_search",
         "global_search": "global_search",
     })
+
+    if hitl_enabled:
+        graph.add_node("call_llm", call_llm_structured)
+        graph.add_node("create_escalation", create_escalation_node)
+        graph.add_conditional_edges("call_llm", _route_hitl, {
+            "create_escalation": "create_escalation",
+            "save_messages": "save_messages",
+        })
+        graph.add_edge("create_escalation", END)
+    else:
+        graph.add_node("call_llm", call_llm_plain)
+        graph.add_edge("call_llm", "save_messages")
+
     graph.add_edge("local_search", "call_llm")
     graph.add_edge("global_search", "call_llm")
-    graph.add_conditional_edges("call_llm", _route_hitl, {
-        "create_escalation": "create_escalation",
-        "save_messages": "save_messages",
-    })
-    graph.add_edge("create_escalation", END)
     graph.add_edge("save_messages", END)
 
     return graph.compile(checkpointer=checkpointer)
@@ -113,7 +125,7 @@ def run_chat_agent(session, user_message: str) -> str:
 
     saver, conn = _create_checkpointer()
     try:
-        graph = build_graph(checkpointer=saver)
+        graph = build_graph(checkpointer=saver, hitl_enabled=config.hitl_enabled)
         result = graph.invoke(
             initial_state,
             config={"configurable": {"thread_id": str(session.id)}},

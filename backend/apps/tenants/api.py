@@ -49,6 +49,8 @@ class TenantConfigOut(Schema):
     webhook_url: str
     webhook_type: str
     welcome_message: str
+    hitl_enabled: bool
+    require_identity_verification: bool
 
 
 class TenantConfigIn(Schema):
@@ -58,6 +60,8 @@ class TenantConfigIn(Schema):
     webhook_url: str = None
     webhook_type: str = None
     welcome_message: str = None
+    hitl_enabled: bool = None
+    require_identity_verification: bool = None
 
 
 class SlugIn(Schema):
@@ -249,6 +253,8 @@ def _config_out(config):
         "webhook_url": config.webhook_url,
         "webhook_type": config.webhook_type,
         "welcome_message": config.welcome_message,
+        "hitl_enabled": config.hitl_enabled,
+        "require_identity_verification": config.require_identity_verification,
     }
 
 
@@ -260,7 +266,7 @@ def get_config(request):
 @tenant_router.patch("/config/", response=TenantConfigOut)
 def update_config(request, body: TenantConfigIn):
     config = request.auth.tenant.config
-    for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message"):
+    for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message", "hitl_enabled", "require_identity_verification"):
         value = getattr(body, field)
         if value is not None:
             setattr(config, field, value)

@@ -77,6 +77,9 @@ class _FakeChatLLM:
             )
         if self.override is not None:
             return self.override(messages)
+        # HITL-OFF 경로(response-only 스키마)는 needs_hitl 필드가 없다
+        if schema.__name__ == "PlainResponse":
+            return schema(response="안녕하세요! 무엇을 도와드릴까요?")
         text = _latest_human_message(messages)
         if self.HUMAN_AGENT_KEYWORD in text:
             return schema(response="", needs_hitl=True, hitl_reason="상담원 요청")

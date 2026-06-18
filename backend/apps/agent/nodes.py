@@ -11,6 +11,11 @@ class HITLResponse(BaseModel):
     hitl_reason: str = ""
 
 
+class PlainResponse(BaseModel):
+    """HITL-OFF Tenant용 구조화 출력 — needs_hitl 필드가 없어 escalation을 표현할 수 없다."""
+    response: str
+
+
 class SearchRoute(BaseModel):
     search_scope: str = "local"  # "local" | "global"
 
@@ -112,6 +117,18 @@ def call_llm_structured(state: dict) -> dict:
         "needs_hitl": result.needs_hitl,
         "hitl_reason": result.hitl_reason,
     }
+
+
+def call_llm_plain(state: dict) -> dict:
+    """HITL-OFF 경로: needs_hitl 없는 response-only 출력. 전환 멘트 누수가 구조적으로 불가능."""
+    lc_messages = _assemble_lc_messages(state)
+    result = llm_boundary.complete_structured(state["model_id"], lc_messages, PlainResponse)
+
+    if result.response:
+        publish_token(state["session_id"], result.response)
+        publish_done(state["session_id"])
+
+    return {"assistant_response": result.response, "needs_hitl": False, "hitl_reason": ""}
 
 
 def create_escalation_node(state: dict) -> dict:
