@@ -1,0 +1,108 @@
+"""GraphIngester — 문서 텍스트에서 Knowledge Graph(Entity/관계)를 추출해 GraphStore에 기여한다.
+
+추출은 플랫폼 전용 모델(settings.GRAPH_EXTRACTION_MODEL)을 `apps/agent/llm` 경계를 통해
+호출하므로, 단위/통합 테스트에서 결정적 Fake로 교체할 수 있다(bring-up은 실제 OpenRouter).
+"""
+import re
+from typing import List
+
+from pydantic import BaseModel, Field
+from django.conf import settings
+from langchain_core.messages import HumanMessage
+
+from apps.agent import llm as llm_boundary
+from apps.rag.graph_store import GraphStore
+
+
+class GraphEntity(BaseModel):
+    name: str
+    type: str = ""
+    description: str = ""
+
+
+class GraphRelation(BaseModel):
+    source: str
+    target: str
+    description: str = ""
+
+
+class GraphExtraction(BaseModel):
+    entities: List[GraphEntity] = Field(default_factory=list)
+    relations: List[GraphRelation] = Field(default_factory=list)
+
+
+_EXTRACTION_PROMPT = """You extract a knowledge graph from a product/support document.
+Return entities (name, type, description) and relations (source, target, description).
+Entity names should be specific (products, specs, accessories, features).
+
+Document label: {label}
+Document text:
+{text}
+"""
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def extract_graph(label: str, text: str, model_id: str = "") -> GraphExtraction:
+    """텍스트에서 Entity/관계를 추출한다 (LLM 경계 경유)."""
+    model = model_id or settings.GRAPH_EXTRACTION_MODEL
+    prompt = _EXTRACTION_PROMPT.format(label=label, text=text[:8000])
+    return llm_boundary.complete_structured(
+        model, [HumanMessage(content=prompt)], GraphExtraction
+    )
+
+
+def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> None:
+    """추출된 Entity/관계 + Text Unit(임베딩)을 GraphStore에 기여한다.
+    문서 레이블도 대표 Entity로 시드한다."""
+    from apps.rag.ingesters import chunk_text, get_embeddings
+
+    text = _CONTROL_CHARS.sub("", text or "")
+    gs = GraphStore(tenant_id)
+
+    extraction = extract_graph(label, text)
+
+    # 엔티티(레이블 + 추출분)를 name+description으로 배치 임베딩 → 의미 검색용
+    valid_entities = [e for e in extraction.entities if e.name]
+    entity_specs = [(label, "document", f"Source document: {label}")] + [
+        (e.name, e.type, e.description) for e in valid_entities
+    ]
+    gs.ensure_entity_vector_index()
+    entity_embeddings = get_embeddings(
+        [f"{name}: {desc}".strip(": ") if desc else name for name, _t, desc in entity_specs]
+    )
+    embed_by_name = {spec[0]: emb for spec, emb in zip(entity_specs, entity_embeddings)}
+
+    # 레이블 대표 Entity 시드 (임베딩 포함)
+    gs.upsert_entity(
+        name=label, entity_type="document", description=f"Source document: {label}",
+        source_document_id=document_id, embedding=embed_by_name.get(label),
+    )
+
+    for e in valid_entities:
+        gs.upsert_entity(
+            e.name, e.type, e.description,
+            source_document_id=document_id, embedding=embed_by_name.get(e.name),
+        )
+        # 문서(레이블) Entity를 그 문서에서 추출된 Entity와 연결한다.
+        # 이게 없으면 문서 노드가 고립돼, 문서 검색 시 내부 엔티티/관계가 보이지 않는다.
+        if e.name != label:
+            gs.upsert_relation(label, e.name, "mentions", source_document_id=document_id)
+    for r in extraction.relations:
+        if not (r.source and r.target):
+            continue
+        gs.upsert_relation(r.source, r.target, r.description, source_document_id=document_id)
+
+    # Text Unit + 임베딩 (Local Search 근거 문맥 / 벡터 검색)
+    chunks = chunk_text(text)
+    if chunks:
+        gs.ensure_vector_index()
+        embeddings = get_embeddings(chunks)
+        for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+            gs.upsert_text_unit(
+                f"{document_id}:{i}", chunk, list(emb),
+                source_document_id=document_id, chunk_index=i,
+            )
+
+    # 그래프가 바뀌었으므로 Community 요약은 재구축 필요(stale). 재구축은 배치/트리거(ADR-0008).
+    gs.set_freshness("stale")

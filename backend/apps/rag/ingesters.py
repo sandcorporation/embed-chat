@@ -33,80 +33,11 @@ def get_embeddings(texts: List[str]) -> List[List[float]]:
 
 
 class DocumentIngester(ABC):
+    """문서에서 텍스트를 추출하는 인터페이스. (GraphRAG: 추출 텍스트는 GraphIngester가 그래프로 변환)"""
+
     @abstractmethod
     def extract_text(self, file_bytes: bytes) -> str:
         pass
-
-    def ingest(self, file_bytes: bytes, tenant_id: str, document_id: str) -> None:
-        from apps.rag.models import Document, DocumentChunk
-
-        doc = Document.objects.get(id=document_id)
-        doc.status = Document.STATUS_PROCESSING
-        doc.save()
-
-        try:
-            text = self.extract_text(file_bytes)
-            # Strip control characters: NUL (PostgreSQL rejects), ESC and other
-            # non-printable bytes that PDF extractors leak from binary streams.
-            # Preserve whitespace (\t \n \r) so chunking stays word-aware.
-            import re
-            text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
-            chunks = chunk_text(text)
-            # Document Label(name)을 임베딩 입력에 prefix해, 본문에 제품명이 없어도
-            # 제품명 기반 쿼리로 검색되게 한다 (ADR-0006). content에는 raw만 저장.
-            embed_inputs = [f"{doc.name}: {chunk}" for chunk in chunks]
-            embeddings = get_embeddings(embed_inputs)
-
-            DocumentChunk.objects.filter(document_id=document_id).delete()
-            DocumentChunk.objects.bulk_create([
-                DocumentChunk(
-                    document_id=document_id,
-                    tenant_id=tenant_id,
-                    content=chunk,
-                    embedding=list(emb),
-                    chunk_index=i,
-                )
-                for i, (chunk, emb) in enumerate(zip(chunks, embeddings))
-            ])
-
-            doc.status = Document.STATUS_READY
-            doc.save()
-        except Exception as e:
-            doc.status = Document.STATUS_FAILED
-            doc.error_message = str(e)
-            doc.save()
-            raise
-
-
-def reembed_document_chunks(document_id: str) -> None:
-    """기존 DocumentChunk content를 현재 Document.name으로 prefix해 임베딩만 교체한다.
-
-    OCR·텍스트 재추출 없이 임베딩만 갱신하므로 Document Label 변경 비용이 가볍다 (ADR-0006).
-    """
-    from apps.rag.models import Document, DocumentChunk
-
-    doc = Document.objects.get(id=document_id)
-    doc.status = Document.STATUS_PROCESSING
-    doc.save()
-
-    try:
-        chunks = list(
-            DocumentChunk.objects.filter(document_id=document_id).order_by("chunk_index")
-        )
-        if chunks:
-            embed_inputs = [f"{doc.name}: {c.content}" for c in chunks]
-            embeddings = get_embeddings(embed_inputs)
-            for chunk, emb in zip(chunks, embeddings):
-                chunk.embedding = list(emb)
-            DocumentChunk.objects.bulk_update(chunks, ["embedding"])
-
-        doc.status = Document.STATUS_READY
-        doc.save()
-    except Exception as e:
-        doc.status = Document.STATUS_FAILED
-        doc.error_message = str(e)
-        doc.save()
-        raise
 
 
 def _call_ocr(image_bytes: bytes) -> str:

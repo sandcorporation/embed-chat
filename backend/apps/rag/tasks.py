@@ -13,13 +13,27 @@ def ingest_document(self, document_id: str, tenant_id: str, mime_type: str):
     import os
     from django.conf import settings
     from apps.rag.ingesters import get_ingester
+    from apps.rag.models import Document
+    from apps.rag.graph_ingester import ingest_to_graph
 
     file_path = os.path.join(settings.MEDIA_ROOT, "documents", document_id)
     with open(file_path, "rb") as f:
         file_bytes = f.read()
 
-    ingester = get_ingester(mime_type)
-    ingester.ingest(file_bytes, tenant_id, document_id)
+    # GraphRAG 단일 인제스션: 텍스트 추출 → Knowledge Graph 구축 (벡터 청크 없음)
+    doc = Document.objects.get(id=document_id)
+    doc.status = Document.STATUS_PROCESSING
+    doc.save()
+    try:
+        text = get_ingester(mime_type).extract_text(file_bytes)
+        ingest_to_graph(text, tenant_id, document_id, doc.name)
+        doc.status = Document.STATUS_READY
+        doc.save()
+    except Exception as e:
+        doc.status = Document.STATUS_FAILED
+        doc.error_message = str(e)
+        doc.save()
+        raise
 
 
 @app.task(
@@ -28,7 +42,7 @@ def ingest_document(self, document_id: str, tenant_id: str, mime_type: str):
     autoretry_for=(httpx.ReadTimeout, httpx.ConnectError),
     default_retry_delay=60,
 )
-def reembed_document(self, document_id: str):
-    from apps.rag.ingesters import reembed_document_chunks
+def rebuild_graph_communities(self, tenant_id: str):
+    from apps.rag.community_builder import rebuild_communities
 
-    reembed_document_chunks(document_id)
+    rebuild_communities(tenant_id)

@@ -1,7 +1,7 @@
 # ADR-0002: pgvector over dedicated vector DB
 
 ## Status
-Accepted
+Superseded by ADR-0007 (RAG Knowledge Base가 Neo4j 기반 GraphRAG로 전환됨). 아래 내용은 전환 이전 상태의 기록이다.
 
 ## Context
 Tenant별 RAG Knowledge Base를 위해 문서를 벡터로 인덱싱·검색해야 한다. 전용 벡터 DB(Qdrant, Weaviate 등) 또는 PostgreSQL 확장(pgvector) 중 선택해야 한다.

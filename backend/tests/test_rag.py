@@ -6,6 +6,20 @@ import threading
 import pytest
 
 
+def _graph_text(tenant_id, doc_id):
+    """GraphRAG: 해당 문서의 Text Unit 내용을 합쳐 반환한다 (옛 DocumentChunk 대체)."""
+    from apps.rag.graph_store import GraphStore
+
+    units = GraphStore(str(tenant_id)).query_text_units(str(doc_id))
+    return " ".join(u["content"] for u in units)
+
+
+def _has_graph_text_units(tenant_id, doc_id):
+    from apps.rag.graph_store import GraphStore
+
+    return len(GraphStore(str(tenant_id)).query_text_units(str(doc_id))) > 0
+
+
 # ── Issue 51: Document Chunk Inspector ───────────────────────────────────────
 
 @pytest.mark.django_db
@@ -69,7 +83,7 @@ def test_list_chunks_other_tenant_returns_404(client, tenant_agent_token, db):
 def test_list_chunks_empty_document_returns_empty_list(client, tenant_agent_token):
     """청크가 없는 문서(빈 PDF)의 /chunks는 빈 배열을 반환한다."""
     import fitz
-    from apps.rag.models import Document, DocumentChunk
+    from apps.rag.models import Document
 
     doc = fitz.open()
     doc.new_page()
@@ -178,10 +192,11 @@ def test_other_tenant_cannot_access_document(client, tenant_agent_token, db):
 
 
 @pytest.mark.django_db
-def test_document_ingestion_sets_status_ready(client, tenant_agent_token):
-    """문서 업로드 후 Celery EAGER 실행으로 인제스션 완료 → status=ready, 청크 생성."""
-    from apps.rag.models import Document, DocumentChunk
+def test_document_ingestion_sets_status_ready(client, tenant_agent_token, tenant_with_key):
+    """문서 업로드 후 Celery EAGER 실행으로 그래프 인제스션 완료 → status=ready, Text Unit 생성."""
+    from apps.rag.models import Document
 
+    tenant, _ = tenant_with_key
     content = b"Our return policy allows returns within 30 days of purchase."
     f = io.BytesIO(content)
     f.name = "return_policy.txt"
@@ -196,13 +211,14 @@ def test_document_ingestion_sets_status_ready(client, tenant_agent_token):
 
     doc = Document.objects.get(id=doc_id)
     assert doc.status == Document.STATUS_READY
-    assert DocumentChunk.objects.filter(document_id=doc_id).exists()
+    assert _has_graph_text_units(tenant.id, doc_id)
 
 
 @pytest.mark.django_db
-def test_rag_retriever_returns_chunks_for_uploaded_content(client, tenant_agent_token, tenant_with_key):
-    """인제스션된 문서와 관련된 쿼리로 retriever를 호출하면 해당 내용의 청크가 반환된다."""
-    from apps.rag.retriever import retrieve_chunks
+def test_graph_search_returns_units_for_uploaded_content(client, tenant_agent_token, tenant_with_key):
+    """인제스션된 문서 내용이 그래프 벡터 검색으로 반환된다."""
+    from apps.rag.graph_store import GraphStore
+    from apps.rag.ingesters import get_embeddings
 
     tenant, _ = tenant_with_key
     content = b"Customer support is available Monday to Friday from 9am to 6pm."
@@ -215,17 +231,17 @@ def test_rag_retriever_returns_chunks_for_uploaded_content(client, tenant_agent_
         HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
     )
 
-    chunks = retrieve_chunks(str(tenant.id), "support hours", top_k=3)
-    assert len(chunks) > 0
-    assert any("support" in c.lower() or "Monday" in c for c in chunks)
+    emb = get_embeddings(["support hours"])[0]
+    results = GraphStore(str(tenant.id)).vector_search(emb, top_k=3)
+    assert len(results) > 0
+    assert any("support" in r["content"].lower() or "Monday" in r["content"] for r in results)
 
 
 @pytest.mark.django_db
-def test_delete_document_removes_chunks(client, tenant_agent_token):
-    """문서 삭제 시 연결된 DocumentChunk도 함께 삭제된다."""
-    from apps.rag.models import DocumentChunk
-
-    content = b"This document should be deleted including all its chunks."
+def test_delete_document_removes_graph_text_units(client, tenant_agent_token, tenant_with_key):
+    """문서 삭제 시 그래프 Text Unit도 함께 제거된다."""
+    tenant, _ = tenant_with_key
+    content = b"This document should be deleted including all its units."
     f = io.BytesIO(content)
     f.name = "to_delete.txt"
 
@@ -235,106 +251,21 @@ def test_delete_document_removes_chunks(client, tenant_agent_token):
         HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
     )
     doc_id = resp.json()["id"]
-    assert DocumentChunk.objects.filter(document_id=doc_id).exists()
+    assert _has_graph_text_units(tenant.id, doc_id)
 
     client.delete(
         f"/api/tenant/documents/{doc_id}",
         HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
     )
-    assert not DocumentChunk.objects.filter(document_id=doc_id).exists()
-
-
-@pytest.mark.django_db
-def test_rag_query_endpoint_returns_chunks_with_score_and_document_name(client, tenant_agent_token, tenant_with_key):
-    """POST /api/tenant/documents/query → document_name, content, score를 포함한 결과 반환."""
-    content = b"Shipping takes 3-5 business days for standard delivery."
-    f = io.BytesIO(content)
-    f.name = "shipping.txt"
-    client.post(
-        "/api/tenant/documents/",
-        {"file": f},
-        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
-    )
-
-    resp = client.post(
-        "/api/tenant/documents/query",
-        {"query": "shipping delivery time", "top_k": 3},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data) >= 1
-    first = data[0]
-    assert "document_name" in first
-    assert "content" in first
-    assert "score" in first
-    assert first["document_name"] == "shipping.txt"
-    assert isinstance(first["score"], float)
-
-
-@pytest.mark.django_db
-def test_rag_query_top_k_limits_results(client, tenant_agent_token, tenant_with_key):
-    """top_k 파라미터가 반환 청크 수를 제한한다."""
-    content = b"Our return policy allows returns within 30 days."
-    f = io.BytesIO(content)
-    f.name = "returns.txt"
-    client.post(
-        "/api/tenant/documents/",
-        {"file": f},
-        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
-    )
-
-    resp = client.post(
-        "/api/tenant/documents/query",
-        {"query": "return policy", "top_k": 1},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
-    )
-    assert resp.status_code == 200
-    assert len(resp.json()) <= 1
-
-
-@pytest.mark.django_db
-def test_rag_query_tenant_isolation(client, tenant_agent_token, tenant_with_key):
-    """다른 Tenant의 문서 청크가 결과에 포함되지 않는다."""
-    import secrets
-    from apps.tenants.models import Tenant, TenantAgent
-    from apps.tenants.auth import create_tenant_agent_token
-
-    # 다른 Tenant 문서 삽입
-    raw_key2 = secrets.token_urlsafe(32)
-    tenant2 = Tenant.objects.create_with_key(name="OtherCo RAG", raw_key=raw_key2)
-    agent2 = TenantAgent(tenant=tenant2, username="rag-agent2")
-    agent2.set_password("pass")
-    agent2.save()
-    token2 = create_tenant_agent_token(agent2)
-
-    f2 = io.BytesIO(b"Secret proprietary knowledge from other company.")
-    f2.name = "secret.txt"
-    client.post(
-        "/api/tenant/documents/",
-        {"file": f2},
-        HTTP_AUTHORIZATION=f"Bearer {token2}",
-    )
-
-    # 현재 Tenant로 쿼리
-    resp = client.post(
-        "/api/tenant/documents/query",
-        {"query": "proprietary knowledge other company"},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
-    )
-    assert resp.status_code == 200
-    doc_names = [r["document_name"] for r in resp.json()]
-    assert "secret.txt" not in doc_names
+    assert not _has_graph_text_units(tenant.id, doc_id)
 
 
 @pytest.mark.django_db
 def test_ingest_strips_nul_bytes(client, tenant_agent_token, tenant_with_key):
     """NUL 바이트(\x00)가 포함된 파일을 업로드해도 PostgreSQL DataError 없이 인제스션된다."""
-    from apps.rag.models import Document, DocumentChunk
+    from apps.rag.models import Document
 
+    tenant, _ = tenant_with_key
     content = b"Hello\x00world\x00this is a test\x00document about FCB1010."
     f = io.BytesIO(content)
     f.name = "nul_bytes.txt"
@@ -351,17 +282,17 @@ def test_ingest_strips_nul_bytes(client, tenant_agent_token, tenant_with_key):
     assert doc.status == Document.STATUS_READY, (
         f"Expected ready, got {doc.status}: {doc.error_message}"
     )
-    chunks = DocumentChunk.objects.filter(document_id=doc_id)
-    assert chunks.exists()
-    for chunk in chunks:
-        assert "\x00" not in chunk.content
+    all_content = _graph_text(tenant.id, doc_id)
+    assert all_content
+    assert "\x00" not in all_content
 
 
 @pytest.mark.django_db
 def test_ingest_strips_esc_bytes(client, tenant_agent_token, tenant_with_key):
-    """ESC(0x1B) 바이트가 포함된 파일을 업로드해도 청크에 ESC가 남지 않는다."""
-    from apps.rag.models import Document, DocumentChunk
+    """ESC(0x1B) 바이트가 포함된 파일을 업로드해도 Text Unit에 ESC가 남지 않는다."""
+    from apps.rag.models import Document
 
+    tenant, _ = tenant_with_key
     content = b"SWITCH 1\x1b toggles relay\x1b when DIRECT SELECT is enabled."
     f = io.BytesIO(content)
     f.name = "esc_bytes.txt"
@@ -378,17 +309,17 @@ def test_ingest_strips_esc_bytes(client, tenant_agent_token, tenant_with_key):
     assert doc.status == Document.STATUS_READY, (
         f"Expected ready, got {doc.status}: {doc.error_message}"
     )
-    chunks = DocumentChunk.objects.filter(document_id=doc_id)
-    assert chunks.exists()
-    for chunk in chunks:
-        assert "\x1b" not in chunk.content
+    all_content = _graph_text(tenant.id, doc_id)
+    assert all_content
+    assert "\x1b" not in all_content
 
 
 @pytest.mark.django_db
 def test_ingest_strips_control_chars_but_keeps_whitespace(client, tenant_agent_token, tenant_with_key):
     """0x01~0x1F 제어 문자는 제거되고, \\t \\n \\r 공백은 보존된다."""
-    from apps.rag.models import Document, DocumentChunk
+    from apps.rag.models import Document
 
+    tenant, _ = tenant_with_key
     # 제어 문자 + 정상 공백 혼합
     content = (
         b"line one\x01\x07\x0e\x1c\x1f\n"  # 제어 문자들 + 줄바꿈 보존
@@ -410,11 +341,11 @@ def test_ingest_strips_control_chars_but_keeps_whitespace(client, tenant_agent_t
     assert doc.status == Document.STATUS_READY, (
         f"Expected ready, got {doc.status}: {doc.error_message}"
     )
-    all_content = "".join(c.content for c in DocumentChunk.objects.filter(document_id=doc_id))
+    all_content = _graph_text(tenant.id, doc_id)
 
     # 제어 문자 없음
     for bad in ["\x01", "\x02", "\x03", "\x07", "\x0e", "\x1c", "\x1e", "\x1f"]:
-        assert bad not in all_content, f"제어문자 {bad!r}가 청크에 남아 있음"
+        assert bad not in all_content, f"제어문자 {bad!r}가 Text Unit에 남아 있음"
 
     # 실제 텍스트 보존
     assert "FCB1010" in all_content
@@ -433,9 +364,10 @@ def _make_pdf(*page_texts):
 
 @pytest.mark.django_db
 def test_ingest_multipage_pdf_includes_text_from_all_pages(client, tenant_agent_token, tenant_with_key):
-    """멀티페이지 PDF를 업로드하면 모든 페이지의 텍스트가 청크에 포함된다."""
-    from apps.rag.models import Document, DocumentChunk
+    """멀티페이지 PDF를 업로드하면 모든 페이지의 텍스트가 Text Unit에 포함된다."""
+    from apps.rag.models import Document
 
+    tenant, _ = tenant_with_key
     pdf_bytes = _make_pdf(
         "MIDI channel settings for FCB1010 bank A presets.",
         "Expression pedal calibration procedure for FCB1010.",
@@ -455,17 +387,18 @@ def test_ingest_multipage_pdf_includes_text_from_all_pages(client, tenant_agent_
     assert doc.status == Document.STATUS_READY, (
         f"Expected ready, got {doc.status}: {doc.error_message}"
     )
-    all_content = " ".join(c.content for c in DocumentChunk.objects.filter(document_id=doc_id))
+    all_content = _graph_text(tenant.id, doc_id)
     assert "MIDI channel" in all_content
     assert "Expression pedal" in all_content
 
 
 @pytest.mark.django_db
-def test_ingest_empty_pdf_results_in_no_chunks(client, tenant_agent_token):
-    """텍스트가 없는 빈 PDF를 업로드하면 status=ready이고 청크가 생성되지 않는다."""
+def test_ingest_empty_pdf_results_in_no_chunks(client, tenant_agent_token, tenant_with_key):
+    """텍스트가 없는 빈 PDF를 업로드하면 status=ready이고 Text Unit이 생성되지 않는다."""
     import fitz
-    from apps.rag.models import Document, DocumentChunk
+    from apps.rag.models import Document
 
+    tenant, _ = tenant_with_key
     doc = fitz.open()
     doc.new_page()  # blank page, no text
     pdf_bytes = doc.tobytes()
@@ -485,15 +418,16 @@ def test_ingest_empty_pdf_results_in_no_chunks(client, tenant_agent_token):
     assert doc_obj.status == Document.STATUS_READY, (
         f"Expected ready, got {doc_obj.status}: {doc_obj.error_message}"
     )
-    assert DocumentChunk.objects.filter(document_id=doc_id).count() == 0
+    assert not _has_graph_text_units(tenant.id, doc_id)
 
 
 @pytest.mark.django_db
 def test_ingest_pdf_strips_control_chars(client, tenant_agent_token, tenant_with_key):
-    """PDF 추출 텍스트에 제어 문자가 포함돼도 청크에는 남지 않는다."""
+    """PDF 추출 텍스트에 제어 문자가 포함돼도 Text Unit에는 남지 않는다."""
     import fitz
-    from apps.rag.models import Document, DocumentChunk
+    from apps.rag.models import Document
 
+    tenant, _ = tenant_with_key
     # pymupdf로 생성한 PDF는 보통 제어문자가 없지만,
     # TXTIngester 경로로 제어문자 포함 파일을 인제스션하면 동일한 strip 코드 경로를 탄다.
     # PDF ingester 자체의 strip을 검증하기 위해 fitz가 반환하는 텍스트에 제어문자가 있는 케이스를
@@ -513,7 +447,7 @@ def test_ingest_pdf_strips_control_chars(client, tenant_agent_token, tenant_with
     doc_obj = Document.objects.get(id=doc_id)
     assert doc_obj.status == Document.STATUS_READY
 
-    all_content = " ".join(c.content for c in DocumentChunk.objects.filter(document_id=doc_id))
+    all_content = _graph_text(tenant.id, doc_id)
     for bad in ["\x01", "\x0e", "\x1c", "\x1f"]:
         assert bad not in all_content
     assert "FCB1010" in all_content
@@ -523,8 +457,9 @@ def test_ingest_pdf_strips_control_chars(client, tenant_agent_token, tenant_with
 @pytest.mark.django_db
 def test_ingest_txt_with_unicode_content(client, tenant_agent_token, tenant_with_key):
     """한글·특수문자·이모지가 포함된 TXT 파일도 올바르게 인제스션된다."""
-    from apps.rag.models import Document, DocumentChunk
+    from apps.rag.models import Document
 
+    tenant, _ = tenant_with_key
     content = "FCB1010 설명서: MIDI 채널 설정 방법 (1~16).\nExpression pedal A·B 캘리브레이션 절차.".encode("utf-8")
     f = io.BytesIO(content)
     f.name = "korean.txt"
@@ -540,7 +475,7 @@ def test_ingest_txt_with_unicode_content(client, tenant_agent_token, tenant_with
     doc_obj = Document.objects.get(id=doc_id)
     assert doc_obj.status == Document.STATUS_READY
 
-    all_content = " ".join(c.content for c in DocumentChunk.objects.filter(document_id=doc_id))
+    all_content = _graph_text(tenant.id, doc_id)
     assert "FCB1010" in all_content
     assert "MIDI" in all_content
     assert "설명서" in all_content
@@ -570,10 +505,11 @@ def _make_jpg_with_text(text: str) -> bytes:
 
 @pytest.mark.django_db
 def test_ingest_png_creates_chunks(client, tenant_agent_token, tenant_with_key):
-    """PNG 이미지 업로드 시 OCR로 텍스트가 추출되어 status=ready, 청크가 생성된다."""
+    """PNG 이미지 업로드 시 OCR로 텍스트가 추출되어 status=ready, Text Unit이 생성된다."""
     from django.core.files.uploadedfile import SimpleUploadedFile
-    from apps.rag.models import Document, DocumentChunk
+    from apps.rag.models import Document
 
+    tenant, _ = tenant_with_key
     png_bytes = _make_png_with_text("FCB1010 MIDI controller test")
     uploaded = SimpleUploadedFile("test_ocr.png", png_bytes, content_type="image/png")
 
@@ -589,15 +525,16 @@ def test_ingest_png_creates_chunks(client, tenant_agent_token, tenant_with_key):
     assert doc.status == Document.STATUS_READY, (
         f"Expected ready, got {doc.status}: {doc.error_message}"
     )
-    assert DocumentChunk.objects.filter(document_id=doc_id).exists()
+    assert _has_graph_text_units(tenant.id, doc_id)
 
 
 @pytest.mark.django_db
 def test_ingest_jpg_creates_chunks(client, tenant_agent_token, tenant_with_key):
-    """JPG 이미지 업로드 시 OCR로 텍스트가 추출되어 status=ready, 청크가 생성된다."""
+    """JPG 이미지 업로드 시 OCR로 텍스트가 추출되어 status=ready, Text Unit이 생성된다."""
     from django.core.files.uploadedfile import SimpleUploadedFile
-    from apps.rag.models import Document, DocumentChunk
+    from apps.rag.models import Document
 
+    tenant, _ = tenant_with_key
     jpg_bytes = _make_jpg_with_text("Expression pedal calibration guide")
     uploaded = SimpleUploadedFile("test_ocr.jpg", jpg_bytes, content_type="image/jpeg")
 
@@ -613,7 +550,7 @@ def test_ingest_jpg_creates_chunks(client, tenant_agent_token, tenant_with_key):
     assert doc.status == Document.STATUS_READY, (
         f"Expected ready, got {doc.status}: {doc.error_message}"
     )
-    assert DocumentChunk.objects.filter(document_id=doc_id).exists()
+    assert _has_graph_text_units(tenant.id, doc_id)
 
 
 @pytest.mark.django_db
@@ -656,11 +593,12 @@ def _make_image_only_pdf(text: str) -> bytes:
 
 @pytest.mark.django_db
 def test_pdf_ocr_fallback_used_when_text_too_sparse(client, tenant_agent_token, tenant_with_key):
-    """텍스트 레이어가 없는 스캔 PDF는 OCR fallback을 통해 status=ready이고 청크가 생성된다."""
+    """텍스트 레이어가 없는 스캔 PDF는 OCR fallback을 통해 status=ready이고 Text Unit이 생성된다."""
     from django.core.files.uploadedfile import SimpleUploadedFile
-    from apps.rag.models import Document, DocumentChunk
+    from apps.rag.models import Document
     import fitz
 
+    tenant, _ = tenant_with_key
     pdf_bytes = _make_image_only_pdf("SYSEX dump sends entire FCB1010 memory")
 
     # 텍스트 레이어가 없음을 먼저 확인
@@ -681,14 +619,15 @@ def test_pdf_ocr_fallback_used_when_text_too_sparse(client, tenant_agent_token, 
     assert doc.status == Document.STATUS_READY, (
         f"Expected ready, got {doc.status}: {doc.error_message}"
     )
-    assert DocumentChunk.objects.filter(document_id=doc_id).exists()
+    assert _has_graph_text_units(tenant.id, doc_id)
 
 
 @pytest.mark.django_db
 def test_pdf_normal_text_skips_ocr(client, tenant_agent_token, tenant_with_key):
     """단어 수 >= 50인 정상 PDF는 OCR fallback 없이 처리된다."""
-    from apps.rag.models import Document, DocumentChunk
+    from apps.rag.models import Document
 
+    tenant, _ = tenant_with_key
     long_text = "FCB1010 MIDI controller " * 10  # 50개 이상 단어
     pdf_bytes = _make_pdf(long_text)
 
@@ -704,18 +643,19 @@ def test_pdf_normal_text_skips_ocr(client, tenant_agent_token, tenant_with_key):
 
     doc = Document.objects.get(id=doc_id)
     assert doc.status == Document.STATUS_READY
-    assert DocumentChunk.objects.filter(document_id=doc_id).exists()
+    assert _has_graph_text_units(tenant.id, doc_id)
 
 
-# ── Issue 52: Document Label 임베딩 prefix ────────────────────────────────────
+# ── Issue 52/66: Document Label은 Knowledge Graph의 Entity로 표현된다 ──────────
+# (옛 "청크 임베딩 prefix" 메커니즘은 GraphRAG Entity 추출로 대체됨 — retriever/reembed 테스트 폐기.
+#  레이블 기반 검색 가능성은 test_graph_store/test_graph_search가 커버한다.)
 
 @pytest.mark.django_db
-def test_retrieved_chunk_is_prefixed_with_document_label(client, tenant_agent_token, tenant_with_key):
-    """retrieve_chunks가 반환하는 content는 Document Label(name)로 prefix된다."""
-    from apps.rag.retriever import retrieve_chunks
+def test_document_label_becomes_graph_entity(client, tenant_agent_token, tenant_with_key):
+    """본문에 제품명이 없어도 Document Label이 그래프 대표 Entity로 잡힌다."""
+    from apps.rag.graph_store import GraphStore
 
     tenant, _ = tenant_with_key
-    # 본문에는 제품명이 전혀 없고 사양만 있다
     content = b"The unit offers ten assignable footswitches and two expression pedals for stage use."
     f = io.BytesIO(content)
     f.name = "ZX900PRO.txt"
@@ -725,66 +665,18 @@ def test_retrieved_chunk_is_prefixed_with_document_label(client, tenant_agent_to
         HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
     )
 
-    chunks = retrieve_chunks(str(tenant.id), "footswitches", top_k=3)
-    assert len(chunks) > 0
-    assert any(c.startswith("ZX900PRO.txt:") for c in chunks), (
-        f"label prefix가 붙지 않음: {chunks}"
-    )
+    names = [e["name"] for e in GraphStore(str(tenant.id)).query_entities()]
+    assert "ZX900PRO.txt" in names
 
 
-@pytest.mark.django_db
-def test_document_retrievable_by_label_even_when_body_lacks_product_name(
-    client, tenant_agent_token, tenant_with_key
-):
-    """본문에 제품명이 없어도 Document Label 덕분에 제품명 쿼리로 상위 검색된다.
-
-    distractor 문서는 쿼리의 일반 단어("specifications and features")를 본문에 담고 있어,
-    label prefix가 없으면 distractor가 더 유사하게 검색된다.
-    """
-    from apps.rag.retriever import retrieve_chunks_with_scores
-
-    tenant, _ = tenant_with_key
-
-    # 타깃: 본문에 제품명("ZX900PRO")도 "specifications/features"도 없음
-    target = io.BytesIO(b"The unit offers ten assignable footswitches and two expression pedals.")
-    target.name = "ZX900PRO.txt"
-    client.post(
-        "/api/tenant/documents/",
-        {"file": target},
-        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
-    )
-
-    # distractor: 쿼리의 일반 단어를 본문에 포함 (label 없으면 이쪽이 더 유사)
-    distractor = io.BytesIO(b"Product specifications and features overview guide for general use.")
-    distractor.name = "manual.txt"
-    client.post(
-        "/api/tenant/documents/",
-        {"file": distractor},
-        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
-    )
-
-    results = retrieve_chunks_with_scores(
-        str(tenant.id), "ZX900PRO specifications and features", top_k=1
-    )
-    assert len(results) == 1
-    assert results[0]["document_name"] == "ZX900PRO.txt", (
-        f"제품명 쿼리가 타깃 문서를 상위로 검색하지 못함: {results}"
-    )
-
-
-# ── Issue 53: Document Label 수정 + 자동 재임베딩 ──────────────────────────────
+# ── Issue 53/66: Document Label 수정 (rename + Entity 재시드, 재임베딩 없음) ────
 
 @pytest.mark.django_db
-def test_patch_document_name_reembeds_and_is_searchable_by_new_name(
-    client, tenant_agent_token, tenant_with_key
-):
-    """PATCH로 name을 제품명으로 바꾸면 재임베딩되어 새 제품명 쿼리로 상위 검색된다."""
-    from apps.rag.models import Document
-    from apps.rag.retriever import retrieve_chunks_with_scores
+def test_patch_document_name_reseeds_graph_entity(client, tenant_agent_token, tenant_with_key):
+    """PATCH로 name을 바꾸면 새 레이블이 그래프 대표 Entity로 시드되고 그래프가 stale이 된다 (재임베딩 없음)."""
+    from apps.rag.graph_store import GraphStore
 
     tenant, _ = tenant_with_key
-
-    # 타깃: 본문에 제품명/일반 단어 없음, 처음엔 무의미한 이름
     target = io.BytesIO(b"The unit offers ten assignable footswitches and two expression pedals.")
     target.name = "before.txt"
     resp = client.post(
@@ -794,16 +686,6 @@ def test_patch_document_name_reembeds_and_is_searchable_by_new_name(
     )
     doc_id = resp.json()["id"]
 
-    # distractor: 쿼리의 일반 단어 포함
-    distractor = io.BytesIO(b"Product specifications and features overview guide for general use.")
-    distractor.name = "manual.txt"
-    client.post(
-        "/api/tenant/documents/",
-        {"file": distractor},
-        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
-    )
-
-    # PATCH로 제품명 레이블 부여
     patch_resp = client.patch(
         f"/api/tenant/documents/{doc_id}",
         {"name": "ZX900PRO.txt"},
@@ -813,15 +695,10 @@ def test_patch_document_name_reembeds_and_is_searchable_by_new_name(
     assert patch_resp.status_code == 200
     assert patch_resp.json()["name"] == "ZX900PRO.txt"
 
-    doc = Document.objects.get(id=doc_id)
-    assert doc.status == Document.STATUS_READY
-
-    results = retrieve_chunks_with_scores(
-        str(tenant.id), "ZX900PRO specifications and features", top_k=1
-    )
-    assert results[0]["document_name"] == "ZX900PRO.txt", (
-        f"새 레이블로 재임베딩되지 않아 검색 실패: {results}"
-    )
+    gs = GraphStore(str(tenant.id))
+    names = [e["name"] for e in gs.query_entities()]
+    assert "ZX900PRO.txt" in names
+    assert gs.get_freshness() == "stale"
 
 
 @pytest.mark.django_db
@@ -909,11 +786,8 @@ def test_patch_document_other_tenant_returns_404(client, tenant_agent_token, db)
 
 
 @pytest.mark.django_db
-def test_patch_reembeds_without_reextracting_from_file(client, tenant_agent_token):
-    """원본 파일이 삭제돼도 재임베딩은 기존 청크로 수행되어 status=ready가 된다.
-
-    재임베딩이 OCR/텍스트 재추출(파일 재읽기) 없이 저장된 청크만 사용함을 검증한다.
-    """
+def test_patch_rename_without_file_access(client, tenant_agent_token):
+    """원본 파일이 삭제돼도 PATCH 레이블 변경은 동작한다 (재추출/재임베딩 없이 rename + Entity 재시드)."""
     import os
     from django.conf import settings as dj_settings
     from apps.rag.models import Document

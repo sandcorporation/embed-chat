@@ -27,16 +27,39 @@ def _last_user_message(messages):
     return texts[-1] if texts else ""
 
 
+_GLOBAL_KEYWORDS = ("공통", "전체", "요약", "전반", "모든 문서")
+
+
 def build_completion(body: dict) -> dict:
     """OpenAI chat.completions 요청 dict → 응답 dict (결정적)."""
     messages = body.get("messages", []) or []
     last_user = _last_user_message(messages)
-    needs_hitl = HUMAN_AGENT_KEYWORD in (last_user or "")
 
     response_format = body.get("response_format") or {}
     is_structured = response_format.get("type") == "json_schema"
-
+    schema_name = ""
     if is_structured:
+        schema_name = (response_format.get("json_schema") or {}).get("name", "")
+
+    if schema_name == "GraphExtraction":
+        # GraphRAG Entity/관계 추출 — 결정적 그래프
+        content = json.dumps(
+            {
+                "entities": [
+                    {"name": "FOOTSWITCH", "type": "feature", "description": "a footswitch"},
+                    {"name": "EXPRESSION_PEDAL", "type": "feature", "description": "a pedal"},
+                ],
+                "relations": [
+                    {"source": "FOOTSWITCH", "target": "EXPRESSION_PEDAL", "description": "paired with"},
+                ],
+            },
+            ensure_ascii=False,
+        )
+    elif schema_name == "SearchRoute":
+        scope = "global" if any(k in (last_user or "") for k in _GLOBAL_KEYWORDS) else "local"
+        content = json.dumps({"search_scope": scope})
+    elif is_structured:
+        needs_hitl = HUMAN_AGENT_KEYWORD in (last_user or "")
         content = json.dumps(
             {
                 "response": "" if needs_hitl else NORMAL_REPLY,
@@ -46,7 +69,7 @@ def build_completion(body: dict) -> dict:
             ensure_ascii=False,
         )
     else:
-        # 일반 completion (예: Visitor Memory 추출) — 결정적 빈 facts
+        # 일반 completion (예: Visitor Memory 추출 / Community 요약) — 결정적
         content = "{}"
 
     return {

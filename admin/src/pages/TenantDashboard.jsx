@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import DocumentsTab from '../components/DocumentsTab'
+import KnowledgeGraphTab from '../components/KnowledgeGraphTab'
 import VisitorsTab from '../components/VisitorsTab'
 import ConfigTab from '../components/ConfigTab'
 import AgentsTab from '../components/AgentsTab'
@@ -20,19 +21,20 @@ export default function TenantDashboard({ agentToken, username, onLogout }) {
       </div>
 
       <div style={s.tabs}>
-        {['documents', 'visitors', 'config', 'agents', 'hitl'].map(t => (
+        {['documents', 'graph', 'visitors', 'config', 'agents', 'hitl'].map(t => (
           <button
             key={t}
             style={s.tab(tab === t)}
             onClick={() => setTab(t)}
           >
-            {{ documents: '📄 문서', visitors: '👤 Visitors', config: '⚙️ 설정', agents: '👥 팀원', hitl: '🎧 HITL 상담' }[t]}
+            {{ documents: '📄 문서', graph: '🕸️ 지식그래프', visitors: '👤 Visitors', config: '⚙️ 설정', agents: '👥 팀원', hitl: '🎧 HITL 상담' }[t]}
           </button>
         ))}
       </div>
 
       <div style={s.tabContent}>
         {tab === 'documents' && <DocumentsTab agentToken={agentToken} />}
+        {tab === 'graph' && <KnowledgeGraphTab agentToken={agentToken} />}
         {tab === 'visitors' && <VisitorsTab agentToken={agentToken} />}
         {tab === 'config' && <ConfigTab agentToken={agentToken} />}
         {tab === 'agents' && <AgentsTab agentToken={agentToken} />}

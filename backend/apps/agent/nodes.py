@@ -11,15 +11,41 @@ class HITLResponse(BaseModel):
     hitl_reason: str = ""
 
 
-def retrieve_node(state: dict) -> dict:
-    from apps.rag.retriever import retrieve_chunks
+class SearchRoute(BaseModel):
+    search_scope: str = "local"  # "local" | "global"
 
-    chunks = retrieve_chunks(
-        tenant_id=state["tenant_id"],
-        query=state["user_message"],
-        top_k=5,
+
+def route_search_node(state: dict) -> dict:
+    """질의를 local/global로 분류한다 (구조화 출력 한 번)."""
+    prompt = (
+        "Classify the scope of the user's question. Respond with search_scope = "
+        "'global' if it asks for a summary across many documents or common themes; "
+        "'local' if it is about a specific entity or fact.\n\n"
+        f"Question: {state['user_message']}"
     )
-    return {"rag_chunks": chunks}
+    result = llm_boundary.complete_structured(
+        state["model_id"], [HumanMessage(content=prompt)], SearchRoute
+    )
+    scope = result.search_scope if result.search_scope in ("local", "global") else "local"
+    return {"search_scope": scope}
+
+
+def local_search_node(state: dict) -> dict:
+    """엔티티 중심 근거 — Knowledge Graph의 Text Unit을 벡터로 검색한다."""
+    from apps.rag.graph_store import GraphStore
+    from apps.rag.ingesters import get_embeddings
+
+    query_embedding = get_embeddings([state["user_message"]])[0]
+    units = GraphStore(state["tenant_id"]).vector_search(query_embedding, top_k=5)
+    return {"rag_chunks": [u["content"] for u in units]}
+
+
+def global_search_node(state: dict) -> dict:
+    """전체/요약형 근거 — Tenant의 Community 요약을 모은다."""
+    from apps.rag.graph_store import GraphStore
+
+    communities = GraphStore(state["tenant_id"]).query_community_summaries()
+    return {"rag_chunks": [c["summary"] for c in communities if c.get("summary")]}
 
 
 def _assemble_lc_messages(state: dict) -> list:

@@ -52,8 +52,29 @@ class _FakeChatLLM:
 
     def __init__(self):
         self.override = None  # callable(messages) -> schema instance
+        self.extraction = None  # optional GraphExtraction override (GraphRAG 추출용)
+
+    GLOBAL_KEYWORDS = ("공통", "전체", "요약", "전반", "모든 문서")
 
     def complete_structured(self, model_id, messages, schema):
+        # 검색 범위 분류: 글로벌 키워드가 있으면 global, 아니면 local
+        if schema.__name__ == "SearchRoute":
+            text = _latest_human_message(messages)
+            scope = "global" if any(k in text for k in self.GLOBAL_KEYWORDS) else "local"
+            return schema(search_scope=scope)
+        # GraphRAG Entity/관계 추출 스키마는 결정적 그래프를 반환
+        if schema.__name__ == "GraphExtraction":
+            if self.extraction is not None:
+                return self.extraction
+            return schema(
+                entities=[
+                    {"name": "FOOTSWITCH", "type": "feature", "description": "a footswitch"},
+                    {"name": "EXPRESSION_PEDAL", "type": "feature", "description": "a pedal"},
+                ],
+                relations=[
+                    {"source": "FOOTSWITCH", "target": "EXPRESSION_PEDAL", "description": "paired with"},
+                ],
+            )
         if self.override is not None:
             return self.override(messages)
         text = _latest_human_message(messages)

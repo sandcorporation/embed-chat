@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { listDocuments, uploadDocument, updateDocument, deleteDocument, queryDocuments, listDocumentChunks } from '../api'
+import { listDocuments, uploadDocument, updateDocument, deleteDocument, listDocumentChunks, getGraphStatus, rebuildGraph } from '../api'
 import { s } from '../styles'
 
 const STATUS_COLORS = { pending: '#ed8936', processing: '#4299e1', ready: '#48bb78', failed: '#fc8181' }
+const FRESHNESS_LABEL = { fresh: '최신', stale: '재구축 필요', rebuilding: '재구축 중…' }
+const FRESHNESS_COLOR = { fresh: '#48bb78', stale: '#ed8936', rebuilding: '#4299e1' }
 
 export default function DocumentsTab({ agentToken }) {
   const [docs, setDocs] = useState([])
@@ -12,18 +14,20 @@ export default function DocumentsTab({ agentToken }) {
   const [uploadLabel, setUploadLabel] = useState('')      // 업로드 모달의 레이블 값
   const [editingId, setEditingId] = useState(null)        // 인라인 편집 중인 문서 id
   const [editLabel, setEditLabel] = useState('')
-  const [ragQuery, setRagQuery] = useState('')
-  const [ragTopK, setRagTopK] = useState(5)
-  const [ragResults, setRagResults] = useState(null)
-  const [ragLoading, setRagLoading] = useState(false)
   const [expandedChunks, setExpandedChunks] = useState({})  // docId → chunks[] | 'loading'
+  const [graphFreshness, setGraphFreshness] = useState(null)
 
-  const runRagQuery = async (q) => {
-    if (!q.trim()) return
-    setRagLoading(true)
-    const results = await queryDocuments(agentToken, q, ragTopK)
-    setRagResults(results)
-    setRagLoading(false)
+  const loadGraphStatus = async () => {
+    try {
+      const data = await getGraphStatus(agentToken)
+      setGraphFreshness(data.freshness)
+    } catch { /* ignore */ }
+  }
+
+  const handleRebuildGraph = async () => {
+    await rebuildGraph(agentToken)
+    setGraphFreshness('rebuilding')
+    setTimeout(loadGraphStatus, 1500)
   }
 
   const load = async () => {
@@ -33,7 +37,8 @@ export default function DocumentsTab({ agentToken }) {
 
   useEffect(() => {
     load()
-    const interval = setInterval(load, 3000)
+    loadGraphStatus()
+    const interval = setInterval(() => { load(); loadGraphStatus() }, 3000)
     return () => clearInterval(interval)
   }, [])
 
@@ -105,6 +110,22 @@ export default function DocumentsTab({ agentToken }) {
           {uploading ? '업로드 중...' : '📄 문서 업로드 (PDF/TXT/이미지)'}
         </label>
         <span style={{ fontSize: 13, color: '#718096' }}>3초마다 상태 자동 갱신</span>
+        {graphFreshness && (
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }} data-testid="graph-freshness">
+            <span style={{ fontSize: 12, color: '#718096' }}>지식그래프</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: FRESHNESS_COLOR[graphFreshness] || '#718096' }}>
+              {FRESHNESS_LABEL[graphFreshness] || graphFreshness}
+            </span>
+            <button
+              data-testid="rebuild-graph"
+              style={{ ...s.btnSm, padding: '4px 10px' }}
+              onClick={handleRebuildGraph}
+              disabled={graphFreshness === 'rebuilding'}
+            >
+              재구축
+            </button>
+          </span>
+        )}
       </div>
 
       {pendingFile && (
@@ -222,54 +243,6 @@ export default function DocumentsTab({ agentToken }) {
           )}
         </tbody>
       </table>
-
-      <div style={{ marginTop: 32, borderTop: '1px solid #e2e8f0', paddingTop: 24 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, color: '#2d3748' }}>RAG 테스트</h3>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
-          <input
-            style={{ ...s.input, flex: 1 }}
-            placeholder="검색어를 입력하세요"
-            value={ragQuery}
-            onChange={e => setRagQuery(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && runRagQuery(e.target.value)}
-          />
-          <input
-            type="number"
-            min={1}
-            max={20}
-            style={{ ...s.input, width: 60 }}
-            value={ragTopK}
-            onChange={e => setRagTopK(Number(e.target.value))}
-            title="top_k"
-          />
-          <button style={s.btn} onClick={() => runRagQuery(ragQuery)} disabled={ragLoading}>
-            {ragLoading ? '검색 중...' : '검색'}
-          </button>
-        </div>
-        <div style={{ fontSize: 12, color: '#718096', marginBottom: 12 }}>
-          점수(낮을수록 유사)
-        </div>
-
-        {ragLoading && <div style={{ color: '#718096' }}>검색 중...</div>}
-
-        {ragResults !== null && !ragLoading && ragResults.length === 0 && (
-          <div style={{ color: '#a0aec0', textAlign: 'center', padding: 16 }}>결과 없음</div>
-        )}
-
-        {ragResults !== null && ragResults.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {ragResults.map((r, i) => (
-              <div key={i} style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 12, background: '#f7fafc' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{r.document_name}</span>
-                  <span data-testid="rag-score" style={{ fontSize: 12, color: '#718096' }}>{r.score.toFixed(4)}</span>
-                </div>
-                <div style={{ fontSize: 13, color: '#4a5568', whiteSpace: 'pre-wrap' }}>{r.content}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   )
 }

@@ -3,7 +3,9 @@ import operator
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from apps.agent.nodes import (
-    retrieve_node,
+    route_search_node,
+    local_search_node,
+    global_search_node,
     call_llm_structured,
     create_escalation_node,
     save_messages_node,
@@ -21,6 +23,7 @@ class ChatState(TypedDict):
     messages: Annotated[List[dict], operator.add]
     rag_chunks: List[str]
     visitor_memories: List[str]
+    search_scope: str
     assistant_response: str
     needs_hitl: bool
     hitl_reason: str
@@ -28,6 +31,10 @@ class ChatState(TypedDict):
 
 def _route_hitl(state: ChatState) -> str:
     return "create_escalation" if state.get("needs_hitl") else "save_messages"
+
+
+def _route_scope(state: ChatState) -> str:
+    return "global_search" if state.get("search_scope") == "global" else "local_search"
 
 
 def _build_conninfo() -> str:
@@ -58,13 +65,20 @@ def _create_checkpointer():
 def build_graph(checkpointer=None):
     graph = StateGraph(ChatState)
 
-    graph.add_node("retrieve", retrieve_node)
+    graph.add_node("route_search", route_search_node)
+    graph.add_node("local_search", local_search_node)
+    graph.add_node("global_search", global_search_node)
     graph.add_node("call_llm", call_llm_structured)
     graph.add_node("create_escalation", create_escalation_node)
     graph.add_node("save_messages", save_messages_node)
 
-    graph.add_edge(START, "retrieve")
-    graph.add_edge("retrieve", "call_llm")
+    graph.add_edge(START, "route_search")
+    graph.add_conditional_edges("route_search", _route_scope, {
+        "local_search": "local_search",
+        "global_search": "global_search",
+    })
+    graph.add_edge("local_search", "call_llm")
+    graph.add_edge("global_search", "call_llm")
     graph.add_conditional_edges("call_llm", _route_hitl, {
         "create_escalation": "create_escalation",
         "save_messages": "save_messages",
@@ -93,6 +107,7 @@ def run_chat_agent(session, user_message: str) -> str:
         "messages": [],  # Checkpoint이 이전 메시지 복원
         "rag_chunks": [],
         "visitor_memories": memories,
+        "search_scope": "local",
         "assistant_response": "",
         "needs_hitl": False,
         "hitl_reason": "",

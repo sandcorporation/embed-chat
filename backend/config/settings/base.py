@@ -80,6 +80,13 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3")
 OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "60.0"))
 
+# Neo4j (GraphRAG Knowledge Graph)
+NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "neo4j-test-password")
+# GraphRAG entity/relation extraction model (platform-level, separate from tenant chat model)
+GRAPH_EXTRACTION_MODEL = os.environ.get("GRAPH_EXTRACTION_MODEL", OPEN_ROUTER_DEFAULT_MODEL)
+
 # EmbedToken
 EMBED_TOKEN_TTL_SECONDS = int(os.environ.get("EMBED_TOKEN_TTL_SECONDS", "300"))
 

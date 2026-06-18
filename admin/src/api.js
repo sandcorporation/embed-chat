@@ -127,11 +127,29 @@ export async function listDocumentChunks(agentToken, docId) {
   return res.json()
 }
 
-export async function queryDocuments(agentToken, query, topK = 5) {
-  const res = await fetch(`${BASE}/api/tenant/documents/query`, {
+export async function searchGraph(agentToken, q) {
+  const res = await fetch(`${BASE}/api/tenant/documents/graph/search?q=${encodeURIComponent(q)}`, {
+    headers: getHeaders(agentToken),
+  })
+  return res.json()
+}
+
+export async function graphNeighbors(agentToken, entity) {
+  const res = await fetch(`${BASE}/api/tenant/documents/graph/neighbors?entity=${encodeURIComponent(entity)}`, {
+    headers: getHeaders(agentToken),
+  })
+  return res.json()
+}
+
+export async function getGraphStatus(agentToken) {
+  const res = await fetch(`${BASE}/api/tenant/documents/graph/status`, { headers: getHeaders(agentToken) })
+  return res.json()
+}
+
+export async function rebuildGraph(agentToken) {
+  const res = await fetch(`${BASE}/api/tenant/documents/graph/rebuild`, {
     method: 'POST',
     headers: getHeaders(agentToken),
-    body: JSON.stringify({ query, top_k: topK }),
   })
   return res.json()
 }

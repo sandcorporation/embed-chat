@@ -6,7 +6,7 @@ from ninja.errors import HttpError
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from apps.tenants.auth import tenant_agent_auth
-from apps.rag.models import Document, DocumentChunk
+from apps.rag.models import Document
 from apps.rag.ingesters import MIME_TO_INGESTER
 
 rag_router = Router(tags=["rag"], auth=tenant_agent_auth)
@@ -61,17 +61,37 @@ def list_documents(request):
     ]
 
 
-class QueryIn(Schema):
-    query: str
-    top_k: int = 5
-
-
-@rag_router.post("/query", response=list)
-def query_rag(request, body: QueryIn):
-    from apps.rag.retriever import retrieve_chunks_with_scores
+@rag_router.get("/graph/search", response=dict)
+def graph_search(request, q: str):
+    """Knowledge Graph 인스펙터 — 이름/설명 매칭 엔티티 + 각 1홉 이웃을 {nodes, edges}로 반환."""
+    from apps.rag.graph_store import GraphStore
 
     tenant = request.auth.tenant
-    return retrieve_chunks_with_scores(str(tenant.id), body.query, body.top_k)
+    gs = GraphStore(str(tenant.id))
+    matched = gs.search_entities(q)
+
+    nodes_by_name = {}
+    edges = []
+    seen_edges = set()
+    for ent in matched:
+        sub = gs.neighbors(ent["name"])
+        for n in sub["nodes"]:
+            nodes_by_name[n["name"]] = n
+        for e in sub["edges"]:
+            key = (e["source"], e["target"])
+            if key not in seen_edges:
+                seen_edges.add(key)
+                edges.append(e)
+    return {"nodes": list(nodes_by_name.values()), "edges": edges}
+
+
+@rag_router.get("/graph/neighbors", response=dict)
+def graph_neighbors(request, entity: str):
+    """선택 엔티티의 1홉 이웃 서브그래프 {nodes, edges} (노드 클릭 확장용)."""
+    from apps.rag.graph_store import GraphStore
+
+    tenant = request.auth.tenant
+    return GraphStore(str(tenant.id)).neighbors(entity)
 
 
 class DocumentPatchIn(Schema):
@@ -87,15 +107,15 @@ def update_document(request, document_id: str, body: DocumentPatchIn):
     if not name:
         raise HttpError(400, "name must not be empty")
 
+    from apps.rag.graph_store import GraphStore
+
     doc.name = name
-    doc.status = Document.STATUS_PENDING
     doc.error_message = ""
     doc.save()
 
-    from apps.rag.tasks import reembed_document
-    reembed_document.delay(str(doc.id))
+    # GraphRAG: 레이블 변경은 대표 Entity 재시드 + 그래프 stale (청크 재임베딩 없음)
+    GraphStore(str(tenant.id)).reseed_document_label(str(doc.id), name)
 
-    doc.refresh_from_db()
     return {
         "id": str(doc.id),
         "name": doc.name,
@@ -106,9 +126,12 @@ def update_document(request, document_id: str, body: DocumentPatchIn):
 
 @rag_router.delete("/{document_id}", response={204: None})
 def delete_document(request, document_id: str):
+    from apps.rag.graph_store import GraphStore
+
     tenant = request.auth.tenant
     doc = get_object_or_404(Document, id=document_id, tenant_id=tenant.id)
-    doc.chunks.all().delete()
+    # 지식그래프 정리: 출처에서 제거 후 고아 prune (공유 Entity 보존)
+    GraphStore(str(tenant.id)).delete_document(document_id)
     doc.delete()
     return 204, None
 
@@ -118,11 +141,31 @@ class ChunkOut(Schema):
     content: str
 
 
+@rag_router.get("/graph/status", response=dict)
+def graph_status(request):
+    """Tenant Knowledge Graph의 신선도(fresh/stale/rebuilding)를 반환한다."""
+    from apps.rag.graph_store import GraphStore
+
+    tenant = request.auth.tenant
+    return {"freshness": GraphStore(str(tenant.id)).get_freshness()}
+
+
+@rag_router.post("/graph/rebuild", response={202: dict})
+def rebuild_graph(request):
+    """Tenant Knowledge Graph의 Community 재구축을 트리거한다 (어드민 수동)."""
+    from apps.rag.tasks import rebuild_graph_communities
+
+    tenant = request.auth.tenant
+    rebuild_graph_communities.delay(str(tenant.id))
+    return 202, {"status": "rebuilding"}
+
+
 @rag_router.get("/{document_id}/chunks", response=List[ChunkOut])
 def list_chunks(request, document_id: str):
+    """청크 인스펙터 — Knowledge Graph의 Text Unit을 보여준다 (GraphRAG)."""
+    from apps.rag.graph_store import GraphStore
+
     tenant = request.auth.tenant
     get_object_or_404(Document, id=document_id, tenant_id=tenant.id)
-    chunks = DocumentChunk.objects.filter(
-        document_id=document_id, tenant_id=tenant.id
-    ).order_by("chunk_index")
-    return [{"chunk_index": c.chunk_index, "content": c.content} for c in chunks]
+    units = GraphStore(str(tenant.id)).query_text_units(document_id)
+    return [{"chunk_index": u["chunk_index"], "content": u["content"]} for u in units]

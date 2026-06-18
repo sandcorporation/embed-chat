@@ -1,6 +1,5 @@
 import uuid
 from django.db import models
-from pgvector.django import VectorField
 
 
 class Document(models.Model):
@@ -20,21 +19,6 @@ class Document(models.Model):
 
     class Meta:
         db_table = "documents"
-        indexes = [
-            models.Index(fields=["tenant_id"]),
-        ]
-
-
-class DocumentChunk(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="chunks")
-    tenant_id = models.UUIDField()
-    content = models.TextField()
-    embedding = VectorField(dimensions=1024)
-    chunk_index = models.IntegerField(default=0)
-
-    class Meta:
-        db_table = "document_chunks"
         indexes = [
             models.Index(fields=["tenant_id"]),
         ]
