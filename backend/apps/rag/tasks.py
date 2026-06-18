@@ -16,16 +16,25 @@ def ingest_document(self, document_id: str, tenant_id: str, mime_type: str):
     from apps.rag.models import Document
     from apps.rag.graph_ingester import ingest_to_graph
 
-    file_path = os.path.join(settings.MEDIA_ROOT, "documents", document_id)
-    with open(file_path, "rb") as f:
-        file_bytes = f.read()
-
     # GraphRAG 단일 인제스션: 텍스트 추출 → Knowledge Graph 구축 (벡터 청크 없음)
     doc = Document.objects.get(id=document_id)
     doc.status = Document.STATUS_PROCESSING
     doc.save()
     try:
-        text = get_ingester(mime_type).extract_text(file_bytes)
+        if doc.source_type == Document.SOURCE_URL:
+            from apps.rag.web import fetch_html, extract_main_content, extract_title
+            html = fetch_html(doc.source_url)
+            text = extract_main_content(html)
+            # Document Label 기본값: 페이지 title (없으면 URL 유지)
+            if doc.name == doc.source_url:
+                title = extract_title(html)
+                if title:
+                    doc.name = title
+        else:
+            file_path = os.path.join(settings.MEDIA_ROOT, "documents", document_id)
+            with open(file_path, "rb") as f:
+                file_bytes = f.read()
+            text = get_ingester(mime_type).extract_text(file_bytes)
         ingest_to_graph(text, tenant_id, document_id, doc.name)
         doc.status = Document.STATUS_READY
         doc.save()

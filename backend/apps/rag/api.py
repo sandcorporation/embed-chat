@@ -19,6 +19,10 @@ class DocumentOut(Schema):
     error_message: str
 
 
+class UrlsIn(Schema):
+    urls: List[str]
+
+
 @rag_router.post("/", response={201: DocumentOut})
 def upload_document(request, file: UploadedFile = File(...), name: str = Form(None)):
     tenant = request.auth.tenant
@@ -48,6 +52,53 @@ def upload_document(request, file: UploadedFile = File(...), name: str = Form(No
         "name": doc.name,
         "status": doc.status,
         "error_message": doc.error_message,
+    }
+
+
+@rag_router.post("/url", response={201: List[DocumentOut]})
+def add_url_documents(request, body: UrlsIn):
+    """명시적 URL(들)을 각각 Document로 등록하고 fetch·인제스션을 트리거한다(재귀 크롤 아님)."""
+    tenant = request.auth.tenant
+    from apps.rag.tasks import ingest_document
+
+    out = []
+    for raw in body.urls:
+        url = raw.strip()
+        if not url:
+            continue
+        doc = Document.objects.create(
+            tenant_id=tenant.id,
+            name=url,
+            mime_type="text/html",
+            source_type=Document.SOURCE_URL,
+            source_url=url,
+        )
+        ingest_document.delay(str(doc.id), str(tenant.id), "text/html")
+        out.append({
+            "id": str(doc.id), "name": doc.name,
+            "status": doc.status, "error_message": doc.error_message,
+        })
+    return 201, out
+
+
+@rag_router.post("/{document_id}/refetch", response={200: DocumentOut})
+def refetch_url_document(request, document_id: str):
+    """웹 Document를 수동 재-fetch한다: 기존 그래프 기여분을 지우고 다시 인제스션(교체)."""
+    tenant = request.auth.tenant
+    doc = get_object_or_404(Document, id=document_id, tenant_id=tenant.id)
+    if doc.source_type != Document.SOURCE_URL:
+        raise HttpError(400, "URL Document만 재-fetch할 수 있습니다")
+
+    from apps.rag.graph_store import GraphStore
+    GraphStore(str(tenant.id)).delete_document(str(doc.id))
+    doc.status = Document.STATUS_PENDING
+    doc.save()
+
+    from apps.rag.tasks import ingest_document
+    ingest_document.delay(str(doc.id), str(tenant.id), "text/html")
+    return 200, {
+        "id": str(doc.id), "name": doc.name,
+        "status": doc.status, "error_message": doc.error_message,
     }
 
 
