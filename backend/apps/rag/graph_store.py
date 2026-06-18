@@ -260,6 +260,37 @@ class GraphStore:
             result = session.run(query, tenant_id=self.tenant_id)
             return [dict(record) for record in result]
 
+    def entity_embeddings(self) -> list:
+        """임베딩을 가진 Entity의 (name, embedding)을 반환한다 (resolution 입력용)."""
+        query = (
+            "MATCH (e:Entity {tenant_id: $tenant_id}) WHERE e.embedding IS NOT NULL "
+            "RETURN e.name AS name, e.embedding AS embedding"
+        )
+        with _get_driver().session() as session:
+            return [dict(r) for r in session.run(query, tenant_id=self.tenant_id)]
+
+    # ── Entity Equivalence (SAME_AS, 비파괴 동치) ─────────────────────────────
+    def upsert_same_as(self, name_a: str, name_b: str) -> None:
+        """두 Entity를 비파괴 SAME_AS 동치 엣지로 잇는다 (노드·표기·출처 보존, tenant 스코프)."""
+        query = (
+            "MATCH (a:Entity {tenant_id: $tenant_id, name: $a}) "
+            "MATCH (b:Entity {tenant_id: $tenant_id, name: $b}) "
+            "MERGE (a)-[:SAME_AS {tenant_id: $tenant_id}]-(b)"
+        )
+        with _get_driver().session() as session:
+            session.run(query, tenant_id=self.tenant_id, a=name_a, b=name_b)
+
+    def query_same_as(self) -> list:
+        """이 tenant의 SAME_AS 동치 쌍 [(name_a, name_b), ...]을 반환한다."""
+        query = (
+            "MATCH (a:Entity {tenant_id: $tenant_id})-[r:SAME_AS {tenant_id: $tenant_id}]-"
+            "(b:Entity {tenant_id: $tenant_id}) "
+            "WHERE a.name < b.name "
+            "RETURN a.name AS source, b.name AS target"
+        )
+        with _get_driver().session() as session:
+            return [(r["source"], r["target"]) for r in session.run(query, tenant_id=self.tenant_id)]
+
     def search_entities(self, term: str, top_k: int = 10) -> list:
         """하이브리드 엔티티 검색 — 어휘 부분일치 ∪ 의미(벡터) top-k, 이름 키로 dedup.
 

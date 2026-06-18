@@ -61,7 +61,19 @@ def rebuild_communities(tenant_id: str) -> int:
         relations = gs.query_relations()
         names = [e["name"] for e in entities]
 
-        components = _connected_components(names, relations)
+        # Entity Resolution (ADR-0010): 맥락(임베딩) 동치를 비파괴 SAME_AS로 저장.
+        # SAME_AS는 연결요소 계산에 RELATED와 함께 union되어 동치 Entity가 같은 Community에 든다.
+        from apps.rag.entity_resolver import resolve_equivalences
+
+        mentions = [
+            {"mention_id": e["name"], "embedding": e["embedding"]}
+            for e in gs.entity_embeddings()
+        ]
+        for a, b in resolve_equivalences(mentions):
+            gs.upsert_same_as(a, b)
+        same_as = [{"source": a, "target": b} for a, b in gs.query_same_as()]
+
+        components = _connected_components(names, relations + same_as)
 
         gs.clear_communities()
         for i, members in enumerate(components):

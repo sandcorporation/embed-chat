@@ -40,8 +40,17 @@ _Avoid_: 벡터 인덱스(이제 그래프가 1차 구조이며 벡터는 그 �
 **Knowledge Graph**
 RAG Knowledge Base의 1차 구조. 노드는 Entity, 엣지는 Entity 간 관계. 각 노드/관계는 어떤 Document에서 추출됐는지(출처)와 소속 Tenant를 보유한다.
 
+**Entity Mention**
+문서에서 LLM이 추출한 개별 언급(이름 + 그 문맥의 설명 + 출처 Document). 같은 표기라도 맥락이 다르면 별개의 Mention이다(한강 "다리"와 신체 "다리"는 다른 Mention). Entity Equivalence를 거쳐 Entity로 묶이기 전의 원자료다.
+_Avoid_: Entity(동치로 묶기 이전 단계는 Mention)
+
 **Entity**
-문서에서 LLM이 추출한 의미 단위(예: 특정 제품, 사양, 액세서리). 여러 Document에 걸쳐 동일 Entity가 등장하면 하나로 모인다(정규화 대상). 이름과 설명으로 **의미 검색**이 가능하며, 한↔영 등 다국어·동의어 질의도 매칭된다(예: "메뉴" → "OSD Menu"). 정확/부분 일치(어휘 검색)와 의미 검색을 함께 사용한다(하이브리드).
+같은 실세계 대상(referent)을 가리키는 Entity Mention들이 동치로 묶인 정체(예: 특정 제품, 사양, 액세서리). **정체성은 이름이 아니라 맥락(설명·이웃 관계·출처)으로 결정된다** — 같은 이름이라도 맥락이 다르면 다른 Entity(한강 "다리" vs 신체 "다리"), 이름이 달라도 맥락이 같으면 같은 Entity("FCB1010"="FCB-1010"). 이름과 설명으로 **의미 검색**이 가능하며, 한↔영 등 다국어·동의어 질의도 매칭된다(예: "메뉴" → "OSD Menu").
+_Avoid_: 벡터 인덱스; "이름으로 식별"(이름은 약한 보조 신호일 뿐)
+
+**Entity Equivalence**
+두 Entity Mention이 같은 referent를 가리키는 동치 관계. 이름 유사도만으론 불충분하며(동음이의·표기변이가 이름을 오도한다) 맥락 정합으로 판별한다. 동치인 Mention들이 하나의 Entity를 이룬다.
+_Avoid_: 정규화(텍스트 정규화와 혼동); 병합(노드를 물리적으로 합치지 않는 비파괴 동치다)
 
 **Community**
 Knowledge Graph에서 밀접하게 연결된 Entity 묶음. 각 Community에는 LLM이 생성한 요약(Community 요약)이 붙어, 글로벌/요약형 질의에 사용된다.
@@ -57,11 +66,15 @@ Tenant가 문서에 부여하는 사용자 편집 가능한 식별 이름. 업�
 _Avoid_: 파일명, 문서명, title
 
 **DocumentIngester**
-문서에서 텍스트를 추출한 뒤 그 텍스트를 Knowledge Graph 기여분(Entity·관계)으로 변환·저장하는 인터페이스. PDF/TXT/이미지(PNG·JPG·WEBP)를 지원. 텍스트 추출 단계는 종전과 동일(PDF는 추출 후 단어 수 부족 시 OCR fallback, 이미지는 OCR). 추출된 텍스트는 LLM Entity/관계 추출을 거쳐 그래프에 기여하며, 각 기여 노드/관계에는 출처 Document가 기록된다.
+문서에서 텍스트를 추출한 뒤 그 텍스트를 Knowledge Graph 기여분(Entity·관계)으로 변환·저장하는 인터페이스. PDF/TXT/이미지(PNG·JPG·WEBP)를 지원. 텍스트 추출 단계: PDF는 추출 후 **단어 수 부족 또는 깨진 추출(Garbled Extraction) 감지 시 OCR로 재추출(fallback)**, 이미지는 OCR. 추출된 텍스트는 LLM Entity/관계 추출을 거쳐 그래프에 기여하며, 각 기여 노드/관계에는 출처 Document가 기록된다.
 _Avoid_: OCR Ingester (이미지 전용이 아닌 PDF fallback도 포함하므로 ImageIngester/PDFIngester 클래스명을 사용); "벡터로 변환"(이제 그래프 기여가 1차 산출물)
 
+**Garbled Extraction**
+PDF 텍스트 레이어의 폰트 인코딩(ToUnicode/CID 매핑) 부재로 글리프가 의미 없는 문자열(mojibake)로 추출된 상태. 원문 정보가 텍스트 레이어에서 소실되어 LLM 정제로는 복원할 수 없고(추측=창작이 됨) OCR(픽셀 재인식)로만 되찾을 수 있다. 추출 직후 문자 클래스 비율 휴리스틱으로 문서 단위 감지하며, 감지 시 OCR 재추출이 트리거된다.
+_Avoid_: 인코딩 오류(너무 일반적), 깨진 글자
+
 **Text Unit**
-문서를 일정 크기로 나눈 텍스트 조각. Knowledge Graph의 노드로 저장되며 임베딩을 가져 Local Search의 근거 문맥(citation)으로 쓰인다. 어떤 Entity들이 이 조각에서 추출됐는지, 그리고 출처 Document와 연결된다.
+문서를 일정 크기로 나눈 텍스트 조각. Knowledge Graph의 노드로 저장되며 임베딩을 가져 Local Search의 근거 문맥(citation)으로 쓰인다. 어떤 Entity들이 이 조각에서 추출됐는지, 그리고 출처 Document와 연결된다. citation은 검증의 기준점이므로 **추출 원문(또는 OCR 재추출본)에 충실**해야 하며 LLM이 정제·생성한 텍스트를 담지 않는다 — 이 점에서 LLM 해석물인 Entity와 구분된다(Garbled Extraction 참조).
 _Avoid_: DocumentChunk(옛 pgvector 모델의 명칭 — GraphRAG에선 그래프 노드인 Text Unit), chunk(단독 사용 시 모호)
 
 **Graph Freshness**
