@@ -69,12 +69,23 @@ def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
     return response
 
 
-@chat_router.post("/message", response={202: dict, 404: dict})
+@chat_router.post("/message", response={202: dict, 404: dict, 429: dict})
 def send_message(request, body: MessageIn):
+    from django.conf import settings
+    from apps.chat.rate_limit import allow_message
+
     try:
         session = ChatSession.objects.get(id=body.session_id, ended_at=None)
     except ChatSession.DoesNotExist:
         return 404, {"detail": "Session not found"}
+
+    if not allow_message(
+        str(session.tenant_id),
+        session.visitor_id,
+        per_visitor=settings.CHAT_RATE_LIMIT_PER_VISITOR,
+        per_tenant=settings.CHAT_RATE_LIMIT_PER_TENANT,
+    ):
+        return 429, {"detail": "Rate limit exceeded"}
 
     ChatMessage.objects.create(
         session=session,
