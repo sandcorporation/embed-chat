@@ -74,6 +74,37 @@ def test_llm_provider_config_key_encrypted_and_masked(client, tenant_agent_token
     assert decrypt_secret(config.llm_api_key) == "sk-tenant-secret"
 
 
+@pytest.mark.django_db
+def test_saving_masked_key_preserves_real_key(client, tenant_agent_token, tenant_with_key):
+    """마스킹된 키('********')를 그대로 다시 저장해도 실제 키가 보존된다.
+
+    어드민은 GET으로 받은 config(마스킹된 키 포함) 전체를 PATCH로 되돌려 보낸다.
+    이때 마스크 값을 그대로 암호화 저장하면 실제 키가 파괴되므로, 마스크는 무시해야 한다.
+    """
+    from apps.tenants.models import TenantConfig
+    from apps.tenants.crypto import decrypt_secret
+
+    tenant, _ = tenant_with_key
+
+    def patch(body):
+        return client.patch(
+            "/api/tenant/config/", body,
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+        )
+
+    patch({"llm_api_key": "sk-real-llm", "embed_api_key": "sk-real-embed"})
+    masked = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}").json()
+    assert masked["llm_api_key"] == "********" and masked["embed_api_key"] == "********"
+
+    # 어드민처럼 받은 config 전체(마스킹된 키 포함)를 무관한 변경과 함께 되돌려 보낸다
+    patch({**masked, "welcome_message": "변경됨"})
+
+    config = TenantConfig.objects.get(tenant=tenant)
+    assert decrypt_secret(config.llm_api_key) == "sk-real-llm", "마스크 저장이 실제 키를 파괴함"
+    assert decrypt_secret(config.embed_api_key) == "sk-real-embed"
+
+
 # ── Issue 92: 챗 호출이 Tenant LLM provider로 라우팅 ──────────────────────────
 
 @pytest.mark.django_db

@@ -265,6 +265,10 @@ def delete_tenant(request, tenant_id: str):
     return 204, None
 
 
+# GET 응답에서 암호화 키를 가리는 마스크. 이 값으로 되돌아오면 변경 없음으로 본다.
+_KEY_MASK = "********"
+
+
 def _config_out(config):
     return {
         "model_id": config.model_id,
@@ -279,11 +283,11 @@ def _config_out(config):
         "llm_provider_type": config.llm_provider_type,
         "llm_base_url": config.llm_base_url,
         # 키는 평문·암호문 모두 노출하지 않고 설정 여부만 마스킹으로 알린다.
-        "llm_api_key": "********" if config.llm_api_key else "",
+        "llm_api_key": _KEY_MASK if config.llm_api_key else "",
         "extraction_model": config.extraction_model,
         "embed_provider_type": config.embed_provider_type,
         "embed_base_url": config.embed_base_url,
-        "embed_api_key": "********" if config.embed_api_key else "",
+        "embed_api_key": _KEY_MASK if config.embed_api_key else "",
         "embed_model": config.embed_model,
         "embed_dim": config.embed_dim,
     }
@@ -307,11 +311,12 @@ def update_config(request, body: TenantConfigIn):
         value = getattr(body, field)
         if value is not None:
             setattr(config, field, value)
-    # API 키는 평문으로 받아 암호화 저장한다(write-only).
+    # API 키는 평문으로 받아 암호화 저장한다(write-only). 단, GET이 돌려준 마스크 값을
+    # 그대로 되돌려 보낸 경우(어드민 round-trip)는 무시해 실제 키를 보존한다.
     from apps.tenants.crypto import encrypt_secret
-    if body.llm_api_key is not None:
+    if body.llm_api_key is not None and body.llm_api_key != _KEY_MASK:
         config.llm_api_key = encrypt_secret(body.llm_api_key)
-    if body.embed_api_key is not None:
+    if body.embed_api_key is not None and body.embed_api_key != _KEY_MASK:
         config.embed_api_key = encrypt_secret(body.embed_api_key)
     config.save()
 
