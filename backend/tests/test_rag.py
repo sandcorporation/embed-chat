@@ -646,6 +646,118 @@ def test_pdf_normal_text_skips_ocr(client, tenant_agent_token, tenant_with_key):
     assert _has_graph_text_units(tenant.id, doc_id)
 
 
+# ── PRD garbled-pdf-ocr-fallback: 깨진 텍스트 레이어(mojibake) → OCR 재추출 ────
+
+# 폰트 ToUnicode 매핑 부재로 깨진 추출 텍스트 (여러 줄, 단어 수는 충분 → 단어 수 조건을 빠져나감).
+_MOJIBAKE = (
+    "-%&././ 2*$* . ./G/ 2*$* . 1 PRG CHG 1 2 PRG CHG 2 3 PRG CHG 3 4 PRG CHG 4\n"
+    "5 PRG CHG 5 6 CNT 1 7 CNT 2 8 EXP A 9 EXP B 10/0 NOTE -% *+ , ,(/. 4 2*$*\n"
+    "?'$ 8G'') 2*$* 2*$*%(4?'$ % 2*$* . ./G/ 'F)'::*@'$4?47 8G'')\n"
+    "$@0G':%4' $)1& %@-*+?'$ %@-*+8)4*@ ;; 1 ; 1 SWITCH 1 2 SWITCH 2\n"
+    "3 PRG CHG 6 4 CNT 3 5 EXP C 6 NOTE -% 2*$* ./G/ 8G'') 'F)'::*@\n"
+    "7 PRG CHG 7 8 CNT 4 9 EXP D 2*$* %@-*+ ?'$ ./G/ -%&././ 2*$*"
+)
+
+
+def _make_garbled_text_layer_pdf(visible_text: str, garbled_layer: str) -> bytes:
+    """이미지 픽셀엔 visible_text(정상)를 렌더하고, 텍스트 레이어엔 garbled_layer(mojibake)를
+    invisible(render_mode=3)로 삽입한 PDF. get_text()→mojibake(깨짐 감지), OCR(이미지)→정상 복원.
+    """
+    import fitz
+
+    src = fitz.open()
+    page = src.new_page(width=700, height=240)
+    page.insert_text((20, 90), visible_text, fontsize=20)
+    pix = page.get_pixmap(dpi=150)
+    png_bytes = pix.tobytes(output="png")
+
+    out = fitz.open()
+    op = out.new_page(width=700, height=240)
+    op.insert_image(op.rect, stream=png_bytes)
+    op.insert_text((20, 40), garbled_layer, fontsize=10, render_mode=3)  # invisible, 여러 줄
+    return out.tobytes()
+
+
+@pytest.mark.django_db
+def test_pdf_garbled_text_layer_triggers_ocr_recovery(client, tenant_agent_token, tenant_with_key):
+    """텍스트 레이어가 mojibake인 PDF는 깨짐 감지로 OCR 재추출되어, 깨진 텍스트가 Text Unit에 남지 않는다."""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from apps.rag.models import Document
+    from apps.rag.text_quality import is_garbled
+    import fitz
+
+    tenant, _ = tenant_with_key
+    visible = "FCB1010 expression pedal calibration guide for stage use"
+    pdf_bytes = _make_garbled_text_layer_pdf(visible, _MOJIBAKE)
+
+    # 전제: 텍스트 레이어가 깨졌고(단어 수는 충분) → 단어 수 조건이 아니라 깨짐 감지로 트리거되어야 한다.
+    check = fitz.open(stream=pdf_bytes, filetype="pdf")
+    extracted = " ".join(p.get_text() for p in check)
+    assert len(extracted.split()) >= 50, "단어 수가 충분해야 깨짐 감지 경로를 검증한다"
+    assert is_garbled(extracted), "테스트 PDF의 텍스트 레이어가 깨져 있어야 한다"
+
+    uploaded = SimpleUploadedFile("garbled.pdf", pdf_bytes, content_type="application/pdf")
+    resp = client.post(
+        "/api/tenant/documents/",
+        {"file": uploaded},
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert resp.status_code == 201
+    doc_id = resp.json()["id"]
+
+    doc = Document.objects.get(id=doc_id)
+    assert doc.status == Document.STATUS_READY, (
+        f"Expected ready, got {doc.status}: {doc.error_message}"
+    )
+    # OCR 재추출로 Text Unit이 생성되고, 깨진 텍스트 레이어의 시그니처가 들어가지 않았다.
+    assert _has_graph_text_units(tenant.id, doc_id)
+    all_content = _graph_text(tenant.id, doc_id)
+    assert "2*$*" not in all_content, "깨진 텍스트 레이어가 그대로 Text Unit에 저장되었다"
+    assert not is_garbled(all_content), "Text Unit content가 여전히 깨져 있다"
+
+
+@pytest.mark.django_db
+def test_garbled_chunks_dropped_from_text_units(client, tenant_agent_token, tenant_with_key):
+    """추출 후에도 남은 깨진 청크는 Text Unit으로 저장되지 않고, 정상 청크만 남는다.
+
+    chunk 드롭은 mime 무관하게 동일한 ingest_to_graph 경로를 타므로 TXT로 격리 검증한다.
+    통째로 깨진 청크를 버리는 것이 명세다(청크는 임베딩 단위라, 정상 우세 경계 청크 속
+    일부 깨진 조각까지 제거하지는 않는다).
+    """
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from apps.rag.models import Document
+    from apps.rag.graph_store import GraphStore
+    from apps.rag.text_quality import is_garbled
+
+    tenant, _ = tenant_with_key
+    # 정상 청크 여러 개 분량 + 순수하게 깨진 청크 여러 개 분량을 이어붙인다.
+    normal = "expression pedal calibration guide for stage performance setup procedure " * 90
+    garbled = "2*$* ./G/ -%&././ 8G'') %@-*+ ?'$ 2*$* ./G/ -%&././ " * 90
+    content = (normal + " " + garbled).encode("utf-8")
+    uploaded = SimpleUploadedFile("mixed.txt", content, content_type="text/plain")
+
+    resp = client.post(
+        "/api/tenant/documents/",
+        {"file": uploaded},
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert resp.status_code == 201
+    doc_id = resp.json()["id"]
+
+    doc = Document.objects.get(id=doc_id)
+    assert doc.status == Document.STATUS_READY, (
+        f"Expected ready, got {doc.status}: {doc.error_message}"
+    )
+
+    units = GraphStore(str(tenant.id)).query_text_units(str(doc_id))
+    assert units, "Text Unit이 하나도 없다 (정상 청크까지 드롭되었다)"
+    # 정상 청크는 보존된다.
+    assert any("calibration" in u["content"] for u in units), "정상 청크가 드롭되었다"
+    # 저장된 모든 Text Unit은 깨지지 않았다 — 통째로 깨진 청크는 드롭되었다.
+    for u in units:
+        assert not is_garbled(u["content"]), f"깨진 청크가 저장됨: {u['content'][:80]!r}"
+
+
 # ── Issue 52/66: Document Label은 Knowledge Graph의 Entity로 표현된다 ──────────
 # (옛 "청크 임베딩 prefix" 메커니즘은 GraphRAG Entity 추출로 대체됨 — retriever/reembed 테스트 폐기.
 #  레이블 기반 검색 가능성은 test_graph_store/test_graph_search가 커버한다.)

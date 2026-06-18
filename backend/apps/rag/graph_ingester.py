@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage
 
 from apps.agent import llm as llm_boundary
 from apps.rag.graph_store import GraphStore
+from apps.rag.text_quality import is_garbled
 
 
 class GraphEntity(BaseModel):
@@ -94,7 +95,8 @@ def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> 
         gs.upsert_relation(r.source, r.target, r.description, source_document_id=document_id)
 
     # Text Unit + 임베딩 (Local Search 근거 문맥 / 벡터 검색)
-    chunks = chunk_text(text)
+    # citation은 원문에 충실해야 하므로, 추출(OCR 포함) 후에도 남은 깨진 청크는 저장하지 않는다.
+    chunks = [c for c in chunk_text(text) if not is_garbled(c)]
     if chunks:
         gs.ensure_vector_index()
         embeddings = get_embeddings(chunks)

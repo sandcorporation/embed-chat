@@ -74,10 +74,12 @@ def _ocr_pdf(file_bytes: bytes) -> str:
 class PDFIngester(DocumentIngester):
     def extract_text(self, file_bytes: bytes) -> str:
         import fitz  # pymupdf
+        from apps.rag.text_quality import is_garbled
 
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         text = "\n".join(page.get_text() for page in doc)
-        if len(text.split()) < PDF_OCR_FALLBACK_MIN_WORDS:
+        # 텍스트 레이어가 희소(스캔)하거나 폰트 인코딩이 깨져(mojibake) 추출되면 OCR로 재추출한다.
+        if len(text.split()) < PDF_OCR_FALLBACK_MIN_WORDS or is_garbled(text):
             text = _ocr_pdf(file_bytes)
         return text
 
