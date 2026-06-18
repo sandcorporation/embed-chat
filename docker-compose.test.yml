@@ -209,10 +209,11 @@ services:
       retries: 10
 
   # ── E2E용 Celery Worker ───────────────────────────────────────────────────
+  # 기본 큐(배치)와 chat 전용 큐를 모두 소비한다(E2E는 격리가 아니라 정확성이 관심사).
   worker-e2e:
     build:
       context: ./backend
-    command: celery -A config worker --loglevel=info
+    command: celery -A config worker -Q celery,chat --loglevel=info
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       DB_HOST: db-test

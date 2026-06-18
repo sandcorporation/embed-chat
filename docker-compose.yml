@@ -65,6 +65,23 @@ services:
       neo4j:
         condition: service_healthy
 
+  # 인터랙티브 chat 전용 워커 — 'chat' 큐만 소비해 무거운 배치(worker)에 굶지 않는다.
+  # prefork(프로세스 격리)로 gevent web 워커의 블로킹-허브 문제를 피하고, prefetch=1로
+  # 긴 태스크의 head-of-line 블로킹을 막는다. 처리량은 이 서비스의 replica로 확장한다.
+  worker-chat:
+    build: ./backend
+    command: celery -A config.celery worker -Q chat --concurrency=4 --prefetch-multiplier=1 --loglevel=info
+    env_file: .env
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
   paddle-ocr:
     build:
       context: ./paddle_service

@@ -180,7 +180,7 @@ docker compose exec api python manage.py createsuperuser
 
 ```bash
 cp .env.example .env   # DB_HOST=db, REDIS_URL=redis://redis:6379/0, NEO4J_URI=bolt://neo4j:7687 등
-docker compose -f docker-compose.prod.yml up --build -d
+docker compose -f docker-compose.prod.yml up --build -d --force-recreate
 docker compose exec api python manage.py migrate
 docker compose exec api python manage.py createsuperuser
 ```

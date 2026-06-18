@@ -30,6 +30,17 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
 
+  worker-chat:
+    command: celery -A config.celery worker -Q chat --concurrency=2 --prefetch-multiplier=1 --loglevel=debug
+    volumes:
+      - ./backend:/app
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      OLLAMA_BASE_URL: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+
   widget:
     image: node:20-alpine
     working_dir: /app

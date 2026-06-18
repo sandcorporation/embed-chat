@@ -1,4 +1,3 @@
-import threading
 from ninja import Router, Schema
 from django.http import StreamingHttpResponse
 from apps.chat.embed_token import create_embed_token, verify_embed_token
@@ -89,21 +88,7 @@ def send_message(request, body: MessageIn):
         from apps.chat.sse import publish_visitor_message
         publish_visitor_message(str(session.tenant_id), str(session.id), body.content)
     else:
-        thread = threading.Thread(
-            target=_run_agent,
-            args=(session, body.content),
-            daemon=True,
-        )
-        thread.start()
+        from apps.chat.tasks import run_chat_agent_task
+        run_chat_agent_task.delay(str(session.id), body.content)
 
     return 202, {"status": "processing"}
-
-
-def _run_agent(session: ChatSession, user_message: str) -> None:
-    from apps.agent.graph import run_chat_agent
-
-    try:
-        run_chat_agent(session, user_message)
-    except Exception as e:
-        from apps.chat.sse import publish_error
-        publish_error(str(session.id), str(e))

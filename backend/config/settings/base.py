@@ -69,6 +69,11 @@ CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_TASK_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
+# 인터랙티브 chat을 무거운 배치(ingest/community)와 분리된 전용 큐로 보낸다.
+# worker-chat이 'chat' 큐만 소비하므로 배치가 밀려도 chat 슬롯이 굶지 않는다.
+CELERY_TASK_ROUTES = {
+    "apps.chat.tasks.run_chat_agent_task": {"queue": "chat"},
+}
 
 # OpenRouter
 OPEN_ROUTER_API_KEY = os.environ.get("OPEN_ROUTER_API_KEY", "")

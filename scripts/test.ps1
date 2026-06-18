@@ -16,7 +16,9 @@ Set-Location (Join-Path $PSScriptRoot '..')
 
 $composeFile = 'docker-compose.test.yml'
 $infra = @('test', 'db-test', 'redis-test', 'neo4j-test', 'paddle-ocr-test', 'ollama-test', 'ollama-test-init')
-$pytestTarget = if ($args.Count -gt 0) { $args } else { @('tests/') }
+# @(...)로 강제 배열화: 단일 인자일 때 if 블록이 스칼라로 풀려 @splat이 문자 단위로
+# 쪼개지는 것을 막는다.
+$pytestTarget = if ($args.Count -gt 0) { @($args) } else { @('tests/') }
 $code = 0
 
 try {
