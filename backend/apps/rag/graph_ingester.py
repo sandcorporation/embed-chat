@@ -74,15 +74,23 @@ def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> 
     )
     embed_by_name = {spec[0]: emb for spec, emb in zip(entity_specs, entity_embeddings)}
 
-    # 레이블 대표 Entity 시드 (임베딩 포함)
+    # 레이블 대표 Entity 시드 (임베딩 포함). Mention도 함께 생성한다(dual-write, ADR-0010).
     gs.upsert_entity(
         name=label, entity_type="document", description=f"Source document: {label}",
+        source_document_id=document_id, embedding=embed_by_name.get(label),
+    )
+    gs.upsert_mention(
+        f"{document_id}:{label}", label, "document", f"Source document: {label}",
         source_document_id=document_id, embedding=embed_by_name.get(label),
     )
 
     for e in valid_entities:
         gs.upsert_entity(
             e.name, e.type, e.description,
+            source_document_id=document_id, embedding=embed_by_name.get(e.name),
+        )
+        gs.upsert_mention(
+            f"{document_id}:{e.name}", e.name, e.type, e.description,
             source_document_id=document_id, embedding=embed_by_name.get(e.name),
         )
         # 문서(레이블) Entity를 그 문서에서 추출된 Entity와 연결한다.

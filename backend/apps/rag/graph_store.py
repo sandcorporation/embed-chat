@@ -260,6 +260,47 @@ class GraphStore:
             result = session.run(query, tenant_id=self.tenant_id)
             return [dict(record) for record in result]
 
+    # ── Entity Mention (mention_id 식별, Entity와 공존 — ADR-0010) ────────────
+    def upsert_mention(
+        self,
+        mention_id: str,
+        name: str,
+        entity_type: str = "",
+        description: str = "",
+        source_document_id: str = "",
+        embedding: list = None,
+    ) -> None:
+        """Entity Mention을 upsert한다. (tenant_id, mention_id)로 식별하므로 같은 표기라도
+        출처/맥락이 다르면 별개 노드다(동음이의 보존)."""
+        query = (
+            "MERGE (m:Mention {tenant_id: $tenant_id, mention_id: $mention_id}) "
+            "SET m.name = $name, m.entity_type = $entity_type, m.description = $description, "
+            "m.source_document_id = $source_document_id, "
+            "m.embedding = CASE WHEN $embedding IS NULL THEN m.embedding ELSE $embedding END"
+        )
+        with _get_driver().session() as session:
+            session.run(
+                query,
+                tenant_id=self.tenant_id,
+                mention_id=mention_id,
+                name=name,
+                entity_type=entity_type,
+                description=description,
+                source_document_id=source_document_id,
+                embedding=embedding,
+            )
+
+    def query_mentions(self) -> list:
+        """이 tenant의 Entity Mention 목록을 반환한다."""
+        query = (
+            "MATCH (m:Mention {tenant_id: $tenant_id}) "
+            "RETURN m.mention_id AS mention_id, m.name AS name, "
+            "m.entity_type AS entity_type, m.description AS description, "
+            "m.source_document_id AS source_document_id"
+        )
+        with _get_driver().session() as session:
+            return [dict(r) for r in session.run(query, tenant_id=self.tenant_id)]
+
     def entity_embeddings(self) -> list:
         """임베딩을 가진 Entity의 (name, embedding)을 반환한다 (resolution 입력용)."""
         query = (
