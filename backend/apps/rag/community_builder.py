@@ -42,19 +42,24 @@ def _connected_components(entity_names, relations):
 def rebuild_communities(tenant_id: str) -> int:
     """Tenant 그래프의 Community를 재탐지하고 요약을 다시 생성한다. 생성된 Community 수 반환."""
     from apps.rag.ingesters import get_embeddings
+    from apps.tenants.models import TenantConfig
+    from apps.agent.providers import embedding_provider
 
     gs = GraphStore(tenant_id)
+    _ecfg = TenantConfig.objects.filter(tenant_id=tenant_id).first()
+    _ep = embedding_provider(_ecfg) if _ecfg else None
+    _edim = _ecfg.embed_dim if _ecfg else 1024
     gs.set_freshness("rebuilding")
     try:
         # 임베딩 없는(기능 이전에 생성된) Mention 백필 → 의미 검색 가능
         missing = gs.mentions_without_embedding()
         if missing:
-            gs.ensure_mention_vector_index()
+            gs.ensure_mention_vector_index(dimensions=_edim)
             texts = [
                 f"{m['name']}: {m['description']}".strip(": ") if m["description"] else m["name"]
                 for m in missing
             ]
-            for m, emb in zip(missing, get_embeddings(texts)):
+            for m, emb in zip(missing, get_embeddings(texts, provider=_ep)):
                 gs.set_mention_embedding(m["mention_id"], emb)
 
         # Entity Resolution + Community를 Entity Mention 기준으로 수행한다(ADR-0010 / issue 80).

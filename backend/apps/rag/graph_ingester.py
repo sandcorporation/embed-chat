@@ -63,13 +63,16 @@ def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> 
     문서 레이블도 대표 Entity로 시드한다."""
     from apps.rag.ingesters import chunk_text, get_embeddings
     from apps.tenants.models import TenantConfig
-    from apps.agent.providers import extraction_provider
+    from apps.agent.providers import extraction_provider, embedding_provider
 
     text = _CONTROL_CHARS.sub("", text or "")
     gs = GraphStore(tenant_id)
 
     config = TenantConfig.objects.filter(tenant_id=tenant_id).first()
     provider = extraction_provider(config) if config else None
+    # per-Tenant 임베딩 provider·차원으로 인덱스/임베딩을 일관되게(ADR-0012).
+    ep = embedding_provider(config) if config else None
+    edim = config.embed_dim if config else 1024
     extraction = extract_graph(label, text, provider)
 
     # 추출된 언급(레이블 + 추출분)을 Entity Mention으로 시드한다(ADR-0010).
@@ -78,9 +81,10 @@ def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> 
     specs = [(label, "document", f"Source document: {label}")] + [
         (e.name, e.type, e.description) for e in valid_entities
     ]
-    gs.ensure_mention_vector_index()
+    gs.ensure_mention_vector_index(dimensions=edim)
     embeddings = get_embeddings(
-        [f"{name}: {desc}".strip(": ") if desc else name for name, _t, desc in specs]
+        [f"{name}: {desc}".strip(": ") if desc else name for name, _t, desc in specs],
+        provider=ep,
     )
     embed_by_name = {s[0]: emb for s, emb in zip(specs, embeddings)}
 
@@ -110,8 +114,8 @@ def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> 
     # citation은 원문에 충실해야 하므로, 추출(OCR 포함) 후에도 남은 깨진 청크는 저장하지 않는다.
     chunks = [c for c in chunk_text(text) if not is_garbled(c)]
     if chunks:
-        gs.ensure_vector_index()
-        embeddings = get_embeddings(chunks)
+        gs.ensure_vector_index(dimensions=edim)
+        embeddings = get_embeddings(chunks, provider=ep)
         for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
             gs.upsert_text_unit(
                 f"{document_id}:{i}", chunk, list(emb),

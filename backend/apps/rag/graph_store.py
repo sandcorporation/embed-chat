@@ -31,11 +31,33 @@ class GraphStore:
             raise ValueError("tenant_id is required")
         self.tenant_id = str(tenant_id)
 
+    # Neo4j 벡터 인덱스는 (label, property)당 하나·고정 차원이므로, Tenant마다 다른
+    # 임베딩 차원을 담으려면 인덱스를 per-Tenant 라벨/이름으로 격리한다(ADR-0012).
+    # tenant_id는 우리 시스템의 UUID라 라벨 식별자로 안전하다(하이픈만 제거).
+    def _tu_label(self) -> str:
+        return f"TU_{self.tenant_id.replace('-', '')}"
+
+    def _tu_index(self) -> str:
+        return f"tu_{self.tenant_id.replace('-', '')}"
+
+    def _m_label(self) -> str:
+        return f"M_{self.tenant_id.replace('-', '')}"
+
+    def _m_index(self) -> str:
+        return f"m_{self.tenant_id.replace('-', '')}"
+
+    def _embedding_provider(self):
+        """이 Tenant의 임베딩 provider(검색 쿼리 임베딩이 저장 공간과 일치하도록)."""
+        from apps.tenants.models import TenantConfig
+        from apps.agent.providers import embedding_provider
+        cfg = TenantConfig.objects.filter(tenant_id=self.tenant_id).first()
+        return embedding_provider(cfg) if cfg else None
+
     def ensure_vector_index(self, dimensions: int = 1024) -> None:
-        """TextUnit.embedding에 대한 Neo4j 벡터 인덱스를 보장하고 ONLINE까지 대기한다."""
+        """이 Tenant의 TextUnit 벡터 인덱스를 보장하고 ONLINE까지 대기한다(per-Tenant)."""
         create = (
-            f"CREATE VECTOR INDEX {VECTOR_INDEX} IF NOT EXISTS "
-            "FOR (t:TextUnit) ON (t.embedding) "
+            f"CREATE VECTOR INDEX {self._tu_index()} IF NOT EXISTS "
+            f"FOR (t:{self._tu_label()}) ON (t.embedding) "
             "OPTIONS {indexConfig: {`vector.dimensions`: $dim, "
             "`vector.similarity_function`: 'cosine'}}"
         )
@@ -54,7 +76,7 @@ class GraphStore:
         """Text Unit 노드를 임베딩과 함께 upsert한다."""
         query = (
             "MERGE (t:TextUnit {tenant_id: $tenant_id, unit_id: $unit_id}) "
-            "SET t.content = $content, t.embedding = $embedding, "
+            f"SET t:{self._tu_label()}, t.content = $content, t.embedding = $embedding, "
             "t.source_document_id = $source_document_id, t.chunk_index = $chunk_index"
         )
         with _get_driver().session() as session:
@@ -92,7 +114,7 @@ class GraphStore:
             with _get_driver().session() as session:
                 result = session.run(
                     query,
-                    idx=VECTOR_INDEX,
+                    idx=self._tu_index(),
                     probe=max(top_k * 5, 10),
                     emb=query_embedding,
                     tenant_id=self.tenant_id,
@@ -188,7 +210,7 @@ class GraphStore:
         출처/맥락이 다르면 별개 노드다(동음이의 보존)."""
         query = (
             "MERGE (m:Mention {tenant_id: $tenant_id, mention_id: $mention_id}) "
-            "SET m.name = $name, m.entity_type = $entity_type, m.description = $description, "
+            f"SET m:{self._m_label()}, m.name = $name, m.entity_type = $entity_type, m.description = $description, "
             "m.source_document_id = $source_document_id, "
             "m.embedding = CASE WHEN $embedding IS NULL THEN m.embedding ELSE $embedding END"
         )
@@ -291,8 +313,8 @@ class GraphStore:
     def ensure_mention_vector_index(self, dimensions: int = 1024) -> None:
         """Mention.embedding에 대한 Neo4j 벡터 인덱스를 보장하고 ONLINE까지 대기한다."""
         create = (
-            f"CREATE VECTOR INDEX {MENTION_VECTOR_INDEX} IF NOT EXISTS "
-            "FOR (m:Mention) ON (m.embedding) "
+            f"CREATE VECTOR INDEX {self._m_index()} IF NOT EXISTS "
+            f"FOR (m:{self._m_label()}) ON (m.embedding) "
             "OPTIONS {indexConfig: {`vector.dimensions`: $dim, "
             "`vector.similarity_function`: 'cosine'}}"
         )
@@ -329,10 +351,10 @@ class GraphStore:
             # 의미(벡터) 보강 — 인덱스/임베딩이 없으면 어휘만으로 무중단
             try:
                 from apps.rag.ingesters import get_embeddings
-                query_embedding = get_embeddings([term])[0]
+                query_embedding = get_embeddings([term], provider=self._embedding_provider())[0]
                 for rec in session.run(
                     vector_q,
-                    idx=MENTION_VECTOR_INDEX,
+                    idx=self._m_index(),
                     probe=max(top_k * 5, 10),
                     emb=query_embedding,
                     tenant_id=self.tenant_id,
