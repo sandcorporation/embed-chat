@@ -103,8 +103,11 @@ def build_graph(checkpointer=None, hitl_enabled=True):
 def run_chat_agent(session, user_message: str) -> str:
     from apps.tenants.models import TenantConfig
     from apps.memory.manager import get_visitor_memories
+    from apps.agent.providers import set_chat_provider, chat_provider
 
     config = TenantConfig.objects.get(tenant_id=session.tenant_id)
+    # 챗 그래프 노드가 쓸 LLM provider를 컨텍스트에 싣는다(비밀키를 state/Checkpoint에 안 넣음).
+    set_chat_provider(chat_provider(config))
     memories = get_visitor_memories(str(session.tenant_id), session.visitor_id)
 
     initial_state: ChatState = {

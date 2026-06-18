@@ -2,6 +2,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pydantic import BaseModel
 
 from apps.agent import llm as llm_boundary
+from apps.agent.providers import get_chat_provider
 from apps.chat.sse import publish_token, publish_done, publish_hitl_start, publish_hitl_new
 
 
@@ -40,7 +41,7 @@ def route_search_node(state: dict) -> dict:
         f"Question: {state['user_message']}"
     )
     result = llm_boundary.complete_structured(
-        state["model_id"], [HumanMessage(content=prompt)], SearchRoute
+        get_chat_provider(), [HumanMessage(content=prompt)], SearchRoute
     )
     scope = result.search_scope if result.search_scope in ("local", "global") else "local"
     return {"search_scope": scope}
@@ -125,7 +126,7 @@ def _assemble_lc_messages(state: dict) -> list:
 def call_llm_structured(state: dict) -> dict:
     lc_messages = _assemble_lc_messages(state)
 
-    result = llm_boundary.complete_structured(state["model_id"], lc_messages, HITLResponse)
+    result = llm_boundary.complete_structured(get_chat_provider(), lc_messages, HITLResponse)
 
     # HITL 여부와 무관하게, AI가 만든 응답(전환 멘트 포함)이 있으면 사용자에게 스트리밍한다.
     if result.response:
@@ -142,7 +143,7 @@ def call_llm_structured(state: dict) -> dict:
 def call_llm_plain(state: dict) -> dict:
     """HITL-OFF 경로: needs_hitl 없는 response-only 출력. 전환 멘트 누수가 구조적으로 불가능."""
     lc_messages = _assemble_lc_messages(state)
-    result = llm_boundary.complete_structured(state["model_id"], lc_messages, PlainResponse)
+    result = llm_boundary.complete_structured(get_chat_provider(), lc_messages, PlainResponse)
 
     if result.response:
         publish_token(state["session_id"], result.response)

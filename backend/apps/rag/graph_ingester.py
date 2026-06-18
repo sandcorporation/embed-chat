@@ -44,12 +44,17 @@ Document text:
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
-def extract_graph(label: str, text: str, model_id: str = "") -> GraphExtraction:
-    """텍스트에서 Entity/관계를 추출한다 (LLM 경계 경유)."""
-    model = model_id or settings.GRAPH_EXTRACTION_MODEL
+def extract_graph(label: str, text: str, provider=None) -> GraphExtraction:
+    """텍스트에서 Entity/관계를 추출한다 (per-Tenant provider 경유)."""
+    if provider is None:
+        from apps.agent.providers import LLMProvider
+        provider = LLMProvider(
+            type="", model=settings.GRAPH_EXTRACTION_MODEL,
+            base_url=settings.OPEN_ROUTER_BASE_URL, api_key=settings.OPEN_ROUTER_API_KEY,
+        )
     prompt = _EXTRACTION_PROMPT.format(label=label, text=text[:8000])
     return llm_boundary.complete_structured(
-        model, [HumanMessage(content=prompt)], GraphExtraction
+        provider, [HumanMessage(content=prompt)], GraphExtraction
     )
 
 
@@ -57,11 +62,15 @@ def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> 
     """추출된 Entity/관계 + Text Unit(임베딩)을 GraphStore에 기여한다.
     문서 레이블도 대표 Entity로 시드한다."""
     from apps.rag.ingesters import chunk_text, get_embeddings
+    from apps.tenants.models import TenantConfig
+    from apps.agent.providers import extraction_provider
 
     text = _CONTROL_CHARS.sub("", text or "")
     gs = GraphStore(tenant_id)
 
-    extraction = extract_graph(label, text)
+    config = TenantConfig.objects.filter(tenant_id=tenant_id).first()
+    provider = extraction_provider(config) if config else None
+    extraction = extract_graph(label, text, provider)
 
     # 추출된 언급(레이블 + 추출분)을 Entity Mention으로 시드한다(ADR-0010).
     # name+description을 배치 임베딩해 의미 검색·resolution에 쓴다.

@@ -73,6 +73,11 @@ def rebuild_communities(tenant_id: str) -> int:
 
         components = _connected_components(mids, mention_rels + same_as)
 
+        from apps.tenants.models import TenantConfig
+        from apps.agent.providers import extraction_provider
+        _cfg = TenantConfig.objects.filter(tenant_id=tenant_id).first()
+        _provider = extraction_provider(_cfg) if _cfg else None
+
         gs.clear_communities()
         for i, member_mids in enumerate(components):
             members = [name_by_mid.get(mid, mid) for mid in member_mids]
@@ -81,7 +86,7 @@ def rebuild_communities(tenant_id: str) -> int:
                 + ", ".join(members)
             )
             summary = llm_boundary.complete_text(
-                settings.GRAPH_EXTRACTION_MODEL, [HumanMessage(content=prompt)]
+                _provider, [HumanMessage(content=prompt)]
             )
             gs.upsert_community(f"{tenant_id}:{i}", summary, members)
 

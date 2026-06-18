@@ -83,6 +83,12 @@ class TenantConfig(models.Model):
 
     tenant = models.OneToOneField(Tenant, on_delete=models.CASCADE, related_name="config")
     model_id = models.CharField(max_length=255, default="openrouter/owl-alpha")
+    # LLM Provider(챗+추출) 설정 — Tenant가 자기 키로 비용 부담(ADR-0012). type이 비면
+    # 플랫폼 기본(OpenRouter)으로 폴백. api_key는 암호화 저장(write-only).
+    llm_provider_type = models.CharField(max_length=20, blank=True, default="")
+    llm_base_url = models.CharField(max_length=500, blank=True, default="")
+    llm_api_key = models.TextField(blank=True, default="")
+    extraction_model = models.CharField(max_length=255, blank=True, default="")
     system_prompt = models.TextField(
         default="You are a helpful assistant. Answer questions clearly and concisely."
     )

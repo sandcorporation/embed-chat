@@ -52,6 +52,10 @@ class TenantConfigOut(Schema):
     brand_name: str
     hitl_enabled: bool
     require_identity_verification: bool
+    llm_provider_type: str
+    llm_base_url: str
+    llm_api_key: str
+    extraction_model: str
 
 
 class TenantConfigIn(Schema):
@@ -64,6 +68,10 @@ class TenantConfigIn(Schema):
     brand_name: str = None
     hitl_enabled: bool = None
     require_identity_verification: bool = None
+    llm_provider_type: str = None
+    llm_base_url: str = None
+    llm_api_key: str = None
+    extraction_model: str = None
 
 
 class SlugIn(Schema):
@@ -258,6 +266,11 @@ def _config_out(config):
         "brand_name": config.brand_name,
         "hitl_enabled": config.hitl_enabled,
         "require_identity_verification": config.require_identity_verification,
+        "llm_provider_type": config.llm_provider_type,
+        "llm_base_url": config.llm_base_url,
+        # 키는 평문·암호문 모두 노출하지 않고 설정 여부만 마스킹으로 알린다.
+        "llm_api_key": "********" if config.llm_api_key else "",
+        "extraction_model": config.extraction_model,
     }
 
 
@@ -269,10 +282,14 @@ def get_config(request):
 @tenant_router.patch("/config/", response=TenantConfigOut)
 def update_config(request, body: TenantConfigIn):
     config = request.auth.tenant.config
-    for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message", "brand_name", "hitl_enabled", "require_identity_verification"):
+    for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message", "brand_name", "hitl_enabled", "require_identity_verification", "llm_provider_type", "llm_base_url", "extraction_model"):
         value = getattr(body, field)
         if value is not None:
             setattr(config, field, value)
+    # API 키는 평문으로 받아 암호화 저장한다(write-only).
+    if body.llm_api_key is not None:
+        from apps.tenants.crypto import encrypt_secret
+        config.llm_api_key = encrypt_secret(body.llm_api_key)
     config.save()
     return _config_out(config)
 

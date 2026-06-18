@@ -20,11 +20,15 @@ def schedule_memory_extraction(tenant_id: str, visitor_id: str, session_id: str)
         )
 
         from apps.tenants.models import TenantConfig
+        from apps.agent.providers import chat_provider, LLMProvider
         try:
             config = TenantConfig.objects.get(tenant_id=tenant_id)
-            model_id = config.model_id
+            provider = chat_provider(config)
         except TenantConfig.DoesNotExist:
-            model_id = settings.OPEN_ROUTER_DEFAULT_MODEL
+            provider = LLMProvider(
+                type="", model=settings.OPEN_ROUTER_DEFAULT_MODEL,
+                base_url=settings.OPEN_ROUTER_BASE_URL, api_key=settings.OPEN_ROUTER_API_KEY,
+            )
 
         prompt = f"""Extract key facts about the user from this conversation as JSON.
 Return ONLY a JSON object with string keys and string values. Example: {{"preference": "prefers email", "name": "Alice"}}
@@ -33,7 +37,7 @@ If nothing notable, return {{}}.
 Conversation:
 {conversation}"""
 
-        content = llm_boundary.complete_text(model_id, [HumanMessage(content=prompt)])
+        content = llm_boundary.complete_text(provider, [HumanMessage(content=prompt)])
         import json, re
         raw = content.strip()
         # strip code fences: ```json ... ``` or ``` ... ```

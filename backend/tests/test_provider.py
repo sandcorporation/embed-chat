@@ -1,0 +1,114 @@
+import pytest
+
+
+# ── Issue 92: 키 암호화 deep module ───────────────────────────────────────────
+
+def test_encrypt_decrypt_round_trip():
+    """Tenant API 키는 암호화 저장되고 복호화로 원문이 복원된다(평문 노출 없음)."""
+    from apps.tenants.crypto import encrypt_secret, decrypt_secret
+
+    secret = "sk-tenant-key-abcdef123456"
+    enc = encrypt_secret(secret)
+
+    assert enc != secret  # 저장값은 평문이 아니다
+    assert decrypt_secret(enc) == secret  # 복호화 왕복
+    assert encrypt_secret("") == ""  # 빈 값은 그대로
+    assert decrypt_secret("") == ""
+
+
+# ── Issue 92: ProviderResolver — 타입별 클라이언트 분기 ────────────────────────
+
+def test_resolver_builds_openai_compatible_for_custom():
+    """openai/custom 타입은 OpenAI-호환 클라이언트(base_url·model 반영)를 만든다."""
+    from langchain_openai import ChatOpenAI
+    from apps.agent.providers import LLMProvider, build_llm_client
+
+    client = build_llm_client(LLMProvider(
+        type="custom", model="some-model", base_url="https://my-endpoint/v1", api_key="sk-x",
+    ))
+    assert isinstance(client, ChatOpenAI)
+    assert client.model_name == "some-model"
+
+
+def test_resolver_builds_anthropic_native_for_anthropic():
+    """anthropic 타입은 Anthropic 네이티브 클라이언트를 만든다(OpenAI-호환 아님)."""
+    from langchain_anthropic import ChatAnthropic
+    from apps.agent.providers import LLMProvider, build_llm_client
+
+    client = build_llm_client(LLMProvider(
+        type="anthropic", model="claude-sonnet-4-5", api_key="sk-ant",
+    ))
+    assert isinstance(client, ChatAnthropic)
+    assert client.model == "claude-sonnet-4-5"
+
+
+# ── Issue 92: provider 설정 API — 키 암호화·write-only ─────────────────────────
+
+@pytest.mark.django_db
+def test_llm_provider_config_key_encrypted_and_masked(client, tenant_agent_token, tenant_with_key):
+    """LLM provider 설정 저장 시 키는 암호화되고, GET 응답엔 평문이 노출되지 않는다."""
+    from apps.tenants.models import TenantConfig
+    from apps.tenants.crypto import decrypt_secret
+
+    tenant, _ = tenant_with_key
+    r = client.patch(
+        "/api/tenant/config/",
+        {
+            "llm_provider_type": "custom",
+            "llm_base_url": "https://my-endpoint/v1",
+            "llm_api_key": "sk-tenant-secret",
+            "extraction_model": "gpt-4o-mini",
+        },
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert r.status_code == 200
+
+    g = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}").json()
+    assert g["llm_provider_type"] == "custom"
+    assert g["llm_base_url"] == "https://my-endpoint/v1"
+    assert g["llm_api_key"] != "sk-tenant-secret"  # 평문 미반환(마스킹)
+
+    config = TenantConfig.objects.get(tenant=tenant)
+    assert config.llm_api_key != "sk-tenant-secret"  # 암호화 저장
+    assert decrypt_secret(config.llm_api_key) == "sk-tenant-secret"
+
+
+# ── Issue 92: 챗 호출이 Tenant LLM provider로 라우팅 ──────────────────────────
+
+@pytest.mark.django_db
+def test_chat_routes_through_tenant_llm_provider(tenant_with_key, fake_chat_llm):
+    """run_chat_agent의 LLM 호출이 Tenant가 설정한 provider로 라우팅된다(키 복호화 전달)."""
+    from apps.agent.graph import run_chat_agent
+    from apps.chat.models import ChatSession
+    from apps.tenants.models import TenantConfig
+    from apps.tenants.crypto import encrypt_secret
+
+    tenant, _ = tenant_with_key
+    config = TenantConfig.objects.get(tenant=tenant)
+    config.llm_provider_type = "custom"
+    config.llm_base_url = "https://tenant-endpoint.example/v1"
+    config.llm_api_key = encrypt_secret("sk-tenant")
+    config.save()
+
+    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-provider")
+    run_chat_agent(session, "안녕하세요")
+
+    prov = fake_chat_llm.last_provider
+    assert prov is not None and prov.type == "custom"
+    assert prov.base_url == "https://tenant-endpoint.example/v1"
+    assert prov.api_key == "sk-tenant"  # 복호화되어 경계로 전달
+
+
+@pytest.mark.django_db
+def test_chat_falls_back_to_platform_provider_when_unset(tenant_with_key, fake_chat_llm):
+    """provider 미설정 Tenant는 플랫폼 기본(OpenRouter)으로 폴백한다."""
+    from apps.agent.graph import run_chat_agent
+    from apps.chat.models import ChatSession
+
+    tenant, _ = tenant_with_key
+    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-default")
+    run_chat_agent(session, "안녕하세요")
+
+    prov = fake_chat_llm.last_provider
+    assert prov is not None and prov.type == ""  # 플랫폼 기본
