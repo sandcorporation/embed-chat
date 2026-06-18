@@ -90,6 +90,8 @@ class TenantConfig(models.Model):
     webhook_url = models.URLField(blank=True, default="")
     webhook_type = models.CharField(max_length=10, choices=WEBHOOK_TYPE_CHOICES, blank=True, default="")
     welcome_message = models.TextField(blank=True, default="")
+    # 식별 Visitor의 visitor_id 위조를 막는 HMAC 신원검증 요구(opt-in). 기본 꺼짐.
+    require_identity_verification = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

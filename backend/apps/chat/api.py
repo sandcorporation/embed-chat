@@ -2,6 +2,7 @@ from ninja import Router, Schema
 from django.http import StreamingHttpResponse
 from apps.chat.models import ChatSession, ChatMessage
 from apps.chat.sse import sse_event_stream
+from apps.tenants.auth import tenant_key_auth
 
 chat_router = Router(tags=["chat"])
 
@@ -11,8 +12,24 @@ class MessageIn(Schema):
     content: str
 
 
+class IdentityIn(Schema):
+    visitor_id: str
+
+
+@chat_router.post("/identity", auth=tenant_key_auth)
+def issue_identity_hash(request, body: IdentityIn):
+    """TENANT_KEY 인증으로 visitor_id의 검증 해시를 발급한다(유저당 1회, 캐시 가능)."""
+    from apps.chat.identity import compute_identity_hash
+
+    tenant = request.auth
+    return {
+        "visitor_id": body.visitor_id,
+        "hash": compute_identity_hash(str(tenant.id), body.visitor_id),
+    }
+
+
 @chat_router.get("/stream")
-def stream(request, slug: str, visitor_id: str = ""):
+def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
     from apps.tenants.models import Tenant
 
     tenant = Tenant.resolve_slug(slug)
@@ -20,6 +37,13 @@ def stream(request, slug: str, visitor_id: str = ""):
         return StreamingHttpResponse(status=404)
     if not visitor_id:
         return StreamingHttpResponse(status=400)
+
+    # 신원검증 토글이 켜진 Tenant는 유효한 HMAC 해시가 있어야 visitor_id 위조를 막는다.
+    config = getattr(tenant, "config", None)
+    if config and config.require_identity_verification:
+        from apps.chat.identity import verify_identity
+        if not verify_identity(str(tenant.id), visitor_id, hash):
+            return StreamingHttpResponse(status=401)
 
     session, _ = ChatSession.objects.get_or_create(
         tenant_id=tenant.id,

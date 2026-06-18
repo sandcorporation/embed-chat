@@ -27,6 +27,11 @@ function resolveVisitorId() {
 function App() {
   const slug = useMemo(resolveSlug, [])
   const visitorId = useMemo(resolveVisitorId, [])
+  // 신원검증(opt-in)을 켠 Tenant는 ?hash=로 HMAC 검증 해시를 함께 넘긴다.
+  const hash = useMemo(
+    () => new URLSearchParams(window.location.search).get('hash') || '',
+    []
+  )
 
   if (!slug) {
     return (
@@ -36,7 +41,7 @@ function App() {
     )
   }
 
-  return <ChatWidget slug={slug} visitorId={visitorId} />
+  return <ChatWidget slug={slug} visitorId={visitorId} hash={hash} />
 }
 
 export default App

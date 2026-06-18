@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
-export default function ChatWidget({ slug, visitorId }) {
+export default function ChatWidget({ slug, visitorId, hash = '' }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [sessionId, setSessionId] = useState(null)
@@ -16,7 +16,7 @@ export default function ChatWidget({ slug, visitorId }) {
 
   useEffect(() => {
     const es = new EventSource(
-      `${API_BASE}/api/chat/stream?slug=${encodeURIComponent(slug)}&visitor_id=${encodeURIComponent(visitorId)}`
+      `${API_BASE}/api/chat/stream?slug=${encodeURIComponent(slug)}&visitor_id=${encodeURIComponent(visitorId)}&hash=${encodeURIComponent(hash)}`
     )
     eventSourceRef.current = es
 
@@ -97,7 +97,7 @@ export default function ChatWidget({ slug, visitorId }) {
       es.close()
       clearTimeout(typingTimerRef.current)
     }
-  }, [slug, visitorId])
+  }, [slug, visitorId, hash])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
