@@ -57,26 +57,25 @@ def rebuild_communities(tenant_id: str) -> int:
             for m, emb in zip(missing, get_embeddings(texts)):
                 gs.set_entity_embedding(m["name"], emb)
 
-        entities = gs.query_entities()
-        relations = gs.query_relations()
-        names = [e["name"] for e in entities]
-
-        # Entity Resolution (ADR-0010): 맥락(임베딩) 동치를 비파괴 SAME_AS로 저장.
-        # SAME_AS는 연결요소 계산에 RELATED와 함께 union되어 동치 Entity가 같은 Community에 든다.
+        # Entity Resolution + Community를 Entity Mention 기준으로 수행한다(ADR-0010 / issue 80).
+        # 같은 표기라도 맥락(임베딩)이 다른 Mention은 분리되어 동음이의가 별도 Community로 남는다.
+        # SAME_AS는 연결요소 계산에 RELATED와 함께 union되어 동치 Mention이 같은 Community에 든다.
         from apps.rag.entity_resolver import resolve_equivalences
 
-        mentions = [
-            {"mention_id": e["name"], "embedding": e["embedding"]}
-            for e in gs.entity_embeddings()
-        ]
-        for a, b in resolve_equivalences(mentions):
-            gs.upsert_same_as(a, b)
-        same_as = [{"source": a, "target": b} for a, b in gs.query_same_as()]
+        mention_nodes = gs.query_mentions()
+        name_by_mid = {m["mention_id"]: m["name"] for m in mention_nodes}
+        mids = [m["mention_id"] for m in mention_nodes]
+        mention_rels = gs.query_mention_relations()
 
-        components = _connected_components(names, relations + same_as)
+        for a, b in resolve_equivalences(gs.mention_embeddings()):
+            gs.upsert_mention_same_as(a, b)
+        same_as = [{"source": a, "target": b} for a, b in gs.query_mention_same_as()]
+
+        components = _connected_components(mids, mention_rels + same_as)
 
         gs.clear_communities()
-        for i, members in enumerate(components):
+        for i, member_mids in enumerate(components):
+            members = [name_by_mid.get(mid, mid) for mid in member_mids]
             prompt = (
                 "Summarize this community of related entities in one sentence: "
                 + ", ".join(members)

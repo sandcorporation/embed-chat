@@ -97,10 +97,16 @@ def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> 
         # 이게 없으면 문서 노드가 고립돼, 문서 검색 시 내부 엔티티/관계가 보이지 않는다.
         if e.name != label:
             gs.upsert_relation(label, e.name, "mentions", source_document_id=document_id)
+            gs.upsert_mention_relation(
+                f"{document_id}:{label}", f"{document_id}:{e.name}", "mentions", document_id
+            )
     for r in extraction.relations:
         if not (r.source and r.target):
             continue
         gs.upsert_relation(r.source, r.target, r.description, source_document_id=document_id)
+        gs.upsert_mention_relation(
+            f"{document_id}:{r.source}", f"{document_id}:{r.target}", r.description, document_id
+        )
 
     # Text Unit + 임베딩 (Local Search 근거 문맥 / 벡터 검색)
     # citation은 원문에 충실해야 하므로, 추출(OCR 포함) 후에도 남은 깨진 청크는 저장하지 않는다.

@@ -88,14 +88,16 @@ def test_graph_rebuild_and_status_endpoints(client, tenant_agent_token, tenant_w
 #   - 무관한 대상이라도 같은 (일반)이름이면 한 노드 → Community 부당 통합(과대병합).
 # Entity Resolution이 도입되면 아래 단언이 깨지며 '고쳐졌다'는 신호가 된다.
 
-_EMB = [0.1] * 1024  # 더미 임베딩 — rebuild의 임베딩 백필(ollama 호출)을 건너뛰게 함
+_EMB = [0.1] * 1024  # 더미 임베딩(같은 맥락 가정)
 
 
-def _seed_doc(gs, label, entity, doc_id):
-    """문서 레이블 Entity가 추출 Entity를 mentions로 잇는, 실제 ingest와 동일한 형태로 시드."""
-    gs.upsert_entity(label, "document", embedding=_EMB, source_document_id=doc_id)
-    gs.upsert_entity(entity, "Product", embedding=_EMB, source_document_id=doc_id)
-    gs.upsert_relation(label, entity, "mentions", source_document_id=doc_id)
+def _seed_mention_doc(gs, label, entity, doc_id, label_emb=None, entity_emb=None):
+    """문서 레이블 Mention이 추출 Mention을 RELATED로 잇는, ingest dual-write와 동일한 형태로 시드."""
+    gs.upsert_mention(f"{doc_id}:{label}", label, "document",
+                      embedding=label_emb or _EMB, source_document_id=doc_id)
+    gs.upsert_mention(f"{doc_id}:{entity}", entity, "Product",
+                      embedding=entity_emb or _EMB, source_document_id=doc_id)
+    gs.upsert_mention_relation(f"{doc_id}:{label}", f"{doc_id}:{entity}", "mentions", doc_id)
 
 
 @pytest.mark.django_db
@@ -109,12 +111,8 @@ def test_synonym_entities_resolve_into_one_community(tenant_with_key):
     # 표기변이 두 제품은 유사 임베딩(동치), 문서 레이블은 서로/제품과 다른 임베딩.
     p, p2 = [1.0, 0.0, 0.0], [0.98, 0.02, 0.0]   # cos>0.95 → 동치
     ea, eb = [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]
-    gs.upsert_entity("Manual A", "document", embedding=ea, source_document_id="docA")
-    gs.upsert_entity("FCB1010", "Product", embedding=p, source_document_id="docA")
-    gs.upsert_relation("Manual A", "FCB1010", "mentions", source_document_id="docA")
-    gs.upsert_entity("Manual B", "document", embedding=eb, source_document_id="docB")
-    gs.upsert_entity("FCB-1010", "Product", embedding=p2, source_document_id="docB")
-    gs.upsert_relation("Manual B", "FCB-1010", "mentions", source_document_id="docB")
+    _seed_mention_doc(gs, "Manual A", "FCB1010", "docA", ea, p)
+    _seed_mention_doc(gs, "Manual B", "FCB-1010", "docB", eb, p2)
 
     rebuild_communities(str(tenant.id))
     # 표기변이가 SAME_AS로 동치되어 두 문서가 한 Community로 통합.
@@ -129,43 +127,35 @@ def test_unrelated_entities_are_not_resolved(tenant_with_key):
 
     tenant, _ = tenant_with_key
     gs = GraphStore(str(tenant.id))
-    gs.upsert_entity("Doc A", "document", embedding=[0.0, 1.0, 0.0], source_document_id="docA")
-    gs.upsert_entity("Apple", "Product", embedding=[1.0, 0.0, 0.0], source_document_id="docA")
-    gs.upsert_relation("Doc A", "Apple", "mentions", source_document_id="docA")
-    gs.upsert_entity("Doc B", "document", embedding=[0.7, 0.7, 0.0], source_document_id="docB")
-    gs.upsert_entity("Zebra", "Product", embedding=[0.0, 0.0, 1.0], source_document_id="docB")
-    gs.upsert_relation("Doc B", "Zebra", "mentions", source_document_id="docB")
+    _seed_mention_doc(gs, "Doc A", "Apple", "docA", [0.0, 1.0, 0.0], [1.0, 0.0, 0.0])
+    _seed_mention_doc(gs, "Doc B", "Zebra", "docB", [0.7, 0.7, 0.0], [0.0, 0.0, 1.0])
 
     rebuild_communities(str(tenant.id))
-    assert gs.query_same_as() == []  # 무관하므로 동치 없음
+    assert gs.query_mention_same_as() == []  # 무관하므로 동치 없음
     assert len(gs.query_community_summaries()) == 2  # 별도 Community 유지
 
 
 @pytest.mark.django_db
-def test_identical_entity_name_merges_into_one_community(tenant_with_key):
-    """동일 표기 Entity는 한 노드로 병합되어 두 문서가 한 Community가 된다(병합이 작동하는 경계, 대조군)."""
+def test_identical_mentions_resolve_into_one_community(tenant_with_key):
+    """같은 표기·같은 맥락의 Mention은 동치(SAME_AS)로 묶여 두 문서가 한 Community가 된다."""
     from apps.rag.graph_store import GraphStore
     from apps.rag.community_builder import rebuild_communities
 
     tenant, _ = tenant_with_key
     gs = GraphStore(str(tenant.id))
-    _seed_doc(gs, "Manual A", "FCB1010", "docA")
-    _seed_doc(gs, "Manual B", "FCB1010", "docB")  # 같은 표기 → 한 노드가 두 문서를 연결
+    _seed_mention_doc(gs, "Manual A", "FCB1010", "docA")  # 같은 표기·같은 맥락(_EMB)
+    _seed_mention_doc(gs, "Manual B", "FCB1010", "docB")
 
     rebuild_communities(str(tenant.id))
     assert len(gs.query_community_summaries()) == 1
 
 
-@pytest.mark.xfail(
-    reason="동음이의 분리(Entity Mention 식별)는 78 재분할 슬라이스에서 구현 — ADR-0010",
-    strict=False,
-)
 @pytest.mark.django_db
 def test_homonym_mentions_stay_separate(tenant_with_key):
     """같은 표기·다른 맥락(동음이의 '다리')은 별개 Mention으로 분리되어 별도 Community로 남는다.
 
     과대병합 해결(ADR-0010): name이 아니라 맥락(임베딩)이 정체성이므로,
-    같은 표기라도 임베딩이 다르면 한 노드로 합쳐지지 않는다.
+    같은 표기라도 임베딩이 다르면 동치되지 않아 한 Community로 합쳐지지 않는다.
     """
     from apps.rag.graph_store import GraphStore
     from apps.rag.community_builder import rebuild_communities
@@ -173,13 +163,9 @@ def test_homonym_mentions_stay_separate(tenant_with_key):
     tenant, _ = tenant_with_key
     gs = GraphStore(str(tenant.id))
     bridge, leg = [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]  # 직교 → 다른 맥락
-    gs.upsert_entity("Bridge Doc", "document", embedding=[0.0, 0.0, 1.0], source_document_id="docA")
-    gs.upsert_entity("다리", "Structure", embedding=bridge, source_document_id="docA")  # 한강 대교
-    gs.upsert_relation("Bridge Doc", "다리", "mentions", source_document_id="docA")
-    gs.upsert_entity("Injury Doc", "document", embedding=[0.6, 0.0, 0.8], source_document_id="docB")
-    gs.upsert_entity("다리", "BodyPart", embedding=leg, source_document_id="docB")  # 신체 부위
-    gs.upsert_relation("Injury Doc", "다리", "mentions", source_document_id="docB")
+    _seed_mention_doc(gs, "Bridge Doc", "다리", "docA", [0.0, 0.0, 1.0], bridge)  # 한강 대교
+    _seed_mention_doc(gs, "Injury Doc", "다리", "docB", [0.6, 0.0, 0.8], leg)     # 신체 부위
 
     rebuild_communities(str(tenant.id))
-    # 동음이의는 분리되어야 한다 — 두 "다리"가 한 노드로 뭉개지면 1, 분리되면 2.
+    # 동음이의는 분리되어야 한다 — 두 "다리"가 동치되면 1, 분리되면 2.
     assert len(gs.query_community_summaries()) == 2

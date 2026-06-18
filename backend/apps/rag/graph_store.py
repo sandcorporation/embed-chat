@@ -301,6 +301,61 @@ class GraphStore:
         with _get_driver().session() as session:
             return [dict(r) for r in session.run(query, tenant_id=self.tenant_id)]
 
+    def mention_embeddings(self) -> list:
+        """임베딩을 가진 Mention의 (mention_id, embedding)을 반환한다 (resolution 입력용)."""
+        query = (
+            "MATCH (m:Mention {tenant_id: $tenant_id}) WHERE m.embedding IS NOT NULL "
+            "RETURN m.mention_id AS mention_id, m.embedding AS embedding"
+        )
+        with _get_driver().session() as session:
+            return [dict(r) for r in session.run(query, tenant_id=self.tenant_id)]
+
+    def upsert_mention_relation(
+        self, source_id: str, target_id: str, description: str = "", source_document_id: str = ""
+    ) -> None:
+        """두 Mention 사이 RELATED 관계를 upsert한다 (양 끝 Mention이 없으면 생성)."""
+        query = (
+            "MERGE (a:Mention {tenant_id: $tenant_id, mention_id: $source_id}) "
+            "MERGE (b:Mention {tenant_id: $tenant_id, mention_id: $target_id}) "
+            "MERGE (a)-[r:RELATED {tenant_id: $tenant_id}]->(b) "
+            "SET r.description = $description, r.source_document_id = $source_document_id"
+        )
+        with _get_driver().session() as session:
+            session.run(
+                query, tenant_id=self.tenant_id, source_id=source_id, target_id=target_id,
+                description=description, source_document_id=source_document_id,
+            )
+
+    def query_mention_relations(self) -> list:
+        """Mention 간 RELATED 관계 [{source, target}]을 반환한다 (mention_id 기준)."""
+        query = (
+            "MATCH (a:Mention {tenant_id: $tenant_id})-[:RELATED {tenant_id: $tenant_id}]->"
+            "(b:Mention {tenant_id: $tenant_id}) "
+            "RETURN a.mention_id AS source, b.mention_id AS target"
+        )
+        with _get_driver().session() as session:
+            return [dict(r) for r in session.run(query, tenant_id=self.tenant_id)]
+
+    def upsert_mention_same_as(self, id_a: str, id_b: str) -> None:
+        """두 Mention을 비파괴 SAME_AS 동치 엣지로 잇는다 (mention_id 기준)."""
+        query = (
+            "MATCH (a:Mention {tenant_id: $tenant_id, mention_id: $a}) "
+            "MATCH (b:Mention {tenant_id: $tenant_id, mention_id: $b}) "
+            "MERGE (a)-[:SAME_AS {tenant_id: $tenant_id}]-(b)"
+        )
+        with _get_driver().session() as session:
+            session.run(query, tenant_id=self.tenant_id, a=id_a, b=id_b)
+
+    def query_mention_same_as(self) -> list:
+        """Mention 간 SAME_AS 동치 쌍 [(id_a, id_b)]을 반환한다."""
+        query = (
+            "MATCH (a:Mention {tenant_id: $tenant_id})-[:SAME_AS {tenant_id: $tenant_id}]-"
+            "(b:Mention {tenant_id: $tenant_id}) WHERE a.mention_id < b.mention_id "
+            "RETURN a.mention_id AS source, b.mention_id AS target"
+        )
+        with _get_driver().session() as session:
+            return [(r["source"], r["target"]) for r in session.run(query, tenant_id=self.tenant_id)]
+
     def entity_embeddings(self) -> list:
         """임베딩을 가진 Entity의 (name, embedding)을 반환한다 (resolution 입력용)."""
         query = (
