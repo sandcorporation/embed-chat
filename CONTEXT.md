@@ -16,20 +16,32 @@ Tenant 사이트에서 챗봇을 실제로 사용하는 최종 사용자. Tenant
 
 ## Authentication & Session
 
+**Tenant Slug**
+Tenant의 챗봇 공개 URL(`/chatbot/{slug}/`)에 쓰이는 고유·URL-safe 공개 식별자. 사람이 읽는 표시명(`Tenant.name`)과 별개이며 전역에서 중복 불가. Tenant가 어드민에서 직접 설정·변경하되, 변경하면 사이트에 박아둔 기존 임베드 URL이 끊긴다.
+_Avoid_: 표시명(name은 사람용, slug는 URL 식별자); UUID(slug는 사람이 정하는 짧은 이름)
+
+**Anonymous Visitor ID**
+위젯이 생성해 브라우저 localStorage에 저장·재사용하는, 추측 불가한 랜덤 VisitorId. Tenant가 `?visitor_id=`로 식별값을 주지 않은 익명 방문자의 정체성으로, 세션을 넘어 지속되어 같은 브라우저에서 대화 이력·Visitor Memory가 축적된다. visitor_id 슬롯은 항상 채워지며 출처만 다르다(Tenant 제공=식별 / 위젯 생성=익명).
+_Avoid_: session_id(이건 정체성이지 연결 단위 세션이 아니다)
+
+**Identity Verification**
+식별된(Tenant 유저시스템의) Visitor의 visitor_id 위조를 막는 선택적(opt-in) 검증. Tenant별 토글로 켜며, 켜지면 서버가 `HMAC(tenant secret, visitor_id)` 해시를 요구·검증한다. 해시는 안정값(visitor_id당 결정적)이라 유저당 1회 계산해 캐시하며, Operator 백엔드의 HMAC API(TENANT_KEY 인증)로 받거나 Tenant가 직접 계산한다. 옛 EmbedToken의 per-session 발급 왕복을 대체한다.
+_Avoid_: EmbedToken(per-session 단기 토큰 — 폐지됨); 토큰(해시는 무상태·무기한)
+
 **TENANT_KEY**
-Tenant를 식별하는 서버사이드 전용 시크릿. 절대 브라우저에 노출되지 않음. 두 가지 용도로만 사용: (1) Tenant 서버가 EmbedToken 발급 요청 시, (2) TenantAgent 계정을 API로 생성할 때. 어드민 UI 로그인에는 사용하지 않음.
+Tenant를 식별하는 서버사이드 전용 시크릿. 절대 브라우저에 노출되지 않음. 두 가지 용도로만 사용: (1) Tenant 서버가 Identity Verification HMAC API를 호출할 때, (2) TenantAgent 계정을 API로 생성할 때. 어드민 UI 로그인에는 사용하지 않음.
 
 **TenantAgent 자격증명**
 TenantAgent가 어드민 UI에 로그인할 때 사용하는 username/password. Operator가 Tenant를 생성하면 초기 TenantAgent의 username과 임시 password가 1회 화면에 표시된다. 이후 추가 TenantAgent 계정은 TENANT_KEY로 인증된 API 또는 어드민 UI "팀원" 탭에서 생성한다. 로그인 성공 시 JWT를 발급받아 어드민 UI 전 기능에 접근한다.
 
-**EmbedToken**
-Operator가 발급하는 단기 서명 토큰 (TTL 보유). Tenant 서버가 `TENANT_KEY + VisitorId`로 발급 요청하면 생성됨. iframe src URL에 포함되어 Visitor 브라우저에 전달.
+**EmbedToken** _(폐지 예정 — A1)_
+~~Operator가 발급하는 단기 서명 토큰 (TTL 보유). Tenant 서버가 `TENANT_KEY + VisitorId`로 발급 요청하면 생성됨. iframe src URL에 포함되어 Visitor 브라우저에 전달.~~ 공개 Tenant Slug URL + 선택적 Identity Verification으로 대체됨(ADR-0011). A1 구현 시 항목 제거.
 
 **ChatSession**
-Visitor가 EmbedToken으로 최초 연결할 때 생성되는 세션. VisitorId에 귀속되며, 세션 이후 채팅 이력은 ChatSession 단위로 저장됨.
+Visitor가 `/chatbot/{slug}/`로 최초 연결할 때 생성되는 세션. VisitorId(Tenant 제공 식별 또는 Anonymous Visitor ID)에 귀속되며, 세션 이후 채팅 이력은 ChatSession 단위로 저장됨.
 
-**VisitorContext**
-EmbedToken 발급 시 Tenant가 함께 넘기는 Visitor의 정적 메타데이터. 예: `{ "name": "홍길동", "plan": "premium", "language": "ko" }`. LLM 시스템 프롬프트에 주입되어 응대 방식을 조정하는 데 사용됨.
+**VisitorContext** _(폐지 예정 — A1)_
+~~EmbedToken 발급 시 Tenant가 함께 넘기는 Visitor의 정적 메타데이터.~~ A1에서 폐지(연결 시점 신뢰 채널 제거; 첫 메시지 개인화 상실, 대체는 Visitor Memory). 비신뢰 입력 채널을 없애 프롬프트 인젝션 표면도 축소.
 
 ## Knowledge & Memory
 
@@ -66,8 +78,12 @@ Tenant가 문서에 부여하는 사용자 편집 가능한 식별 이름. 업�
 _Avoid_: 파일명, 문서명, title
 
 **DocumentIngester**
-문서에서 텍스트를 추출한 뒤 그 텍스트를 Knowledge Graph 기여분(Entity·관계)으로 변환·저장하는 인터페이스. PDF/TXT/이미지(PNG·JPG·WEBP)를 지원. 텍스트 추출 단계: PDF는 추출 후 **단어 수 부족 또는 깨진 추출(Garbled Extraction) 감지 시 OCR로 재추출(fallback)**, 이미지는 OCR. 추출된 텍스트는 LLM Entity/관계 추출을 거쳐 그래프에 기여하며, 각 기여 노드/관계에는 출처 Document가 기록된다.
-_Avoid_: OCR Ingester (이미지 전용이 아닌 PDF fallback도 포함하므로 ImageIngester/PDFIngester 클래스명을 사용); "벡터로 변환"(이제 그래프 기여가 1차 산출물)
+문서에서 텍스트를 추출한 뒤 그 텍스트를 Knowledge Graph 기여분(Entity·관계)으로 변환·저장하는 인터페이스. PDF/TXT/이미지(PNG·JPG·WEBP)/Excel(xlsx·xls)/웹 URL을 지원. 텍스트 추출 단계: PDF는 추출 후 **단어 수 부족 또는 깨진 추출(Garbled Extraction) 감지 시 OCR로 재추출(fallback)**, 이미지는 OCR, **Excel은 시트별 헤더-키 행별 텍스트로 평탄화**, **웹은 명시적 URL(들)을 fetch해 메인 콘텐츠 추출(보일러플레이트 제거; 재귀 크롤 아님)**. 추출된 텍스트는 LLM Entity/관계 추출을 거쳐 그래프에 기여하며, 각 기여 노드/관계에는 출처 Document가 기록된다.
+_Avoid_: OCR Ingester (이미지 전용이 아닌 PDF fallback도 포함하므로 ImageIngester/PDFIngester 클래스명을 사용); "벡터로 변환"(이제 그래프 기여가 1차 산출물); 재귀 크롤러(웹은 명시적 URL 가져오기지 링크 추적 크롤이 아님)
+
+**Document Source**
+Document의 원천 종류: **파일**(업로드되어 media에 저장) 또는 **웹 URL**(명시적으로 지정되어 fetch됨). 인제스션 태스크가 소스 종류로 분기한다(파일은 디스크 읽기, URL은 fetch). 웹 소스 Document의 갱신은 one-shot이며, Tenant가 어드민에서 수동 "다시 가져오기"로 재-ingest한다(자동 스케줄 재크롤 없음).
+_Avoid_: 크롤(명시적 URL 가져오기지 재귀 크롤이 아님)
 
 **Garbled Extraction**
 PDF 텍스트 레이어의 폰트 인코딩(ToUnicode/CID 매핑) 부재로 글리프가 의미 없는 문자열(mojibake)로 추출된 상태. 원문 정보가 텍스트 레이어에서 소실되어 LLM 정제로는 복원할 수 없고(추측=창작이 됨) OCR(픽셀 재인식)로만 되찾을 수 있다. 추출 직후 문자 클래스 비율 휴리스틱으로 문서 단위 감지하며, 감지 시 OCR 재추출이 트리거된다.
@@ -93,15 +109,25 @@ LangGraph가 PostgreSQL에 저장하는 그래프 실행 state 전체 스냅샷.
 
 **TenantConfig**
 Tenant별 설정 집합. 어드민에서 Tenant가 직접 관리. 포함 항목:
-- `model_id`: OpenRouter 모델 식별자 (예: `anthropic/claude-sonnet-4-5`)
+- `model_id`: (폐지 예정 — C) LLM Provider의 `chat_model`로 흡수됨
 - `system_prompt`: Tenant가 직접 편집하는 Base System Prompt. Operator가 기본 템플릿을 제공하며 Tenant가 수정 가능. RAG 결과·VisitorContext·Visitor Memory는 이 프롬프트에 자동 주입됨
 - `welcome_message`: ChatWidget이 열릴 때 Visitor에게 자동으로 표시되는 환영 메시지. 비어 있으면 표시하지 않음. SSE `connected` 이벤트 payload에 포함되어 전달됨
+- `brand_name`: 위젯 헤더 상단에 표시되는 Tenant 브랜드 텍스트(이미지 로고 아님). 비면 AI/사람 상태 텍스트만 표시. AI/사람 상태는 보조 텍스트+점으로 강등. SSE `connected` payload로 전달됨
 - `agent_display_name`: HITL 모드에서 Visitor 위젯에 표시되는 상담원 발신자 이름. 예: "ABC쇼핑 고객센터"
+- `hitl_enabled`: 이 Tenant가 HITL(사람 상담원 전환)을 쓸지 여부(기본 켜짐). 꺼지면 에이전트 그래프가 escalation 분기 없는 토폴로지로 로드되어 AI가 절대 사람에게 넘기지 않는다
 - `webhook_url`: HITL 발생 시 알림을 보낼 웹훅 URL
 - `webhook_type`: 웹훅 플랫폼 종류. `slack` / `discord` / `generic` 중 하나. 플랫폼별로 페이로드 포맷이 다르게 전송됨
 
 **WebhookConfig**
-TenantConfig 내 웹훅 설정 집합. HITL 발생 시 Slack·Discord·Generic 엔드포인트로 알림을 발송하기 위한 정보. 알림 페이로드에는 HITL 트리거 유형, 마지막 N개 대화, VisitorContext, 어드민 UI 딥링크가 포함됨.
+TenantConfig 내 웹훅 설정 집합. HITL 발생 시 Slack·Discord·Generic 엔드포인트로 알림을 발송하기 위한 정보. 알림 페이로드에는 HITL 트리거 유형, 마지막 N개 대화, 어드민 UI 딥링크가 포함됨.
+
+**LLM Provider**
+Tenant가 자기 키로 비용을 부담하는 챗·추출 LLM 제공자 설정. 타입은 **OpenAI · Claude · Custom**. OpenAI/Custom은 OpenAI-호환 클라이언트, Claude는 Anthropic 네이티브 클라이언트로 분기. Custom은 `base_url`+크레덴셜로 임의 OpenAI-호환 엔드포인트(OpenRouter·Deepinfra·로컬 등) 지정. `chat_model`·`extraction_model`을 가짐. LLM Provider 변경은 재구축을 유발하지 않는다(임베딩 공간 불변).
+_Avoid_: model_id(이제 LLM Provider의 chat_model로 흡수); OpenRouter 전용(provider는 다중)
+
+**Embedding Provider**
+Tenant가 자기 키로 비용을 부담하는 임베딩 제공자 설정. 타입은 **OpenAI · Custom**만(Claude는 임베딩 API가 없어 제외). LLM Provider와 **독립**. 임베딩 모델이 벡터 공간을 정의하므로, Embedding Provider 변경은 저장된 벡터를 무효화 → **재임베딩 재구축**(그래프 구조 보존, 무중단 swap, `Graph Freshness=rebuilding`)을 유발한다. 프로덕션엔 플랫폼 기본 폴백이 없어(GPU 없는 Oracle A1) Tenant 설정이 필수. 벡터 인덱스는 가변 차원 때문에 per-Tenant로 격리된다.
+_Avoid_: LLM Provider와 동일시(독립 설정); 차원만으로 호환 판단(모델 정체성이 공간을 정함)
 
 ## Human-in-the-Loop (HITL)
 
