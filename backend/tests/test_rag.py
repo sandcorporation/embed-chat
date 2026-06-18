@@ -777,7 +777,7 @@ def test_document_label_becomes_graph_entity(client, tenant_agent_token, tenant_
         HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
     )
 
-    names = [e["name"] for e in GraphStore(str(tenant.id)).query_entities()]
+    names = [e["name"] for e in GraphStore(str(tenant.id)).query_mentions()]
     assert "ZX900PRO.txt" in names
 
 
@@ -808,7 +808,7 @@ def test_patch_document_name_reseeds_graph_entity(client, tenant_agent_token, te
     assert patch_resp.json()["name"] == "ZX900PRO.txt"
 
     gs = GraphStore(str(tenant.id))
-    names = [e["name"] for e in gs.query_entities()]
+    names = [e["name"] for e in gs.query_mentions()]
     assert "ZX900PRO.txt" in names
     assert gs.get_freshness() == "stale"
 

@@ -63,48 +63,36 @@ def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> 
 
     extraction = extract_graph(label, text)
 
-    # 엔티티(레이블 + 추출분)를 name+description으로 배치 임베딩 → 의미 검색용
+    # 추출된 언급(레이블 + 추출분)을 Entity Mention으로 시드한다(ADR-0010).
+    # name+description을 배치 임베딩해 의미 검색·resolution에 쓴다.
     valid_entities = [e for e in extraction.entities if e.name]
-    entity_specs = [(label, "document", f"Source document: {label}")] + [
+    specs = [(label, "document", f"Source document: {label}")] + [
         (e.name, e.type, e.description) for e in valid_entities
     ]
-    gs.ensure_entity_vector_index()
     gs.ensure_mention_vector_index()
-    entity_embeddings = get_embeddings(
-        [f"{name}: {desc}".strip(": ") if desc else name for name, _t, desc in entity_specs]
+    embeddings = get_embeddings(
+        [f"{name}: {desc}".strip(": ") if desc else name for name, _t, desc in specs]
     )
-    embed_by_name = {spec[0]: emb for spec, emb in zip(entity_specs, entity_embeddings)}
+    embed_by_name = {s[0]: emb for s, emb in zip(specs, embeddings)}
 
-    # 레이블 대표 Entity 시드 (임베딩 포함). Mention도 함께 생성한다(dual-write, ADR-0010).
-    gs.upsert_entity(
-        name=label, entity_type="document", description=f"Source document: {label}",
-        source_document_id=document_id, embedding=embed_by_name.get(label),
-    )
+    # 레이블 대표 Mention 시드
     gs.upsert_mention(
         f"{document_id}:{label}", label, "document", f"Source document: {label}",
         source_document_id=document_id, embedding=embed_by_name.get(label),
     )
-
     for e in valid_entities:
-        gs.upsert_entity(
-            e.name, e.type, e.description,
-            source_document_id=document_id, embedding=embed_by_name.get(e.name),
-        )
         gs.upsert_mention(
             f"{document_id}:{e.name}", e.name, e.type, e.description,
             source_document_id=document_id, embedding=embed_by_name.get(e.name),
         )
-        # 문서(레이블) Entity를 그 문서에서 추출된 Entity와 연결한다.
-        # 이게 없으면 문서 노드가 고립돼, 문서 검색 시 내부 엔티티/관계가 보이지 않는다.
+        # 문서(레이블) Mention을 그 문서에서 추출된 Mention과 연결한다(고립 방지).
         if e.name != label:
-            gs.upsert_relation(label, e.name, "mentions", source_document_id=document_id)
             gs.upsert_mention_relation(
                 f"{document_id}:{label}", f"{document_id}:{e.name}", "mentions", document_id
             )
     for r in extraction.relations:
         if not (r.source and r.target):
             continue
-        gs.upsert_relation(r.source, r.target, r.description, source_document_id=document_id)
         gs.upsert_mention_relation(
             f"{document_id}:{r.source}", f"{document_id}:{r.target}", r.description, document_id
         )

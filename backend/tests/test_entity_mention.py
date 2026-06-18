@@ -22,8 +22,8 @@ def test_same_name_different_source_creates_separate_mentions(tenant_with_key):
 
 
 @pytest.mark.django_db
-def test_ingest_creates_mentions_alongside_entities(client, tenant_agent_token, tenant_with_key):
-    """문서 ingest가 Entity와 함께 Mention 노드를 생성한다 (dual-write). 기존 Entity 경로 유지."""
+def test_ingest_creates_mentions_from_document(client, tenant_agent_token, tenant_with_key):
+    """문서 ingest가 추출 언급을 Entity Mention 노드로 생성한다."""
     from apps.rag.graph_store import GraphStore
 
     tenant, _ = tenant_with_key
@@ -36,8 +36,7 @@ def test_ingest_creates_mentions_alongside_entities(client, tenant_agent_token, 
     )
 
     gs = GraphStore(str(tenant.id))
-    assert len(gs.query_mentions()) > 0   # Mention 생성됨
-    assert len(gs.query_entities()) > 0   # Entity도 여전히 존재(dual-write)
+    assert len(gs.query_mentions()) > 0
 
 
 @pytest.mark.django_db

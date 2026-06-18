@@ -22,7 +22,6 @@ def _get_driver():
 
 
 VECTOR_INDEX = "text_unit_embedding"
-ENTITY_VECTOR_INDEX = "entity_embedding"
 MENTION_VECTOR_INDEX = "mention_embedding"
 
 
@@ -151,122 +150,31 @@ class GraphStore:
             return [dict(record) for record in result]
 
     def reseed_document_label(self, document_id: str, new_label: str) -> None:
-        """문서의 대표(레이블) Entity 이름을 새 레이블로 시드한다. 그래프는 stale로 표시."""
-        self.upsert_entity(
-            name=new_label,
-            entity_type="document",
-            description=f"Source document: {new_label}",
+        """문서의 대표(레이블) Mention을 새 레이블로 시드한다. 그래프는 stale로 표시."""
+        self.upsert_mention(
+            f"{document_id}:{new_label}",
+            new_label,
+            "document",
+            f"Source document: {new_label}",
             source_document_id=document_id,
         )
         self.set_freshness("stale")
 
-    # ── 문서 삭제: 출처 집합에서 제거 후 고아 prune ─────────────────────────────
+    # ── 문서 삭제: Mention/Text Unit 제거 (Mention은 문서 전용이라 통째 삭제) ──────
     def delete_document(self, document_id: str) -> None:
-        """문서를 노드/관계의 출처 집합에서 제거하고, 출처가 빈 것만 prune한다.
-        공유 Entity(다른 문서도 출처)는 보존된다. 그래프는 stale로 표시."""
-        prune_relations = (
-            "MATCH (:Entity {tenant_id: $tenant_id})-[r:RELATED {tenant_id: $tenant_id}]->"
-            "(:Entity {tenant_id: $tenant_id}) "
-            "WHERE $doc IN coalesce(r.source_document_ids, []) "
-            "SET r.source_document_ids = [x IN r.source_document_ids WHERE x <> $doc] "
-            "WITH r WHERE size(r.source_document_ids) = 0 DELETE r"
-        )
-        prune_entities = (
-            "MATCH (e:Entity {tenant_id: $tenant_id}) "
-            "WHERE $doc IN coalesce(e.source_document_ids, []) "
-            "SET e.source_document_ids = [x IN e.source_document_ids WHERE x <> $doc] "
-            "WITH e WHERE size(e.source_document_ids) = 0 DETACH DELETE e"
-        )
+        """문서의 Entity Mention과 Text Unit을 삭제한다. 그래프는 stale로 표시."""
         delete_text_units = (
             "MATCH (t:TextUnit {tenant_id: $tenant_id, source_document_id: $doc}) DELETE t"
         )
-        # Mention은 문서 전용(출처 단수)이므로 통째로 삭제한다(공유 없음).
         delete_mentions = (
             "MATCH (m:Mention {tenant_id: $tenant_id, source_document_id: $doc}) DETACH DELETE m"
         )
         with _get_driver().session() as session:
-            session.run(prune_relations, tenant_id=self.tenant_id, doc=document_id)
-            session.run(prune_entities, tenant_id=self.tenant_id, doc=document_id)
             session.run(delete_text_units, tenant_id=self.tenant_id, doc=document_id)
             session.run(delete_mentions, tenant_id=self.tenant_id, doc=document_id)
         self.set_freshness("stale")
 
-    def ensure_entity_vector_index(self, dimensions: int = 1024) -> None:
-        """Entity.embedding에 대한 Neo4j 벡터 인덱스를 보장하고 ONLINE까지 대기한다."""
-        create = (
-            f"CREATE VECTOR INDEX {ENTITY_VECTOR_INDEX} IF NOT EXISTS "
-            "FOR (e:Entity) ON (e.embedding) "
-            "OPTIONS {indexConfig: {`vector.dimensions`: $dim, "
-            "`vector.similarity_function`: 'cosine'}}"
-        )
-        with _get_driver().session() as session:
-            session.run(create, dim=dimensions)
-            session.run("CALL db.awaitIndexes(30000)")
-
-    def upsert_entity(
-        self,
-        name: str,
-        entity_type: str = "",
-        description: str = "",
-        source_document_id: str = "",
-        embedding: list = None,
-    ) -> None:
-        """Entity를 upsert한다. (tenant_id, name)로 식별하며 출처 Document를 누적한다.
-        embedding이 주어지면 의미 검색용 임베딩을 갱신한다(None이면 기존 유지)."""
-        query = (
-            "MERGE (e:Entity {tenant_id: $tenant_id, name: $name}) "
-            "SET e.entity_type = $entity_type, e.description = $description, "
-            "e.embedding = CASE WHEN $embedding IS NULL THEN e.embedding ELSE $embedding END "
-            "WITH e "
-            "FOREACH (_ IN CASE WHEN $source_document_id <> '' THEN [1] ELSE [] END | "
-            "  SET e.source_document_ids = "
-            "    CASE WHEN $source_document_id IN coalesce(e.source_document_ids, []) "
-            "      THEN e.source_document_ids "
-            "      ELSE coalesce(e.source_document_ids, []) + $source_document_id END)"
-        )
-        with _get_driver().session() as session:
-            session.run(
-                query,
-                tenant_id=self.tenant_id,
-                name=name,
-                entity_type=entity_type,
-                description=description,
-                source_document_id=source_document_id,
-                embedding=embedding,
-            )
-
-    def entities_without_embedding(self) -> list:
-        """임베딩이 없는 Entity(name, description)를 반환한다 (백필 대상)."""
-        query = (
-            "MATCH (e:Entity {tenant_id: $tenant_id}) WHERE e.embedding IS NULL "
-            "RETURN e.name AS name, coalesce(e.description, '') AS description"
-        )
-        with _get_driver().session() as session:
-            return [dict(r) for r in session.run(query, tenant_id=self.tenant_id)]
-
-    def set_entity_embedding(self, name: str, embedding: list) -> None:
-        """Entity의 임베딩만 설정한다(type/description 등 다른 속성은 보존)."""
-        with _get_driver().session() as session:
-            session.run(
-                "MATCH (e:Entity {tenant_id: $tenant_id, name: $name}) SET e.embedding = $embedding",
-                tenant_id=self.tenant_id,
-                name=name,
-                embedding=embedding,
-            )
-
-    def query_entities(self) -> list:
-        """이 tenant의 Entity 목록을 반환한다."""
-        query = (
-            "MATCH (e:Entity {tenant_id: $tenant_id}) "
-            "RETURN e.name AS name, e.entity_type AS entity_type, "
-            "e.description AS description, "
-            "coalesce(e.source_document_ids, []) AS source_document_ids"
-        )
-        with _get_driver().session() as session:
-            result = session.run(query, tenant_id=self.tenant_id)
-            return [dict(record) for record in result]
-
-    # ── Entity Mention (mention_id 식별, Entity와 공존 — ADR-0010) ────────────
+    # ── Entity Mention (mention_id 식별 — ADR-0010) ──────────────────────────
     def upsert_mention(
         self,
         mention_id: str,
@@ -380,37 +288,6 @@ class GraphStore:
         with _get_driver().session() as session:
             return [(r["source"], r["target"]) for r in session.run(query, tenant_id=self.tenant_id)]
 
-    def entity_embeddings(self) -> list:
-        """임베딩을 가진 Entity의 (name, embedding)을 반환한다 (resolution 입력용)."""
-        query = (
-            "MATCH (e:Entity {tenant_id: $tenant_id}) WHERE e.embedding IS NOT NULL "
-            "RETURN e.name AS name, e.embedding AS embedding"
-        )
-        with _get_driver().session() as session:
-            return [dict(r) for r in session.run(query, tenant_id=self.tenant_id)]
-
-    # ── Entity Equivalence (SAME_AS, 비파괴 동치) ─────────────────────────────
-    def upsert_same_as(self, name_a: str, name_b: str) -> None:
-        """두 Entity를 비파괴 SAME_AS 동치 엣지로 잇는다 (노드·표기·출처 보존, tenant 스코프)."""
-        query = (
-            "MATCH (a:Entity {tenant_id: $tenant_id, name: $a}) "
-            "MATCH (b:Entity {tenant_id: $tenant_id, name: $b}) "
-            "MERGE (a)-[:SAME_AS {tenant_id: $tenant_id}]-(b)"
-        )
-        with _get_driver().session() as session:
-            session.run(query, tenant_id=self.tenant_id, a=name_a, b=name_b)
-
-    def query_same_as(self) -> list:
-        """이 tenant의 SAME_AS 동치 쌍 [(name_a, name_b), ...]을 반환한다."""
-        query = (
-            "MATCH (a:Entity {tenant_id: $tenant_id})-[r:SAME_AS {tenant_id: $tenant_id}]-"
-            "(b:Entity {tenant_id: $tenant_id}) "
-            "WHERE a.name < b.name "
-            "RETURN a.name AS source, b.name AS target"
-        )
-        with _get_driver().session() as session:
-            return [(r["source"], r["target"]) for r in session.run(query, tenant_id=self.tenant_id)]
-
     def ensure_mention_vector_index(self, dimensions: int = 1024) -> None:
         """Mention.embedding에 대한 Neo4j 벡터 인덱스를 보장하고 ONLINE까지 대기한다."""
         create = (
@@ -508,44 +385,3 @@ class GraphStore:
             nodes = [dict(rec) for rec in session.run(nodes_q, tenant_id=self.tenant_id, name=name)]
             edges = [dict(rec) for rec in session.run(edges_q, tenant_id=self.tenant_id, name=name)]
         return {"nodes": nodes, "edges": edges}
-
-    def upsert_relation(
-        self,
-        source: str,
-        target: str,
-        description: str = "",
-        source_document_id: str = "",
-    ) -> None:
-        """source→target 관계를 upsert한다. 양 끝 Entity가 없으면 함께 생성하고 출처를 누적한다."""
-        query = (
-            "MERGE (a:Entity {tenant_id: $tenant_id, name: $source}) "
-            "MERGE (b:Entity {tenant_id: $tenant_id, name: $target}) "
-            "MERGE (a)-[r:RELATED {tenant_id: $tenant_id}]->(b) "
-            "SET r.description = $description "
-            "FOREACH (_ IN CASE WHEN $source_document_id <> '' THEN [1] ELSE [] END | "
-            "  SET r.source_document_ids = "
-            "    CASE WHEN $source_document_id IN coalesce(r.source_document_ids, []) "
-            "      THEN r.source_document_ids "
-            "      ELSE coalesce(r.source_document_ids, []) + $source_document_id END)"
-        )
-        with _get_driver().session() as session:
-            session.run(
-                query,
-                tenant_id=self.tenant_id,
-                source=source,
-                target=target,
-                description=description,
-                source_document_id=source_document_id,
-            )
-
-    def query_relations(self) -> list:
-        """이 tenant의 관계 목록을 반환한다."""
-        query = (
-            "MATCH (a:Entity {tenant_id: $tenant_id})-[r:RELATED {tenant_id: $tenant_id}]->"
-            "(b:Entity {tenant_id: $tenant_id}) "
-            "RETURN a.name AS source, b.name AS target, r.description AS description, "
-            "coalesce(r.source_document_ids, []) AS source_document_ids"
-        )
-        with _get_driver().session() as session:
-            result = session.run(query, tenant_id=self.tenant_id)
-            return [dict(record) for record in result]

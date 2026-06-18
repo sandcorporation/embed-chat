@@ -16,26 +16,26 @@ def _upload(client, token, filename):
 # ── Issue 65: 문서 삭제 — 출처 prune (공유 Entity 보존) ───────────────────────
 
 @pytest.mark.django_db
-def test_delete_preserves_shared_entity_removes_unique(client, tenant_agent_token, tenant_with_key):
-    """문서 삭제 시 공유 Entity는 보존되고, 그 문서에만 속한 것(레이블 Entity)은 제거된다."""
+def test_delete_removes_target_doc_mentions_preserves_others(client, tenant_agent_token, tenant_with_key):
+    """문서 삭제는 그 문서의 Mention만 제거하고, 다른 문서의 Mention(같은 표기 포함)은 보존한다."""
     from apps.rag.graph_store import GraphStore
 
     tenant, _ = tenant_with_key
     r1 = _upload(client, tenant_agent_token, "alpha.txt")
     doc1 = r1.json()["id"]
-    _upload(client, tenant_agent_token, "beta.txt")  # 같은 Fake 추출 → FOOTSWITCH 공유
+    _upload(client, tenant_agent_token, "beta.txt")  # 같은 Fake 추출 → FOOTSWITCH 표기 공유
 
     client.delete(
         f"/api/tenant/documents/{doc1}",
         HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
     )
 
-    names = [e["name"] for e in GraphStore(str(tenant.id)).query_entities()]
-    # 두 문서가 공유하는 Entity는 살아남는다
+    names = [m["name"] for m in GraphStore(str(tenant.id)).query_mentions()]
+    # beta 문서의 FOOTSWITCH Mention은 살아남는다 (Mention은 문서 전용)
     assert "FOOTSWITCH" in names
-    # doc1에만 있던 레이블 Entity는 제거된다
+    # doc1(alpha)에만 있던 레이블 Mention은 제거된다
     assert "alpha.txt" not in names
-    # doc2의 레이블 Entity는 유지된다
+    # doc2(beta)의 레이블 Mention은 유지된다
     assert "beta.txt" in names
 
 
