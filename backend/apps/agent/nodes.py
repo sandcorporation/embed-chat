@@ -31,13 +31,34 @@ def route_search_node(state: dict) -> dict:
 
 
 def local_search_node(state: dict) -> dict:
-    """엔티티 중심 근거 — Knowledge Graph의 Text Unit을 벡터로 검색한다."""
-    from apps.rag.graph_store import GraphStore
-    from apps.rag.ingesters import get_embeddings
+    """엔티티 중심 근거 — 질의로 resolved Entity를 찾고 그 이웃 관계를 모은다.
 
-    query_embedding = get_embeddings([state["user_message"]])[0]
-    units = GraphStore(state["tenant_id"]).vector_search(query_embedding, top_k=5)
-    return {"rag_chunks": [u["content"] for u in units]}
+    거대한 Text Unit chunk 대신 구조화된 Entity·Relation을 근거로 전달한다(ADR-0010).
+    """
+    from apps.rag.graph_store import GraphStore
+
+    gs = GraphStore(state["tenant_id"])
+    matched = gs.search_entities(state["user_message"], top_k=5)
+
+    chunks = []
+    seen_entities = set()
+    seen_edges = set()
+    for ent in matched:
+        name = ent["name"]
+        if name in seen_entities:
+            continue
+        seen_entities.add(name)
+        desc = ent.get("description") or ""
+        chunks.append(f"{name}: {desc}".strip(": ") if desc else name)
+
+        for edge in gs.neighbors(name)["edges"]:
+            key = (edge["source"], edge["target"], edge.get("description"))
+            if key in seen_edges:
+                continue
+            seen_edges.add(key)
+            chunks.append(f"{edge['source']} —{edge.get('description') or ''}→ {edge['target']}")
+
+    return {"rag_chunks": chunks}
 
 
 def global_search_node(state: dict) -> dict:
@@ -85,7 +106,8 @@ def call_llm_structured(state: dict) -> dict:
 
     result = llm_boundary.complete_structured(state["model_id"], lc_messages, HITLResponse)
 
-    if not result.needs_hitl and result.response:
+    # HITL 여부와 무관하게, AI가 만든 응답(전환 멘트 포함)이 있으면 사용자에게 스트리밍한다.
+    if result.response:
         publish_token(state["session_id"], result.response)
         publish_done(state["session_id"])
 
@@ -97,12 +119,19 @@ def call_llm_structured(state: dict) -> dict:
 
 
 def create_escalation_node(state: dict) -> dict:
-    from apps.chat.models import ChatSession
+    from apps.chat.models import ChatSession, ChatMessage
     from apps.escalation.models import Escalation
 
     session = ChatSession.objects.get(id=state["session_id"])
     session.is_hitl = True
     session.save(update_fields=["is_hitl"])
+
+    # AI가 만든 전환 멘트가 있으면 사용자 대화에 남긴다(이미 SSE로 스트리밍됨).
+    response = state.get("assistant_response") or ""
+    if response:
+        ChatMessage.objects.create(
+            session=session, role=ChatMessage.ROLE_ASSISTANT, content=response
+        )
 
     escalation = Escalation.objects.create(
         session=session,
@@ -120,11 +149,10 @@ def create_escalation_node(state: dict) -> dict:
     except Exception:
         pass
 
-    return {
-        "messages": [
-            {"role": "user", "content": state["user_message"]},
-        ]
-    }
+    messages = [{"role": "user", "content": state["user_message"]}]
+    if response:
+        messages.append({"role": "assistant", "content": response})
+    return {"messages": messages}
 
 
 def save_messages_node(state: dict) -> dict:

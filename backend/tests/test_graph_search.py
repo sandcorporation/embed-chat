@@ -84,6 +84,32 @@ def test_chat_answers_from_graph_local_search(client, tenant_agent_token, tenant
 
 
 @pytest.mark.django_db
+def test_local_search_returns_entities_and_relations_not_chunks(tenant_with_key):
+    """Local Search는 거대한 Text Unit chunk가 아니라 Entity·Relation 결과를 rag_chunks에 담는다."""
+    from apps.rag.graph_store import GraphStore
+    from apps.rag.ingesters import get_embeddings
+    from apps.agent.nodes import local_search_node
+
+    tenant, _ = tenant_with_key
+    gs = GraphStore(str(tenant.id))
+    gs.ensure_mention_vector_index()
+    doc = "doc1"
+    e1 = get_embeddings(["FCB1010: MIDI foot controller"])[0]
+    e2 = get_embeddings(["Power Supply: 9V DC power adapter"])[0]
+    gs.upsert_mention(f"{doc}:FCB1010", "FCB1010", "product", "MIDI foot controller",
+                      source_document_id=doc, embedding=e1)
+    gs.upsert_mention(f"{doc}:Power Supply", "Power Supply", "spec", "9V DC power adapter",
+                      source_document_id=doc, embedding=e2)
+    gs.upsert_mention_relation(f"{doc}:FCB1010", f"{doc}:Power Supply", "powered by", doc)
+
+    out = local_search_node({"user_message": "FCB1010 power supply", "tenant_id": str(tenant.id)})
+    blob = " ".join(out["rag_chunks"])
+    assert "FCB1010" in blob, f"엔티티가 결과에 없음: {out['rag_chunks']}"
+    assert "Power Supply" in blob, f"이웃 엔티티가 없음: {out['rag_chunks']}"
+    assert "powered by" in blob, f"관계가 없음: {out['rag_chunks']}"
+
+
+@pytest.mark.django_db
 def test_route_search_classifies_global_query(tenant_with_key):
     """'전체/공통' 신호가 있는 질의는 search_scope=global로 분류된다."""
     from apps.agent.nodes import route_search_node

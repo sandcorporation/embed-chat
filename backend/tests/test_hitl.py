@@ -38,6 +38,40 @@ def test_fake_llm_verdict_drives_escalation(tenant_with_key, fake_chat_llm):
     assert Escalation.objects.filter(session=session, trigger_type="ai").exists()
 
 
+@pytest.mark.django_db
+def test_hitl_with_response_streams_transition_then_escalates(
+    tenant_with_key, fake_chat_llm, redis_subscribe
+):
+    """needs_hitl=True여도 AI 전환 멘트가 있으면 먼저 사용자에게 스트리밍·저장된 뒤 escalation된다."""
+    from apps.agent.graph import run_chat_agent
+    from apps.agent.nodes import HITLResponse
+    from apps.chat.models import ChatMessage
+    from apps.escalation.models import Escalation
+
+    tenant, _ = tenant_with_key
+    session = _make_session(tenant)
+    pubsub = redis_subscribe(f"session:{session.id}")
+    fake_chat_llm.override = lambda m: HITLResponse(
+        response="상담원에게 연결해 드리겠습니다.", needs_hitl=True, hitl_reason="불확실"
+    )
+
+    run_chat_agent(session, "FCB1010 전원 사양 알려줘")
+
+    # 전환 멘트가 먼저 token으로 스트리밍된다 (escalation 이벤트보다 앞서)
+    first = get_redis_message(pubsub)
+    assert first is not None and first["type"] == "token", f"전환 멘트 스트리밍 안 됨: {first}"
+    assert first["content"] == "상담원에게 연결해 드리겠습니다."
+    # 전환 멘트가 ChatMessage로도 저장된다
+    assert ChatMessage.objects.filter(
+        session=session, role=ChatMessage.ROLE_ASSISTANT,
+        content="상담원에게 연결해 드리겠습니다.",
+    ).exists()
+    # 그 뒤 escalation
+    session.refresh_from_db()
+    assert session.is_hitl is True
+    assert Escalation.objects.filter(session=session).exists()
+
+
 # ── Issue 21: Escalation 모델 + LangGraph Structured Output ───────────────
 
 
