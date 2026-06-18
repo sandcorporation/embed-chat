@@ -9,6 +9,7 @@ export default function ChatWidget({ slug, visitorId, hash = '' }) {
   const [status, setStatus] = useState('connecting') // connecting | ready | streaming | error
   const [streamingText, setStreamingText] = useState('')
   const [isHitl, setIsHitl] = useState(false)
+  const [brandName, setBrandName] = useState('')
   const [typingActor, setTypingActor] = useState(null) // null | 'ai' | 'human_agent'
   const typingTimerRef = useRef(null)
   const bottomRef = useRef(null)
@@ -24,6 +25,7 @@ export default function ChatWidget({ slug, visitorId, hash = '' }) {
       const data = JSON.parse(e.data)
       setSessionId(data.session_id)
       setStatus('ready')
+      if (data.brand_name) setBrandName(data.brand_name)
       if (data.history) {
         setMessages(data.history)
         if (data.is_hitl) setIsHitl(true)
@@ -136,7 +138,14 @@ export default function ChatWidget({ slug, visitorId, hash = '' }) {
     <div style={styles.container}>
       <div style={styles.header}>
         <div style={styles.headerDot(status)} />
-        <span>{isHitl ? '상담원 연결 중' : 'AI 상담'}</span>
+        {brandName ? (
+          <div style={styles.headerTitles}>
+            <span style={styles.brandTitle}>{brandName}</span>
+            <span style={styles.statusSub}>{isHitl ? '상담원 연결 중' : 'AI 상담'}</span>
+          </div>
+        ) : (
+          <span>{isHitl ? '상담원 연결 중' : 'AI 상담'}</span>
+        )}
       </div>
 
       <div style={styles.messages}>
@@ -213,6 +222,20 @@ const styles = {
     borderRadius: '50%',
     background: status === 'ready' ? '#48bb78' : status === 'error' ? '#fc8181' : '#ed8936',
   }),
+  headerTitles: {
+    display: 'flex',
+    flexDirection: 'column',
+    lineHeight: 1.2,
+  },
+  brandTitle: {
+    fontWeight: 600,
+    fontSize: '15px',
+  },
+  statusSub: {
+    fontWeight: 400,
+    fontSize: '11px',
+    color: '#718096',
+  },
   messages: {
     flex: 1,
     overflowY: 'auto',

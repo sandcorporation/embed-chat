@@ -51,13 +51,15 @@ def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
         ended_at=None,
     )
 
+    config = getattr(tenant, "config", None)
     existing_messages = ChatMessage.objects.filter(session=session).order_by("created_at")
     if existing_messages.exists():
         history = [{"role": m.role, "content": m.content} for m in existing_messages]
         stream_kwargs = {"history": history, "is_hitl": session.is_hitl}
     else:
-        welcome_message = tenant.config.welcome_message if hasattr(tenant, "config") else ""
-        stream_kwargs = {"welcome_message": welcome_message}
+        stream_kwargs = {"welcome_message": config.welcome_message if config else ""}
+    if config and config.brand_name:
+        stream_kwargs["brand_name"] = config.brand_name
 
     response = StreamingHttpResponse(
         sse_event_stream(str(session.id), **stream_kwargs),

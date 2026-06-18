@@ -323,3 +323,34 @@ def test_stream_new_session_no_history_in_connected_event(client, tenant_with_ke
 
     assert "history" not in payload
     assert payload.get("welcome_message") == "신규 방문자 환영합니다!"
+
+
+# ── Issue 89: 위젯 브랜드 텍스트 ──────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_brand_name_in_connected_event(client, tenant_with_key):
+    """brand_name이 설정되면 connected 이벤트 payload에 포함된다(헤더 타이틀용)."""
+    import json
+    from apps.tenants.models import TenantConfig
+
+    tenant, _ = tenant_with_key
+    config = TenantConfig.objects.get(tenant=tenant)
+    config.brand_name = "ABC쇼핑 고객센터"
+    config.save()
+
+    first_chunk = next(open_stream(client, tenant, "v-brand").streaming_content).decode()
+    payload = json.loads(first_chunk.split("data: ", 1)[1])
+    assert payload.get("brand_name") == "ABC쇼핑 고객센터"
+
+
+@pytest.mark.django_db
+def test_brand_name_settable_via_config_api(client, tenant_agent_token):
+    """Tenant가 어드민 config API로 brand_name을 설정·조회할 수 있다."""
+    client.patch(
+        "/api/tenant/config/",
+        {"brand_name": "내 브랜드"},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    g = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}")
+    assert g.json()["brand_name"] == "내 브랜드"

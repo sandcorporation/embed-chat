@@ -55,11 +55,14 @@ def publish_visitor_message(tenant_id: str, session_id: str, content: str) -> No
     }))
 
 
-def sse_event_stream(session_id: str, welcome_message: str = "", history=None, is_hitl: bool = False):
+def sse_event_stream(session_id: str, welcome_message: str = "", history=None, is_hitl: bool = False, brand_name: str = ""):
     r = get_redis_client()
     pubsub = r.pubsub()
     pubsub.subscribe(f"session:{session_id}")
     connected_payload = {"session_id": session_id}
+    # 브랜드 텍스트는 신규/재연결 무관하게 항상 헤더에 표시한다.
+    if brand_name:
+        connected_payload["brand_name"] = brand_name
     if history is not None:
         connected_payload["history"] = history
         if is_hitl:

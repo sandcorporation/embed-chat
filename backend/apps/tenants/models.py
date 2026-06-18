@@ -90,6 +90,8 @@ class TenantConfig(models.Model):
     webhook_url = models.URLField(blank=True, default="")
     webhook_type = models.CharField(max_length=10, choices=WEBHOOK_TYPE_CHOICES, blank=True, default="")
     welcome_message = models.TextField(blank=True, default="")
+    # 위젯 헤더 상단에 표시되는 Tenant 브랜드 텍스트(이미지 로고 아님). 비면 상태 텍스트만.
+    brand_name = models.CharField(max_length=100, blank=True, default="")
     # 식별 Visitor의 visitor_id 위조를 막는 HMAC 신원검증 요구(opt-in). 기본 꺼짐.
     require_identity_verification = models.BooleanField(default=False)
     # HITL(사람 상담원 전환) 사용 여부. 꺼지면 에이전트 그래프가 escalation 분기 없이 로드된다.
