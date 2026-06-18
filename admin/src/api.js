@@ -75,6 +75,16 @@ export async function updateTenantConfig(agentToken, data) {
   return res.json()
 }
 
+export async function updateTenantSlug(agentToken, slug) {
+  const res = await fetch(`${BASE}/api/tenant/slug/`, {
+    method: 'PATCH',
+    headers: getHeaders(agentToken),
+    body: JSON.stringify({ slug }),
+  })
+  if (!res.ok) throw new Error('slug 저장 실패 (형식·중복·예약어 확인)')
+  return res.json()
+}
+
 export async function resetTenantKey(agentToken) {
   const res = await fetch(`${BASE}/api/tenant/reset-key`, {
     method: 'POST',

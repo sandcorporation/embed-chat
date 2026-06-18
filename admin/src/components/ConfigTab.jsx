@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getTenantConfig, updateTenantConfig, resetTenantKey } from '../api'
+import { getTenantConfig, updateTenantConfig, resetTenantKey, updateTenantSlug } from '../api'
 import { s } from '../styles'
 
 const POPULAR_MODELS = [
@@ -32,6 +32,18 @@ export default function ConfigTab({ agentToken }) {
   const [loading, setLoading] = useState(true)
   const [newKey, setNewKey] = useState(null)
   const [resetConfirm, setResetConfirm] = useState(false)
+  const [slug, setSlug] = useState('')
+  const [slugSaved, setSlugSaved] = useState(false)
+
+  const handleSaveSlug = async () => {
+    try {
+      await updateTenantSlug(agentToken, slug)
+      setSlugSaved(true)
+      setTimeout(() => setSlugSaved(false), 2000)
+    } catch (e) {
+      alert(e.message)
+    }
+  }
 
   useEffect(() => {
     getTenantConfig(agentToken).then(data => {
@@ -65,6 +77,27 @@ export default function ConfigTab({ agentToken }) {
 
   return (
     <div style={{ maxWidth: 700 }}>
+      <div style={{ marginBottom: 24 }}>
+        <label style={s.label}>Tenant Slug (공개 챗봇 URL)</label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, color: '#718096' }}>/chatbot/</span>
+          <input
+            aria-label="Tenant Slug"
+            style={{ ...s.input, width: 260 }}
+            value={slug}
+            onChange={e => setSlug(e.target.value)}
+            placeholder="abc-shop (소문자·숫자·하이픈)"
+          />
+          <span style={{ fontSize: 13, color: '#718096' }}>/</span>
+          <button style={s.btnSm} onClick={handleSaveSlug}>
+            {slugSaved ? '✓ 저장됨' : 'Slug 저장'}
+          </button>
+        </div>
+        <p style={{ marginTop: 4, fontSize: 12, color: '#718096' }}>
+          변경하면 사이트에 박아둔 기존 임베드 URL이 끊깁니다.
+        </p>
+      </div>
+
       <div style={{ marginBottom: 20 }}>
         <label style={s.label}>LLM 모델</label>
         <select
@@ -100,6 +133,17 @@ export default function ConfigTab({ agentToken }) {
       </div>
 
       <div style={{ marginBottom: 20 }}>
+        <label style={s.label}>브랜드 텍스트</label>
+        <input
+          aria-label="브랜드 텍스트"
+          style={{ ...s.input, width: '100%' }}
+          value={config.brand_name || ''}
+          onChange={e => setConfig(c => ({ ...c, brand_name: e.target.value }))}
+          placeholder="위젯 헤더 상단에 표시 (비우면 상태 텍스트만)"
+        />
+      </div>
+
+      <div style={{ marginBottom: 20 }}>
         <label style={s.label}>Base System Prompt</label>
         <textarea
           data-testid="system-prompt-input"
@@ -111,6 +155,20 @@ export default function ConfigTab({ agentToken }) {
 
       <hr style={{ margin: '24px 0', borderColor: '#e2e8f0' }} />
       <h3 style={{ marginBottom: 16, fontSize: 15, fontWeight: 600 }}>HITL 설정</h3>
+
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={!!config.hitl_enabled}
+            onChange={e => setConfig(c => ({ ...c, hitl_enabled: e.target.checked }))}
+          />
+          HITL 사용
+        </label>
+        <p style={{ marginTop: 4, fontSize: 12, color: '#718096' }}>
+          끄면 AI 전용으로 운영되며 상담원 전환(escalation)이 발생하지 않습니다.
+        </p>
+      </div>
 
       <div style={{ marginBottom: 16 }}>
         <label style={s.label}>상담원 표시 이름</label>
@@ -147,6 +205,110 @@ export default function ConfigTab({ agentToken }) {
           />
         </div>
       )}
+
+      <hr style={{ margin: '24px 0', borderColor: '#e2e8f0' }} />
+      <h3 style={{ marginBottom: 16, fontSize: 15, fontWeight: 600 }}>접근 / 보안</h3>
+
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            aria-label="visitor_id 신원검증 요구"
+            checked={!!config.require_identity_verification}
+            onChange={e => setConfig(c => ({ ...c, require_identity_verification: e.target.checked }))}
+          />
+          visitor_id 신원검증 요구 (HMAC)
+        </label>
+        <p style={{ marginTop: 4, fontSize: 12, color: '#718096' }}>
+          켜면 식별 방문자는 HMAC 해시가 있어야 연결됩니다(위조 방지). 익명은 영향 없음.
+        </p>
+      </div>
+
+      <hr style={{ margin: '24px 0', borderColor: '#e2e8f0' }} />
+      <h3 style={{ marginBottom: 8, fontSize: 15, fontWeight: 600 }}>LLM Provider (비용 부담)</h3>
+      <p style={{ fontSize: 12, color: '#718096', marginBottom: 16 }}>
+        미설정 시 플랫폼 기본(OpenRouter)을 사용합니다. 챗·추출에 공용으로 쓰입니다.
+      </p>
+
+      <div style={{ marginBottom: 12 }}>
+        <label style={s.label}>LLM Provider 타입</label>
+        <select
+          aria-label="LLM Provider 타입"
+          style={{ ...s.input, width: '100%' }}
+          value={config.llm_provider_type || ''}
+          onChange={e => setConfig(c => ({ ...c, llm_provider_type: e.target.value }))}
+        >
+          <option value="">기본 (OpenRouter)</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Claude (Anthropic)</option>
+          <option value="custom">Custom (OpenAI-호환)</option>
+        </select>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={s.label}>LLM Base URL</label>
+        <input aria-label="LLM Base URL" style={{ ...s.input, width: '100%' }}
+          value={config.llm_base_url || ''}
+          onChange={e => setConfig(c => ({ ...c, llm_base_url: e.target.value }))}
+          placeholder="Custom일 때 (예: https://openrouter.ai/api/v1)" />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={s.label}>LLM API Key</label>
+        <input type="password" aria-label="LLM API Key" style={{ ...s.input, width: '100%' }}
+          value={config.llm_api_key || ''}
+          onChange={e => setConfig(c => ({ ...c, llm_api_key: e.target.value }))}
+          placeholder="설정됨이면 ******** (변경할 때만 입력)" />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={s.label}>추출 모델 (비우면 플랫폼 기본)</label>
+        <input aria-label="추출 모델" style={{ ...s.input, width: '100%' }}
+          value={config.extraction_model || ''}
+          onChange={e => setConfig(c => ({ ...c, extraction_model: e.target.value }))} />
+      </div>
+
+      <hr style={{ margin: '24px 0', borderColor: '#e2e8f0' }} />
+      <h3 style={{ marginBottom: 8, fontSize: 15, fontWeight: 600 }}>Embedding Provider</h3>
+      <p style={{ fontSize: 12, color: '#718096', marginBottom: 16 }}>
+        LLM과 독립. 변경 시 기존 그래프가 재임베딩됩니다. 프로덕션에선 설정 필수.
+      </p>
+
+      <div style={{ marginBottom: 12 }}>
+        <label style={s.label}>Embedding Provider 타입</label>
+        <select
+          aria-label="Embedding Provider 타입"
+          style={{ ...s.input, width: '100%' }}
+          value={config.embed_provider_type || ''}
+          onChange={e => setConfig(c => ({ ...c, embed_provider_type: e.target.value }))}
+        >
+          <option value="">기본 (dev: ollama)</option>
+          <option value="openai">OpenAI</option>
+          <option value="custom">Custom (OpenAI-호환)</option>
+        </select>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={s.label}>Embedding Base URL</label>
+        <input aria-label="Embedding Base URL" style={{ ...s.input, width: '100%' }}
+          value={config.embed_base_url || ''}
+          onChange={e => setConfig(c => ({ ...c, embed_base_url: e.target.value }))} />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={s.label}>Embedding API Key</label>
+        <input type="password" aria-label="Embedding API Key" style={{ ...s.input, width: '100%' }}
+          value={config.embed_api_key || ''}
+          onChange={e => setConfig(c => ({ ...c, embed_api_key: e.target.value }))}
+          placeholder="설정됨이면 ******** (변경할 때만 입력)" />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={s.label}>Embedding 모델</label>
+        <input aria-label="Embedding 모델" style={{ ...s.input, width: '100%' }}
+          value={config.embed_model || ''}
+          onChange={e => setConfig(c => ({ ...c, embed_model: e.target.value }))} />
+      </div>
+      <div style={{ marginBottom: 20 }}>
+        <label style={s.label}>Embedding 차원</label>
+        <input type="number" aria-label="Embedding 차원" style={{ ...s.input, width: 160 }}
+          value={config.embed_dim ?? 1024}
+          onChange={e => setConfig(c => ({ ...c, embed_dim: Number(e.target.value) }))} />
+      </div>
 
       <button style={s.btn} onClick={handleSave}>
         {saved ? '✓ 저장됨' : '저장'}

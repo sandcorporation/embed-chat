@@ -5,6 +5,11 @@ export default defineConfig({
   plugins: [react()],
   base: '/admin-ui/',
   build: { outDir: 'dist' },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: './src/setupTests.js',
+  },
   server: {
     port: 5174,
     host: '0.0.0.0',
