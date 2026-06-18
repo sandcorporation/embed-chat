@@ -19,17 +19,30 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
     return chunks
 
 
-def get_embeddings(texts: List[str]) -> List[List[float]]:
+def get_embeddings(texts: List[str], provider=None) -> List[List[float]]:
+    """OpenAI-호환 /v1/embeddings로 임베딩을 얻는다(ADR-0012).
+
+    provider 미지정 시 플랫폼 기본(로컬 ollama /v1)을 쓴다. prod에선 Tenant가
+    Embedding Provider를 설정해야 한다(폴백 없음 — embedding_provider 참조).
+    """
     import httpx
     from django.conf import settings
 
+    if provider is None:
+        base_url = f"{settings.OLLAMA_BASE_URL}/v1"
+        model = settings.OLLAMA_EMBED_MODEL
+        api_key = "ollama"
+    else:
+        base_url, model, api_key = provider.base_url, provider.model, (provider.api_key or "x")
+
     resp = httpx.post(
-        f"{settings.OLLAMA_BASE_URL}/api/embed",
-        json={"model": settings.OLLAMA_EMBED_MODEL, "input": texts},
+        f"{base_url}/embeddings",
+        json={"model": model, "input": texts},
+        headers={"Authorization": f"Bearer {api_key}"},
         timeout=getattr(settings, "OLLAMA_TIMEOUT", 60.0),
     )
     resp.raise_for_status()
-    return resp.json()["embeddings"]
+    return [d["embedding"] for d in resp.json()["data"]]
 
 
 class DocumentIngester(ABC):

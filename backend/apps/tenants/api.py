@@ -56,6 +56,11 @@ class TenantConfigOut(Schema):
     llm_base_url: str
     llm_api_key: str
     extraction_model: str
+    embed_provider_type: str
+    embed_base_url: str
+    embed_api_key: str
+    embed_model: str
+    embed_dim: int
 
 
 class TenantConfigIn(Schema):
@@ -72,6 +77,11 @@ class TenantConfigIn(Schema):
     llm_base_url: str = None
     llm_api_key: str = None
     extraction_model: str = None
+    embed_provider_type: str = None
+    embed_base_url: str = None
+    embed_api_key: str = None
+    embed_model: str = None
+    embed_dim: int = None
 
 
 class SlugIn(Schema):
@@ -271,6 +281,11 @@ def _config_out(config):
         # 키는 평문·암호문 모두 노출하지 않고 설정 여부만 마스킹으로 알린다.
         "llm_api_key": "********" if config.llm_api_key else "",
         "extraction_model": config.extraction_model,
+        "embed_provider_type": config.embed_provider_type,
+        "embed_base_url": config.embed_base_url,
+        "embed_api_key": "********" if config.embed_api_key else "",
+        "embed_model": config.embed_model,
+        "embed_dim": config.embed_dim,
     }
 
 
@@ -282,14 +297,16 @@ def get_config(request):
 @tenant_router.patch("/config/", response=TenantConfigOut)
 def update_config(request, body: TenantConfigIn):
     config = request.auth.tenant.config
-    for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message", "brand_name", "hitl_enabled", "require_identity_verification", "llm_provider_type", "llm_base_url", "extraction_model"):
+    for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message", "brand_name", "hitl_enabled", "require_identity_verification", "llm_provider_type", "llm_base_url", "extraction_model", "embed_provider_type", "embed_base_url", "embed_model", "embed_dim"):
         value = getattr(body, field)
         if value is not None:
             setattr(config, field, value)
     # API 키는 평문으로 받아 암호화 저장한다(write-only).
+    from apps.tenants.crypto import encrypt_secret
     if body.llm_api_key is not None:
-        from apps.tenants.crypto import encrypt_secret
         config.llm_api_key = encrypt_secret(body.llm_api_key)
+    if body.embed_api_key is not None:
+        config.embed_api_key = encrypt_secret(body.embed_api_key)
     config.save()
     return _config_out(config)
 

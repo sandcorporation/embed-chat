@@ -20,6 +20,15 @@ class LLMProvider:
     api_key: str = ""
 
 
+@dataclass
+class EmbeddingProvider:
+    type: str          # openai | custom | "" (플랫폼 기본; anthropic 없음)
+    base_url: str      # OpenAI-호환 base (예: https://host/v1)
+    model: str
+    dim: int = 1024
+    api_key: str = ""
+
+
 def build_llm_client(provider: LLMProvider):
     if provider.type == PROVIDER_ANTHROPIC:
         from langchain_anthropic import ChatAnthropic
@@ -82,3 +91,26 @@ def extraction_provider(config) -> LLMProvider:
     from django.conf import settings
 
     return _provider_from_config(config, config.extraction_model or settings.GRAPH_EXTRACTION_MODEL)
+
+
+def embedding_provider(config) -> EmbeddingProvider:
+    """LLM Provider와 독립된 Embedding Provider. 미설정 시 dev는 ollama 폴백,
+    prod(EMBEDDING_PLATFORM_DEFAULT_ENABLED=False)는 Tenant 설정을 강제한다."""
+    from django.conf import settings
+
+    if config and config.embed_provider_type:
+        from apps.tenants.crypto import decrypt_secret
+
+        return EmbeddingProvider(
+            type=config.embed_provider_type,
+            base_url=config.embed_base_url,
+            model=config.embed_model,
+            dim=config.embed_dim,
+            api_key=decrypt_secret(config.embed_api_key),
+        )
+    if getattr(settings, "EMBEDDING_PLATFORM_DEFAULT_ENABLED", True):
+        return EmbeddingProvider(
+            type="", base_url=f"{settings.OLLAMA_BASE_URL}/v1",
+            model=settings.OLLAMA_EMBED_MODEL, dim=1024, api_key="ollama",
+        )
+    raise ValueError("Embedding Provider가 설정되지 않았습니다 (프로덕션은 Tenant 설정 필수)")

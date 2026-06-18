@@ -84,6 +84,10 @@ OPEN_ROUTER_API_KEY = os.environ.get("OPEN_ROUTER_API_KEY", "")
 OPEN_ROUTER_DEFAULT_MODEL = os.environ.get("OPEN_ROUTER_DEFAULT_MODEL", "openrouter/owl-alpha")
 OPEN_ROUTER_BASE_URL = os.environ.get("OPEN_ROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
+# 임베딩 플랫폼 기본 폴백(dev=True). prod(GPU 없는 Oracle A1)는 False로 두어
+# Tenant가 Embedding Provider를 설정하지 않으면 인제스션·검색을 거부한다(ADR-0012).
+EMBEDDING_PLATFORM_DEFAULT_ENABLED = os.environ.get("EMBEDDING_PLATFORM_DEFAULT_ENABLED", "true").lower() == "true"
+
 # Ollama (embedding)
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3")

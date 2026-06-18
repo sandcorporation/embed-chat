@@ -89,6 +89,13 @@ class TenantConfig(models.Model):
     llm_base_url = models.CharField(max_length=500, blank=True, default="")
     llm_api_key = models.TextField(blank=True, default="")
     extraction_model = models.CharField(max_length=255, blank=True, default="")
+    # Embedding Provider — LLM Provider와 독립(Anthropic 임베딩 부재). type이 비면
+    # 플랫폼 기본(dev=ollama). 변경 시 재임베딩 재구축 트리거(issue 95).
+    embed_provider_type = models.CharField(max_length=20, blank=True, default="")
+    embed_base_url = models.CharField(max_length=500, blank=True, default="")
+    embed_api_key = models.TextField(blank=True, default="")
+    embed_model = models.CharField(max_length=255, blank=True, default="")
+    embed_dim = models.IntegerField(default=1024)
     system_prompt = models.TextField(
         default="You are a helpful assistant. Answer questions clearly and concisely."
     )
