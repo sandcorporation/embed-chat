@@ -13,9 +13,7 @@ def _make_escalation_with_messages(tenant, webhook_type="", webhook_url=""):
 
     session = ChatSession.objects.create(
         tenant_id=tenant.id,
-        visitor_id="v-webhook",
-        visitor_context={},
-        is_hitl=True,
+        visitor_id="v-webhook",        is_hitl=True,
     )
     ChatMessage.objects.create(session=session, role="user", content="도움이 필요해요")
     ChatMessage.objects.create(session=session, role="assistant", content="상담원 연결해 드릴게요")
@@ -145,9 +143,7 @@ def test_webhook_sent_when_escalation_created_by_agent(tenant_with_key, webhook_
 
     session = ChatSession.objects.create(
         tenant_id=tenant.id,
-        visitor_id="v-webhook-agent",
-        visitor_context={},
-    )
+        visitor_id="v-webhook-agent",    )
 
     run_chat_agent(session, "상담원 연결해 주세요")
 

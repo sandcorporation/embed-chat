@@ -1,4 +1,5 @@
 import pytest
+from utils import open_stream
 
 
 @pytest.mark.django_db
@@ -461,14 +462,7 @@ def test_welcome_message_included_in_connected_event(client, tenant_with_key):
     config.welcome_message = "안녕하세요! 무엇을 도와드릴까요?"
     config.save()
 
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": "v-welcome", "visitor_context": {}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    embed_token = token_resp.json()["embed_token"]
-    stream_resp = client.get(f"/api/chat/stream?token={embed_token}")
+    stream_resp = open_stream(client, tenant, "v-welcome")
 
     first_chunk = next(stream_resp.streaming_content).decode()
     assert "event: connected" in first_chunk
@@ -482,14 +476,7 @@ def test_no_welcome_message_when_empty(client, tenant_with_key):
     import json
 
     tenant, raw_key = tenant_with_key
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": "v-no-welcome", "visitor_context": {}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    embed_token = token_resp.json()["embed_token"]
-    stream_resp = client.get(f"/api/chat/stream?token={embed_token}")
+    stream_resp = open_stream(client, tenant, "v-no-welcome")
 
     first_chunk = next(stream_resp.streaming_content).decode()
     payload = json.loads(first_chunk.split("data: ", 1)[1])

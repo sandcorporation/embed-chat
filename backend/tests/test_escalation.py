@@ -6,9 +6,7 @@ def _make_session(tenant, is_hitl=False):
     from apps.chat.models import ChatSession
     return ChatSession.objects.create(
         tenant_id=tenant.id,
-        visitor_id="v-esc",
-        visitor_context={},
-        is_hitl=is_hitl,
+        visitor_id="v-esc",        is_hitl=is_hitl,
     )
 
 
@@ -177,9 +175,7 @@ def test_typing_indicator_publishes_sse_event(client, tenant_with_key, tenant_ag
     tenant, _ = tenant_with_key
     session = ChatSession.objects.create(
         tenant_id=tenant.id,
-        visitor_id="v-typing",
-        visitor_context={},
-        is_hitl=True,
+        visitor_id="v-typing",        is_hitl=True,
     )
     esc = Escalation.objects.create(
         session=session,
@@ -254,9 +250,7 @@ def test_visitor_message_in_hitl_session_publishes_to_hitl_channel(client, tenan
     tenant, _ = tenant_with_key
     session = ChatSession.objects.create(
         tenant_id=tenant.id,
-        visitor_id="v-hitl-visitor-msg",
-        visitor_context={},
-        is_hitl=True,
+        visitor_id="v-hitl-visitor-msg",        is_hitl=True,
     )
 
     pubsub = redis_subscribe(f"hitl:{tenant.id}")

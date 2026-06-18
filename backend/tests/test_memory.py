@@ -144,9 +144,7 @@ def test_memory_extraction_upserts_facts_from_llm(tenant_with_key, fake_text_llm
     tenant, _ = tenant_with_key
     session = ChatSession.objects.create(
         tenant_id=tenant.id,
-        visitor_id="v-mem-task",
-        visitor_context={},
-    )
+        visitor_id="v-mem-task",    )
     ChatMessage.objects.create(session=session, role="user", content="제 이름은 홍길동입니다")
     ChatMessage.objects.create(session=session, role="assistant", content="안녕하세요 홍길동님!")
 

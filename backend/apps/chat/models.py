@@ -6,7 +6,6 @@ class ChatSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant_id = models.UUIDField()
     visitor_id = models.CharField(max_length=255)
-    visitor_context = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     is_hitl = models.BooleanField(default=False)

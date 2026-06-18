@@ -6,9 +6,7 @@ def _make_session(tenant):
     from apps.chat.models import ChatSession
     return ChatSession.objects.create(
         tenant_id=tenant.id,
-        visitor_id="v-hitl",
-        visitor_context={},
-    )
+        visitor_id="v-hitl",    )
 
 
 # ── Issue 55: LLM 경계 Fake가 판정을 통제한다 (tracer bullet) ──────────────────
@@ -164,9 +162,7 @@ def test_hitl_mode_session_does_not_invoke_agent(client, tenant_with_key):
     tenant, _ = tenant_with_key
     session = ChatSession.objects.create(
         tenant_id=tenant.id,
-        visitor_id="v-hitl-block",
-        visitor_context={},
-        is_hitl=True,
+        visitor_id="v-hitl-block",        is_hitl=True,
     )
 
     response = client.post(

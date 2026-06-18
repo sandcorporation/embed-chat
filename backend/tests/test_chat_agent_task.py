@@ -1,18 +1,10 @@
 import pytest
-from utils import get_redis_message
+from utils import get_redis_message, open_stream
 
 
-def _open_session(client, raw_key, visitor_id):
-    """embed token → stream으로 세션을 만들고 session_id를 반환한다."""
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": visitor_id, "visitor_context": {}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    embed_token = token_resp.json()["embed_token"]
-    stream_resp = client.get(f"/api/chat/stream?token={embed_token}")
-    return stream_resp["X-Session-Id"]
+def _open_session(client, tenant, visitor_id):
+    """slug 기반 stream으로 세션을 만들고 session_id를 반환한다 (issue 85)."""
+    return open_stream(client, tenant, visitor_id)["X-Session-Id"]
 
 
 # ── Issue 81: 에이전트 실행을 Celery 태스크로 (gevent 스레드 제거) ──────────────
@@ -27,7 +19,7 @@ def test_send_message_runs_agent_via_task_and_saves_assistant(client, tenant_wit
     from apps.chat.models import ChatSession, ChatMessage
 
     tenant, raw_key = tenant_with_key
-    session_id = _open_session(client, raw_key, "v-task-wiring")
+    session_id = _open_session(client, tenant, "v-task-wiring")
 
     resp = client.post(
         "/api/chat/message",
@@ -54,7 +46,7 @@ def test_agent_failure_publishes_error_and_saves_no_assistant(
     from apps.chat.models import ChatSession, ChatMessage
 
     tenant, raw_key = tenant_with_key
-    session_id = _open_session(client, raw_key, "v-task-error")
+    session_id = _open_session(client, tenant, "v-task-error")
     pubsub = redis_subscribe(f"session:{session_id}")
 
     def _boom(messages):
@@ -95,8 +87,7 @@ def test_locked_session_does_not_run_agent_but_reenqueues(settings, tenant_with_
     settings.CELERY_TASK_ALWAYS_EAGER = False
     tenant, _ = tenant_with_key
     session = ChatSession.objects.create(
-        tenant_id=tenant.id, visitor_id="v-locked", visitor_context={}
-    )
+        tenant_id=tenant.id, visitor_id="v-locked"    )
     sid = str(session.id)
 
     r = redis_lib.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
@@ -126,7 +117,7 @@ def test_lock_released_on_failure_so_session_not_deadlocked(
     from apps.chat import session_lock
 
     tenant, raw_key = tenant_with_key
-    session_id = _open_session(client, raw_key, "v-fail-unlock")
+    session_id = _open_session(client, tenant, "v-fail-unlock")
 
     fake_chat_llm.override = lambda m: (_ for _ in ()).throw(RuntimeError("boom"))
 
@@ -160,7 +151,7 @@ def test_soft_time_limit_is_reported_as_error(client, tenant_with_key, fake_chat
     from celery.exceptions import SoftTimeLimitExceeded
 
     tenant, raw_key = tenant_with_key
-    session_id = _open_session(client, raw_key, "v-soft-timeout")
+    session_id = _open_session(client, tenant, "v-soft-timeout")
     pubsub = redis_subscribe(f"session:{session_id}")
 
     def _timeout(messages):

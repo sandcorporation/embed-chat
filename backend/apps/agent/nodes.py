@@ -77,10 +77,6 @@ def _assemble_lc_messages(state: dict) -> list:
     """
     parts = [state["system_prompt"]]
 
-    if state.get("visitor_context"):
-        ctx_lines = "\n".join(f"- {k}: {v}" for k, v in state["visitor_context"].items())
-        parts.append(f"\n## Visitor Context\n{ctx_lines}")
-
     if state.get("visitor_memories"):
         mem_lines = "\n".join(f"- {m}" for m in state["visitor_memories"])
         parts.append(f"\n## Visitor Memory\n{mem_lines}")

@@ -1,21 +1,9 @@
 from ninja import Router, Schema
 from django.http import StreamingHttpResponse
-from apps.chat.embed_token import create_embed_token, verify_embed_token
 from apps.chat.models import ChatSession, ChatMessage
 from apps.chat.sse import sse_event_stream
-from apps.tenants.auth import tenant_key_auth
 
-embed_router = Router(tags=["embed"])
 chat_router = Router(tags=["chat"])
-
-
-class EmbedTokenIn(Schema):
-    visitor_id: str
-    visitor_context: dict = {}
-
-
-class EmbedTokenOut(Schema):
-    embed_token: str
 
 
 class MessageIn(Schema):
@@ -23,34 +11,20 @@ class MessageIn(Schema):
     content: str
 
 
-@embed_router.post("/token", response={200: EmbedTokenOut}, auth=tenant_key_auth)
-def issue_embed_token(request, body: EmbedTokenIn):
-    tenant = request.auth
-    token = create_embed_token(
-        tenant_id=str(tenant.id),
-        visitor_id=body.visitor_id,
-        visitor_context=body.visitor_context,
-    )
-    return {"embed_token": token}
-
-
 @chat_router.get("/stream")
-def stream(request, token: str):
-    payload = verify_embed_token(token)
-    if not payload:
-        return StreamingHttpResponse(status=401)
-
+def stream(request, slug: str, visitor_id: str = ""):
     from apps.tenants.models import Tenant
-    try:
-        tenant = Tenant.objects.get(id=payload["tenant_id"], is_active=True)
-    except Tenant.DoesNotExist:
-        return StreamingHttpResponse(status=401)
+
+    tenant = Tenant.resolve_slug(slug)
+    if not tenant:
+        return StreamingHttpResponse(status=404)
+    if not visitor_id:
+        return StreamingHttpResponse(status=400)
 
     session, _ = ChatSession.objects.get_or_create(
-        tenant_id=payload["tenant_id"],
-        visitor_id=payload["visitor_id"],
+        tenant_id=tenant.id,
+        visitor_id=visitor_id,
         ended_at=None,
-        defaults={"visitor_context": payload.get("visitor_context", {})},
     )
 
     existing_messages = ChatMessage.objects.filter(session=session).order_by("created_at")

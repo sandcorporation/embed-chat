@@ -16,7 +16,6 @@ class ChatState(TypedDict):
     session_id: str
     tenant_id: str
     visitor_id: str
-    visitor_context: dict
     system_prompt: str
     model_id: str
     user_message: str
@@ -100,7 +99,6 @@ def run_chat_agent(session, user_message: str) -> str:
         "session_id": str(session.id),
         "tenant_id": str(session.tenant_id),
         "visitor_id": session.visitor_id,
-        "visitor_context": session.visitor_context,
         "system_prompt": config.system_prompt,
         "model_id": config.model_id,
         "user_message": user_message,

@@ -5,9 +5,7 @@ def _make_session(tenant, visitor_id):
     from apps.chat.models import ChatSession
     return ChatSession.objects.create(
         tenant_id=tenant.id,
-        visitor_id=visitor_id,
-        visitor_context={},
-    )
+        visitor_id=visitor_id,    )
 
 
 @pytest.mark.django_db
@@ -54,8 +52,8 @@ def test_list_visitor_sessions(client, tenant_with_key, tenant_agent_token):
     from apps.chat.models import ChatSession
 
     tenant, _ = tenant_with_key
-    s1 = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-carol", visitor_context={})
-    s2 = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-carol", visitor_context={})
+    s1 = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-carol")
+    s2 = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-carol")
 
     resp = client.get(
         "/api/tenant/visitors/v-carol/sessions/",
@@ -74,7 +72,7 @@ def test_get_session_messages(client, tenant_with_key, tenant_agent_token):
     from apps.chat.models import ChatSession, ChatMessage
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-dave", visitor_context={})
+    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-dave")
     ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_USER, content="안녕")
     ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_ASSISTANT, content="안녕하세요!")
 
@@ -99,8 +97,7 @@ def test_get_session_messages_404_for_other_tenant(client, tenant_agent_token):
     raw_key2 = secrets.token_urlsafe(32)
     other_tenant = Tenant.objects.create_with_key(name="OtherCo2", raw_key=raw_key2)
     other_session = ChatSession.objects.create(
-        tenant_id=other_tenant.id, visitor_id="v-other2", visitor_context={}
-    )
+        tenant_id=other_tenant.id, visitor_id="v-other2"    )
 
     resp = client.get(
         f"/api/tenant/sessions/{other_session.id}/messages/",

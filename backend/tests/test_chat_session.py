@@ -1,4 +1,5 @@
 import pytest
+from utils import open_stream
 
 
 @pytest.mark.django_db
@@ -19,46 +20,46 @@ def test_langgraph_checkpoint_table_exists(db):
 
 
 @pytest.mark.django_db
-def test_issue_embed_token_and_get_session_id(client, tenant_with_key):
-    tenant, raw_key = tenant_with_key
+def test_visitor_connects_via_slug_without_token(client, tenant_with_key):
+    """slug + visitor_id로 토큰 없이 연결되어 ChatSession이 생성된다 (issue 85)."""
+    from apps.chat.models import ChatSession
 
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": "v-001", "visitor_context": {"name": "Test User"}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    assert token_resp.status_code == 200
-    embed_token = token_resp.json()["embed_token"]
+    tenant, _ = tenant_with_key
+    tenant.slug = "abc-shop"
+    tenant.save(update_fields=["slug"])
 
-    stream_resp = client.get(f"/api/chat/stream?token={embed_token}")
-    assert stream_resp.status_code == 200
-    assert stream_resp["Content-Type"] == "text/event-stream"
-    assert "X-Session-Id" in stream_resp
+    resp = client.get("/api/chat/stream?slug=abc-shop&visitor_id=v-77")
+    assert resp.status_code == 200
+    assert resp["Content-Type"] == "text/event-stream"
+
+    session = ChatSession.objects.get(id=resp["X-Session-Id"])
+    assert str(session.tenant_id) == str(tenant.id)
+    assert session.visitor_id == "v-77"
 
 
 @pytest.mark.django_db
-def test_stream_expired_token_rejected(client):
-    from apps.chat.embed_token import create_embed_token
+def test_stream_unknown_slug_rejected(client):
+    """존재하지 않는 slug로의 연결은 거부된다 (issue 85)."""
+    resp = client.get("/api/chat/stream?slug=no-such-tenant&visitor_id=v-1")
+    assert resp.status_code == 404
 
-    expired = create_embed_token("some-tenant", "v-001", {}, ttl_seconds=-1)
-    response = client.get(f"/api/chat/stream?token={expired}")
-    assert response.status_code == 401
+
+@pytest.mark.django_db
+def test_stream_missing_visitor_id_rejected(client, tenant_with_key):
+    """visitor_id 없이 연결하면 거부된다 (위젯이 Anonymous Visitor ID를 보장)."""
+    tenant, _ = tenant_with_key
+    tenant.slug = "novisitor"
+    tenant.save(update_fields=["slug"])
+    resp = client.get("/api/chat/stream?slug=novisitor&visitor_id=")
+    assert resp.status_code == 400
 
 
 @pytest.mark.django_db
 def test_stream_sends_connected_event_first(client, tenant_with_key):
     import json
 
-    tenant, raw_key = tenant_with_key
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": "v-connected", "visitor_context": {}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    embed_token = token_resp.json()["embed_token"]
-    stream_resp = client.get(f"/api/chat/stream?token={embed_token}")
+    tenant, _ = tenant_with_key
+    stream_resp = open_stream(client, tenant, "v-connected")
 
     # 첫 번째 청크가 'connected' 이벤트여야 한다
     first_chunk = next(stream_resp.streaming_content).decode()
@@ -71,15 +72,8 @@ def test_stream_sends_connected_event_first(client, tenant_with_key):
 def test_chatsession_created_on_stream(client, tenant_with_key):
     from apps.chat.models import ChatSession
 
-    tenant, raw_key = tenant_with_key
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": "v-session-test", "visitor_context": {}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    embed_token = token_resp.json()["embed_token"]
-    client.get(f"/api/chat/stream?token={embed_token}")
+    tenant, _ = tenant_with_key
+    open_stream(client, tenant, "v-session-test")
 
     assert ChatSession.objects.filter(visitor_id="v-session-test").exists()
 
@@ -89,16 +83,8 @@ def test_send_message_via_api_saves_user_message(client, tenant_with_key):
     """POST /api/chat/message → 202 반환 + user 메시지 DB 저장."""
     from apps.chat.models import ChatSession, ChatMessage
 
-    tenant, raw_key = tenant_with_key
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": "v-post-msg", "visitor_context": {}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    embed_token = token_resp.json()["embed_token"]
-    stream_resp = client.get(f"/api/chat/stream?token={embed_token}")
-    session_id = stream_resp["X-Session-Id"]
+    tenant, _ = tenant_with_key
+    session_id = open_stream(client, tenant, "v-post-msg")["X-Session-Id"]
 
     resp = client.post(
         "/api/chat/message",
@@ -131,11 +117,7 @@ def test_get_session_checkpoint_returns_channel_values(client, tenant_with_key, 
     from apps.chat.models import ChatSession
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(
-        tenant_id=tenant.id,
-        visitor_id="v-checkpoint-api",
-        visitor_context={},
-    )
+    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-checkpoint-api")
     run_chat_agent(session, "안녕하세요")
 
     resp = client.get(
@@ -154,11 +136,7 @@ def test_get_session_checkpoint_404_when_no_llm_call(client, tenant_with_key, te
     from apps.chat.models import ChatSession
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(
-        tenant_id=tenant.id,
-        visitor_id="v-no-checkpoint",
-        visitor_context={},
-    )
+    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-no-checkpoint")
 
     resp = client.get(
         f"/api/tenant/sessions/{session.id}/checkpoint",
@@ -176,9 +154,7 @@ def test_get_session_checkpoint_404_for_other_tenant(client, tenant_agent_token)
 
     raw_key2 = secrets.token_urlsafe(32)
     other_tenant = Tenant.objects.create_with_key(name="OtherCo CP", raw_key=raw_key2)
-    other_session = ChatSession.objects.create(
-        tenant_id=other_tenant.id, visitor_id="v-other-cp", visitor_context={}
-    )
+    other_session = ChatSession.objects.create(tenant_id=other_tenant.id, visitor_id="v-other-cp")
 
     resp = client.get(
         f"/api/tenant/sessions/{other_session.id}/checkpoint",
@@ -197,11 +173,7 @@ def test_checkpoint_has_messages_but_not_lc_messages(tenant_with_key):
     from apps.chat.models import ChatSession
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(
-        tenant_id=tenant.id,
-        visitor_id="v-lc-messages",
-        visitor_context={},
-    )
+    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-lc-messages")
     run_chat_agent(session, "안녕하세요")
     run_chat_agent(session, "또 질문이요")
 
@@ -227,11 +199,7 @@ def test_multi_turn_creates_multiple_assistant_replies(tenant_with_key):
     from apps.chat.models import ChatSession, ChatMessage
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(
-        tenant_id=tenant.id,
-        visitor_id="v-multiturn",
-        visitor_context={},
-    )
+    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-multiturn")
 
     run_chat_agent(session, "안녕하세요")
     assert ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_ASSISTANT).count() == 1
@@ -247,10 +215,7 @@ def test_hitl_session_blocks_message_post(client, tenant_with_key):
 
     tenant, _ = tenant_with_key
     session = ChatSession.objects.create(
-        tenant_id=tenant.id,
-        visitor_id="v-hitl-block-post",
-        visitor_context={},
-        is_hitl=True,
+        tenant_id=tenant.id, visitor_id="v-hitl-block-post", is_hitl=True
     )
 
     resp = client.post(
@@ -265,23 +230,12 @@ def test_hitl_session_blocks_message_post(client, tenant_with_key):
 
 @pytest.mark.django_db
 def test_stream_reconnect_reuses_same_session(client, tenant_with_key):
-    """동일 embed_token으로 두 번 stream 요청해도 같은 ChatSession을 재사용한다."""
+    """동일 slug+visitor_id로 두 번 stream 요청해도 같은 ChatSession을 재사용한다."""
     from apps.chat.models import ChatSession
 
-    tenant, raw_key = tenant_with_key
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": "v-reconnect", "visitor_context": {}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    embed_token = token_resp.json()["embed_token"]
-
-    resp1 = client.get(f"/api/chat/stream?token={embed_token}")
-    session_id_1 = resp1["X-Session-Id"]
-
-    resp2 = client.get(f"/api/chat/stream?token={embed_token}")
-    session_id_2 = resp2["X-Session-Id"]
+    tenant, _ = tenant_with_key
+    session_id_1 = open_stream(client, tenant, "v-reconnect")["X-Session-Id"]
+    session_id_2 = open_stream(client, tenant, "v-reconnect")["X-Session-Id"]
 
     assert session_id_1 == session_id_2
     assert ChatSession.objects.filter(visitor_id="v-reconnect").count() == 1
@@ -295,23 +249,12 @@ def test_stream_reconnect_includes_history_in_connected_event(client, tenant_wit
     import json
     from apps.chat.models import ChatSession, ChatMessage
 
-    tenant, raw_key = tenant_with_key
-    session = ChatSession.objects.create(
-        tenant_id=tenant.id,
-        visitor_id="v-history-restore",
-        visitor_context={},
-    )
+    tenant, _ = tenant_with_key
+    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-history-restore")
     ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_USER, content="안녕하세요")
     ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_ASSISTANT, content="무엇을 도와드릴까요?")
 
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": "v-history-restore", "visitor_context": {}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    embed_token = token_resp.json()["embed_token"]
-    stream_resp = client.get(f"/api/chat/stream?token={embed_token}")
+    stream_resp = open_stream(client, tenant, "v-history-restore")
     first_chunk = next(stream_resp.streaming_content).decode()
 
     assert "event: connected" in first_chunk
@@ -328,23 +271,13 @@ def test_stream_reconnect_is_hitl_true_included_in_connected_event(client, tenan
     import json
     from apps.chat.models import ChatSession, ChatMessage
 
-    tenant, raw_key = tenant_with_key
+    tenant, _ = tenant_with_key
     session = ChatSession.objects.create(
-        tenant_id=tenant.id,
-        visitor_id="v-hitl-restore",
-        visitor_context={},
-        is_hitl=True,
+        tenant_id=tenant.id, visitor_id="v-hitl-restore", is_hitl=True
     )
     ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_USER, content="상담원 연결해 주세요")
 
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": "v-hitl-restore", "visitor_context": {}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    embed_token = token_resp.json()["embed_token"]
-    stream_resp = client.get(f"/api/chat/stream?token={embed_token}")
+    stream_resp = open_stream(client, tenant, "v-hitl-restore")
     first_chunk = next(stream_resp.streaming_content).decode()
     payload = json.loads(first_chunk.split("data: ", 1)[1])
 
@@ -358,26 +291,15 @@ def test_stream_reconnect_no_welcome_message_for_existing_session(client, tenant
     from apps.chat.models import ChatSession, ChatMessage
     from apps.tenants.models import TenantConfig
 
-    tenant, raw_key = tenant_with_key
+    tenant, _ = tenant_with_key
     config = TenantConfig.objects.get(tenant=tenant)
     config.welcome_message = "안녕하세요! 무엇을 도와드릴까요?"
     config.save()
 
-    session = ChatSession.objects.create(
-        tenant_id=tenant.id,
-        visitor_id="v-no-welcome-repeat",
-        visitor_context={},
-    )
+    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-no-welcome-repeat")
     ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_USER, content="첫 메시지")
 
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": "v-no-welcome-repeat", "visitor_context": {}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    embed_token = token_resp.json()["embed_token"]
-    stream_resp = client.get(f"/api/chat/stream?token={embed_token}")
+    stream_resp = open_stream(client, tenant, "v-no-welcome-repeat")
     first_chunk = next(stream_resp.streaming_content).decode()
     payload = json.loads(first_chunk.split("data: ", 1)[1])
 
@@ -390,22 +312,14 @@ def test_stream_new_session_no_history_in_connected_event(client, tenant_with_ke
     import json
     from apps.tenants.models import TenantConfig
 
-    tenant, raw_key = tenant_with_key
+    tenant, _ = tenant_with_key
     config = TenantConfig.objects.get(tenant=tenant)
     config.welcome_message = "신규 방문자 환영합니다!"
     config.save()
 
-    token_resp = client.post(
-        "/api/embed/token",
-        {"visitor_id": "v-new-no-history", "visitor_context": {}},
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {raw_key}",
-    )
-    embed_token = token_resp.json()["embed_token"]
-    stream_resp = client.get(f"/api/chat/stream?token={embed_token}")
+    stream_resp = open_stream(client, tenant, "v-new-no-history")
     first_chunk = next(stream_resp.streaming_content).decode()
     payload = json.loads(first_chunk.split("data: ", 1)[1])
 
-    assert payload.get("welcome_message") == "신규 방문자 환영합니다!"
     assert "history" not in payload
-    assert "is_hitl" not in payload
+    assert payload.get("welcome_message") == "신규 방문자 환영합니다!"

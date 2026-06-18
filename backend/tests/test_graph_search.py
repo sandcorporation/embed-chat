@@ -73,8 +73,7 @@ def test_chat_answers_from_graph_local_search(client, tenant_agent_token, tenant
     )
 
     session = ChatSession.objects.create(
-        tenant_id=tenant.id, visitor_id="v-graph-chat", visitor_context={}
-    )
+        tenant_id=tenant.id, visitor_id="v-graph-chat"    )
     run_chat_agent(session, "환불 정책 알려줘")
 
     # 그래프 검색 + 응답 경로가 동작해 assistant 메시지가 저장된다

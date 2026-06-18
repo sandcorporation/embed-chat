@@ -92,9 +92,6 @@ NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "neo4j-test-password")
 # GraphRAG entity/relation extraction model (platform-level, separate from tenant chat model)
 GRAPH_EXTRACTION_MODEL = os.environ.get("GRAPH_EXTRACTION_MODEL", OPEN_ROUTER_DEFAULT_MODEL)
 
-# EmbedToken
-EMBED_TOKEN_TTL_SECONDS = int(os.environ.get("EMBED_TOKEN_TTL_SECONDS", "300"))
-
 # JWT signing key (derived from SECRET_KEY)
 JWT_SIGNING_KEY = SECRET_KEY
 
