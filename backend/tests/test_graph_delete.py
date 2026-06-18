@@ -40,6 +40,24 @@ def test_delete_preserves_shared_entity_removes_unique(client, tenant_agent_toke
 
 
 @pytest.mark.django_db
+def test_delete_removes_document_mentions(client, tenant_agent_token, tenant_with_key):
+    """문서 삭제 시 그 문서의 Entity Mention도 제거된다(orphan 방지)."""
+    from apps.rag.graph_store import GraphStore
+
+    tenant, _ = tenant_with_key
+    r = _upload(client, tenant_agent_token, "del.txt")
+    doc = r.json()["id"]
+    gs = GraphStore(str(tenant.id))
+    assert [m for m in gs.query_mentions() if m["source_document_id"] == doc]
+
+    client.delete(
+        f"/api/tenant/documents/{doc}",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert [m for m in gs.query_mentions() if m["source_document_id"] == doc] == []
+
+
+@pytest.mark.django_db
 def test_delete_sets_graph_stale(client, tenant_agent_token, tenant_with_key):
     """문서 삭제 후 Graph Freshness가 stale이 된다."""
     from apps.rag.graph_store import GraphStore

@@ -46,16 +46,16 @@ def rebuild_communities(tenant_id: str) -> int:
     gs = GraphStore(tenant_id)
     gs.set_freshness("rebuilding")
     try:
-        # 임베딩 없는(기능 이전에 생성된) 엔티티 백필 → 의미 검색 가능
-        missing = gs.entities_without_embedding()
+        # 임베딩 없는(기능 이전에 생성된) Mention 백필 → 의미 검색 가능
+        missing = gs.mentions_without_embedding()
         if missing:
-            gs.ensure_entity_vector_index()
+            gs.ensure_mention_vector_index()
             texts = [
                 f"{m['name']}: {m['description']}".strip(": ") if m["description"] else m["name"]
                 for m in missing
             ]
             for m, emb in zip(missing, get_embeddings(texts)):
-                gs.set_entity_embedding(m["name"], emb)
+                gs.set_mention_embedding(m["mention_id"], emb)
 
         # Entity Resolution + Community를 Entity Mention 기준으로 수행한다(ADR-0010 / issue 80).
         # 같은 표기라도 맥락(임베딩)이 다른 Mention은 분리되어 동음이의가 별도 Community로 남는다.

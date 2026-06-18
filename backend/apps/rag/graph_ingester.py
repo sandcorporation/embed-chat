@@ -69,6 +69,7 @@ def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> 
         (e.name, e.type, e.description) for e in valid_entities
     ]
     gs.ensure_entity_vector_index()
+    gs.ensure_mention_vector_index()
     entity_embeddings = get_embeddings(
         [f"{name}: {desc}".strip(": ") if desc else name for name, _t, desc in entity_specs]
     )

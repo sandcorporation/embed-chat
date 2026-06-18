@@ -107,9 +107,9 @@ def test_graphstore_search_entities_and_neighbors(tenant_with_key):
     tenant, _ = tenant_with_key
     gs = GraphStore(str(tenant.id))
     doc = str(uuid.uuid4())
-    gs.upsert_entity("ZX900PRO", "product", "A foot controller", source_document_id=doc)
-    gs.upsert_entity("FOOTSWITCH", "feature", "a switch", source_document_id=doc)
-    gs.upsert_relation("ZX900PRO", "FOOTSWITCH", "has", source_document_id=doc)
+    gs.upsert_mention(f"{doc}:ZX900PRO", "ZX900PRO", "product", "A foot controller", source_document_id=doc)
+    gs.upsert_mention(f"{doc}:FOOTSWITCH", "FOOTSWITCH", "feature", "a switch", source_document_id=doc)
+    gs.upsert_mention_relation(f"{doc}:ZX900PRO", f"{doc}:FOOTSWITCH", "has", doc)
 
     matched = gs.search_entities("zx900")
     assert any(e["name"] == "ZX900PRO" for e in matched)
@@ -153,7 +153,9 @@ def test_graph_neighbors_endpoint(client, tenant_agent_token, tenant_with_key):
     tenant, _ = tenant_with_key
     gs = GraphStore(str(tenant.id))
     doc = str(uuid.uuid4())
-    gs.upsert_relation("A-ENT", "B-ENT", "rel", source_document_id=doc)
+    gs.upsert_mention(f"{doc}:A-ENT", "A-ENT", source_document_id=doc)
+    gs.upsert_mention(f"{doc}:B-ENT", "B-ENT", source_document_id=doc)
+    gs.upsert_mention_relation(f"{doc}:A-ENT", f"{doc}:B-ENT", "rel", doc)
 
     resp = client.get(
         "/api/tenant/documents/graph/neighbors?entity=A-ENT",

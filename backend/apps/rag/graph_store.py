@@ -23,6 +23,7 @@ def _get_driver():
 
 VECTOR_INDEX = "text_unit_embedding"
 ENTITY_VECTOR_INDEX = "entity_embedding"
+MENTION_VECTOR_INDEX = "mention_embedding"
 
 
 class GraphStore:
@@ -179,10 +180,15 @@ class GraphStore:
         delete_text_units = (
             "MATCH (t:TextUnit {tenant_id: $tenant_id, source_document_id: $doc}) DELETE t"
         )
+        # Mention은 문서 전용(출처 단수)이므로 통째로 삭제한다(공유 없음).
+        delete_mentions = (
+            "MATCH (m:Mention {tenant_id: $tenant_id, source_document_id: $doc}) DETACH DELETE m"
+        )
         with _get_driver().session() as session:
             session.run(prune_relations, tenant_id=self.tenant_id, doc=document_id)
             session.run(prune_entities, tenant_id=self.tenant_id, doc=document_id)
             session.run(delete_text_units, tenant_id=self.tenant_id, doc=document_id)
+            session.run(delete_mentions, tenant_id=self.tenant_id, doc=document_id)
         self.set_freshness("stale")
 
     def ensure_entity_vector_index(self, dimensions: int = 1024) -> None:
@@ -310,6 +316,24 @@ class GraphStore:
         with _get_driver().session() as session:
             return [dict(r) for r in session.run(query, tenant_id=self.tenant_id)]
 
+    def mentions_without_embedding(self) -> list:
+        """임베딩이 없는 Mention(mention_id, name, description)을 반환한다 (백필 대상)."""
+        query = (
+            "MATCH (m:Mention {tenant_id: $tenant_id}) WHERE m.embedding IS NULL "
+            "RETURN m.mention_id AS mention_id, m.name AS name, "
+            "coalesce(m.description, '') AS description"
+        )
+        with _get_driver().session() as session:
+            return [dict(r) for r in session.run(query, tenant_id=self.tenant_id)]
+
+    def set_mention_embedding(self, mention_id: str, embedding: list) -> None:
+        """Mention의 임베딩만 설정한다 (다른 속성은 보존)."""
+        with _get_driver().session() as session:
+            session.run(
+                "MATCH (m:Mention {tenant_id: $tenant_id, mention_id: $mid}) SET m.embedding = $embedding",
+                tenant_id=self.tenant_id, mid=mention_id, embedding=embedding,
+            )
+
     def upsert_mention_relation(
         self, source_id: str, target_id: str, description: str = "", source_document_id: str = ""
     ) -> None:
@@ -387,32 +411,43 @@ class GraphStore:
         with _get_driver().session() as session:
             return [(r["source"], r["target"]) for r in session.run(query, tenant_id=self.tenant_id)]
 
-    def search_entities(self, term: str, top_k: int = 10) -> list:
-        """하이브리드 엔티티 검색 — 어휘 부분일치 ∪ 의미(벡터) top-k, 이름 키로 dedup.
+    def ensure_mention_vector_index(self, dimensions: int = 1024) -> None:
+        """Mention.embedding에 대한 Neo4j 벡터 인덱스를 보장하고 ONLINE까지 대기한다."""
+        create = (
+            f"CREATE VECTOR INDEX {MENTION_VECTOR_INDEX} IF NOT EXISTS "
+            "FOR (m:Mention) ON (m.embedding) "
+            "OPTIONS {indexConfig: {`vector.dimensions`: $dim, "
+            "`vector.similarity_function`: 'cosine'}}"
+        )
+        with _get_driver().session() as session:
+            session.run(create, dim=dimensions)
+            session.run("CALL db.awaitIndexes(30000)")
 
-        어휘는 정확/부분 일치(문서 레이블·정확 이름)를 보장하고, 벡터는 다국어/동의어
-        질의(예: '메뉴'→'OSD Menu')를 보강한다. 둘 다 tenant 스코프.
+    def search_entities(self, term: str, top_k: int = 10) -> list:
+        """resolved Entity 검색 — Mention을 어휘 ∪ 의미(벡터)로 찾아 SAME_AS 클러스터로 dedup한다.
+
+        표기변이(동치)는 하나의 Entity로, 동음이의(맥락 다름)는 별개로 반환한다(ADR-0010).
+        어휘는 정확/부분 일치를, 벡터는 다국어/동의어 질의(예: '메뉴'→'OSD Menu')를 보강한다.
         """
         lexical_q = (
-            "MATCH (e:Entity {tenant_id: $tenant_id}) "
-            "WHERE toLower(e.name) CONTAINS toLower($term) "
-            "   OR toLower(coalesce(e.description, '')) CONTAINS toLower($term) "
-            "RETURN e.name AS name, e.entity_type AS entity_type, "
-            "e.description AS description, "
-            "coalesce(e.source_document_ids, []) AS source_document_ids"
+            "MATCH (m:Mention {tenant_id: $tenant_id}) "
+            "WHERE toLower(m.name) CONTAINS toLower($term) "
+            "   OR toLower(coalesce(m.description, '')) CONTAINS toLower($term) "
+            "RETURN m.mention_id AS mention_id, m.name AS name, m.entity_type AS entity_type, "
+            "m.description AS description, m.source_document_id AS source_document_id"
         )
         vector_q = (
             "CALL db.index.vector.queryNodes($idx, $probe, $emb) YIELD node, score "
             "WHERE node.tenant_id = $tenant_id "
-            "RETURN node.name AS name, node.entity_type AS entity_type, "
-            "node.description AS description, "
-            "coalesce(node.source_document_ids, []) AS source_document_ids "
+            "RETURN node.mention_id AS mention_id, node.name AS name, "
+            "node.entity_type AS entity_type, node.description AS description, "
+            "node.source_document_id AS source_document_id "
             "ORDER BY score DESC LIMIT $top_k"
         )
-        by_name = {}
+        by_mid = {}
         with _get_driver().session() as session:
             for rec in session.run(lexical_q, tenant_id=self.tenant_id, term=term):
-                by_name[rec["name"]] = dict(rec)
+                by_mid[rec["mention_id"]] = dict(rec)
 
             # 의미(벡터) 보강 — 인덱스/임베딩이 없으면 어휘만으로 무중단
             try:
@@ -420,33 +455,52 @@ class GraphStore:
                 query_embedding = get_embeddings([term])[0]
                 for rec in session.run(
                     vector_q,
-                    idx=ENTITY_VECTOR_INDEX,
+                    idx=MENTION_VECTOR_INDEX,
                     probe=max(top_k * 5, 10),
                     emb=query_embedding,
                     tenant_id=self.tenant_id,
                     top_k=top_k,
                 ):
-                    by_name.setdefault(rec["name"], dict(rec))
+                    by_mid.setdefault(rec["mention_id"], dict(rec))
             except Neo4jError:
                 pass
 
-        return list(by_name.values())
+        # SAME_AS 클러스터로 dedup — 동치 Mention들이 하나의 resolved Entity가 된다.
+        parent = {}
+
+        def _find(x):
+            parent.setdefault(x, x)
+            root = x
+            while parent[root] != root:
+                root = parent[root]
+            while parent[x] != root:
+                parent[x], x = root, parent[x]
+            return root
+
+        for a, b in self.query_mention_same_as():
+            parent.setdefault(a, a)
+            parent.setdefault(b, b)
+            parent[_find(a)] = _find(b)
+
+        by_cluster = {}
+        for mid, data in by_mid.items():
+            by_cluster.setdefault(_find(mid), data)
+        return list(by_cluster.values())
 
     def neighbors(self, name: str) -> dict:
-        """해당 Entity와 1홉 이웃, 그 사이 관계를 {nodes, edges}로 반환한다 (tenant 스코프)."""
+        """해당 이름의 Mention과 1홉 이웃, 그 사이 관계를 {nodes, edges}로 반환한다 (tenant 스코프)."""
         nodes_q = (
-            "MATCH (e:Entity {tenant_id: $tenant_id, name: $name}) "
-            "OPTIONAL MATCH (e)-[:RELATED {tenant_id: $tenant_id}]-(n:Entity {tenant_id: $tenant_id}) "
-            "WITH collect(DISTINCT e) + collect(DISTINCT n) AS ns "
+            "MATCH (m:Mention {tenant_id: $tenant_id, name: $name}) "
+            "OPTIONAL MATCH (m)-[:RELATED {tenant_id: $tenant_id}]-(n:Mention {tenant_id: $tenant_id}) "
+            "WITH collect(DISTINCT m) + collect(DISTINCT n) AS ns "
             "UNWIND ns AS node "
             "WITH DISTINCT node WHERE node IS NOT NULL "
             "RETURN node.name AS name, node.entity_type AS entity_type, "
-            "node.description AS description, "
-            "coalesce(node.source_document_ids, []) AS source_document_ids"
+            "node.description AS description, node.source_document_id AS source_document_id"
         )
         edges_q = (
-            "MATCH (a:Entity {tenant_id: $tenant_id})-[r:RELATED {tenant_id: $tenant_id}]->"
-            "(b:Entity {tenant_id: $tenant_id}) "
+            "MATCH (a:Mention {tenant_id: $tenant_id})-[r:RELATED {tenant_id: $tenant_id}]->"
+            "(b:Mention {tenant_id: $tenant_id}) "
             "WHERE a.name = $name OR b.name = $name "
             "RETURN a.name AS source, b.name AS target, r.description AS description"
         )
