@@ -22,6 +22,9 @@ class TenantManager(models.Manager):
 class Tenant(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
+    # 공개 챗봇 URL(/chatbot/{slug}/)용 고유·URL-safe 식별자. 표시명(name)과 분리.
+    # null 허용: 기존/미설정 Tenant는 slug 없이 존재(Postgres에서 NULL은 unique 충돌 안 함).
+    slug = models.CharField(max_length=63, unique=True, null=True, blank=True)
     tenant_key_hash = models.CharField(max_length=64, unique=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -35,6 +38,13 @@ class Tenant(models.Model):
     def verify_key(cls, raw_key: str) -> "Tenant | None":
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
         return cls.objects.filter(tenant_key_hash=key_hash, is_active=True).first()
+
+    @classmethod
+    def resolve_slug(cls, slug: str) -> "Tenant | None":
+        """공개 챗봇 URL의 slug로 활성 Tenant를 조회한다. 미존재·정지 시 None."""
+        if not slug:
+            return None
+        return cls.objects.filter(slug=slug, is_active=True).first()
 
     def reset_key(self) -> str:
         new_key = secrets.token_urlsafe(32)

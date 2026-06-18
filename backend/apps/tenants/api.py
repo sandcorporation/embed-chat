@@ -60,6 +60,10 @@ class TenantConfigIn(Schema):
     welcome_message: str = None
 
 
+class SlugIn(Schema):
+    slug: str
+
+
 class ResetKeyOut(Schema):
     new_tenant_key: str
 
@@ -269,3 +273,18 @@ def reset_tenant_key(request):
     tenant = request.auth.tenant
     new_key = tenant.reset_key()
     return 200, {"new_tenant_key": new_key}
+
+
+@tenant_router.patch("/slug/", response={200: SlugIn})
+def update_slug(request, body: SlugIn):
+    from ninja.errors import HttpError
+    from apps.tenants.slug import is_valid_slug
+
+    if not is_valid_slug(body.slug):
+        raise HttpError(400, "Invalid slug format")
+    tenant = request.auth.tenant
+    if Tenant.objects.filter(slug=body.slug).exclude(id=tenant.id).exists():
+        raise HttpError(400, "Slug already taken")
+    tenant.slug = body.slug
+    tenant.save(update_fields=["slug"])
+    return 200, {"slug": tenant.slug}
