@@ -110,3 +110,76 @@ def test_validate_embed_uses_real_embedding_call(monkeypatch):
     monkeypatch.setattr(provider_models.httpx, "post", fail_post)
     with pytest.raises(provider_models.ProviderError):
         provider_models.validate_provider("embed", "openai", "https://x/v1", "bad", "m")
+
+
+# ── 엔드포인트 POST /api/tenant/providers/models (issue 115) ───────────────────
+
+def _patch_get(monkeypatch, payload, status=200, capture=None):
+    from apps.agent import provider_models
+
+    def fake_get(url, headers=None, timeout=None):
+        if capture is not None:
+            capture["headers"] = headers or {}
+        return _FakeResp(status, payload)
+
+    monkeypatch.setattr(provider_models.httpx, "get", fake_get)
+
+
+@pytest.mark.django_db
+def test_provider_models_endpoint_returns_models(client, tenant_agent_token, monkeypatch):
+    _patch_get(monkeypatch, {"data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]})
+    resp = client.post(
+        "/api/tenant/providers/models",
+        {"kind": "llm", "type": "openai", "base_url": "https://api.openai.com/v1", "api_key": "sk-x"},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["models"] == ["gpt-4o", "gpt-4o-mini"]
+    assert "api_key" not in data and "sk-x" not in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_provider_models_endpoint_masked_key_uses_stored(client, tenant_agent_token, tenant_with_key, monkeypatch):
+    from apps.tenants.models import TenantConfig
+    from apps.tenants.crypto import encrypt_secret
+
+    tenant, _ = tenant_with_key
+    config = TenantConfig.objects.get(tenant=tenant)
+    config.llm_api_key = encrypt_secret("real-stored-key")
+    config.save()
+
+    cap = {}
+    _patch_get(monkeypatch, {"data": [{"id": "m"}]}, capture=cap)
+    resp = client.post(
+        "/api/tenant/providers/models",
+        {"kind": "llm", "type": "openai", "base_url": "https://x/v1", "api_key": "********"},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert resp.status_code == 200
+    assert cap["headers"]["Authorization"] == "Bearer real-stored-key"
+
+
+@pytest.mark.django_db
+def test_provider_models_endpoint_failure_is_4xx(client, tenant_agent_token, monkeypatch):
+    _patch_get(monkeypatch, {}, status=401)
+    resp = client.post(
+        "/api/tenant/providers/models",
+        {"kind": "llm", "type": "openai", "base_url": "https://x/v1", "api_key": "bad"},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert resp.status_code == 400
+    assert "detail" in resp.json()
+
+
+@pytest.mark.django_db
+def test_provider_models_endpoint_requires_auth(client):
+    resp = client.post(
+        "/api/tenant/providers/models",
+        {"kind": "llm", "type": "openai", "base_url": "https://x/v1", "api_key": "x"},
+        content_type="application/json",
+    )
+    assert resp.status_code == 401

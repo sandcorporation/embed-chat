@@ -407,6 +407,50 @@ def update_config(request, body: TenantConfigIn):
     return _config_out(config)
 
 
+class ProviderModelsIn(Schema):
+    kind: str            # "llm" | "embed"
+    type: str            # "" | openai | anthropic | custom
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+
+
+class ProviderModelsOut(Schema):
+    models: List[str]
+
+
+@tenant_router.post("/providers/models", response={200: ProviderModelsOut, 400: dict})
+def provider_models(request, body: ProviderModelsIn):
+    """폼의 현재 provider 값으로 모델 목록을 조회한다(어드민 "모델 불러오기").
+
+    마스크 키(********)면 저장된 키를 복호화해 쓰고, type=""(플랫폼 기본)은 kind로
+    base_url/api_key를 해석한다. 응답엔 모델 id만(키 미노출). 실패 시 400 + 메시지.
+    """
+    from django.conf import settings
+    from apps.agent.provider_models import list_provider_models, ProviderError
+
+    config = request.auth.tenant.config
+    type_, base_url, api_key = body.type, body.base_url, body.api_key
+
+    if type_ == "":
+        if not getattr(settings, "PLATFORM_DEFAULT_PROVIDERS_ENABLED", False):
+            return 400, {"detail": "플랫폼 기본 Provider가 비활성화되어 있습니다"}
+        if body.kind == "embed":
+            base_url, api_key = f"{settings.OLLAMA_BASE_URL}/v1", "ollama"
+        else:
+            base_url, api_key = settings.OPEN_ROUTER_BASE_URL, settings.OPEN_ROUTER_API_KEY
+    elif api_key == _KEY_MASK:
+        from apps.tenants.crypto import decrypt_secret
+        stored = config.embed_api_key if body.kind == "embed" else config.llm_api_key
+        api_key = decrypt_secret(stored) if stored else ""
+
+    try:
+        models = list_provider_models(body.kind, type_, base_url, api_key)
+    except ProviderError as e:
+        return 400, {"detail": str(e)}
+    return 200, {"models": models}
+
+
 @tenant_router.post("/reset-key", response={200: ResetKeyOut})
 def reset_tenant_key(request):
     tenant = request.auth.tenant
