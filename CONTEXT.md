@@ -32,7 +32,19 @@ _Avoid_: EmbedToken(per-session 단기 토큰 — 폐지됨); 토큰(해시는 �
 Tenant를 식별하는 서버사이드 전용 시크릿. 절대 브라우저에 노출되지 않음. 두 가지 용도로만 사용: (1) Tenant 서버가 Identity Verification HMAC API를 호출할 때, (2) TenantAgent 계정을 API로 생성할 때. 어드민 UI 로그인에는 사용하지 않음.
 
 **TenantAgent 자격증명**
-TenantAgent가 어드민 UI에 로그인할 때 사용하는 username/password. Operator가 Tenant를 생성하면 초기 TenantAgent의 username과 임시 password가 1회 화면에 표시된다. 이후 추가 TenantAgent 계정은 TENANT_KEY로 인증된 API 또는 어드민 UI "팀원" 탭에서 생성한다. 로그인 성공 시 JWT를 발급받아 어드민 UI 전 기능에 접근한다.
+TenantAgent가 어드민 UI에 로그인할 때 사용하는 username/password. Operator가 Tenant를 생성하면 초기 TenantAgent의 username과 임시 password가 1회 화면에 표시된다. 이후 추가 TenantAgent 계정은 TENANT_KEY로 인증된 API 또는 어드민 UI "팀원" 탭에서 생성한다. 로그인 성공 시 Access Token + Refresh Token을 발급받아 어드민 UI 전 기능에 접근한다.
+
+**Access Token**
+어드민 UI(Operator·TenantAgent)가 API 호출에 쓰는 단수명 Bearer 자격증명. 탈취 시 피해를 줄이려 짧게(30분) 유지하며 브라우저 sessionStorage에만 둔다. 만료되면 Refresh Token으로 무중단 재발급한다.
+_Avoid_: Refresh Token(장수명·재발급 전용); 24시간 JWT 단일토큰(구 방식 — 폐지)
+
+**Refresh Token**
+Access Token을 재발급받기 위한 장수명 자격증명. httpOnly 쿠키로만 전달되어 JS가 읽을 수 없다(XSS 탈취 차단). 어드민 로그인 세션 1건당 1개 발급되며 사용할 때마다 회전(rotation)되고, 서버가 보관·취소할 수 있다(무상태 JWT와 달리 만료 전 강제 폐기 가능).
+_Avoid_: Access Token(단수명·API 호출용); TENANT_KEY(위젯용 서버사이드 키 — 사람 로그인 세션 아님)
+
+**Session Family**
+한 번의 로그인에서 시작되는, 한 기기(브라우저)의 Refresh Token 회전 체인. "로그인 1회 = Family 1개"이며 한 주체(Operator/TenantAgent)는 여러 기기에서 동시에 여러 Family를 가질 수 있다. 회전·재사용 감지·강제 폐기가 모두 Family 단위라 한 기기의 토큰 도난이 다른 기기 세션으로 번지지 않는다. 최초 로그인 시점 +14일 **절대 만료 상한**을 가지며 회전해도 연장되지 않는다(탈취자가 무한 갱신으로 세션을 영속화하는 것을 막는다). 비밀번호 변경 시 해당 주체의 전 Family가 일괄 폐기된다.
+_Avoid_: 슬라이딩 세션(절대 상한이라 회전이 만료를 밀지 않음); 단일 세션(주체당 여러 기기 Family 공존)
 
 **EmbedToken** _(폐지 예정 — A1)_
 ~~Operator가 발급하는 단기 서명 토큰 (TTL 보유). Tenant 서버가 `TENANT_KEY + VisitorId`로 발급 요청하면 생성됨. iframe src URL에 포함되어 Visitor 브라우저에 전달.~~ 공개 Tenant Slug URL + 선택적 Identity Verification으로 대체됨(ADR-0011). A1 구현 시 항목 제거.
