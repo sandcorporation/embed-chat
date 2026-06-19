@@ -1,18 +1,30 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import OperatorLogin from './pages/OperatorLogin'
 import OperatorDashboard from './pages/OperatorDashboard'
 import TenantLogin from './pages/TenantLogin'
 import TenantDashboard from './pages/TenantDashboard'
+import { getAccess, clearAccess, bootSilentRefresh } from './auth'
 
 export default function App() {
-  const [operatorToken, setOperatorToken] = useState(() => localStorage.getItem('op_token'))
+  // Operator: access는 sessionStorage, refresh는 httpOnly 쿠키(ADR-0013).
+  const [operatorAuthed, setOperatorAuthed] = useState(() => !!getAccess('operator'))
+  const [operatorBooting, setOperatorBooting] = useState(true)
+
   const [agentToken, setAgentToken] = useState(() => localStorage.getItem('agent_token'))
   const [agentUsername, setAgentUsername] = useState(() => localStorage.getItem('agent_username'))
 
-  const handleOperatorLogin = (token) => {
-    localStorage.setItem('op_token', token)
-    setOperatorToken(token)
+  useEffect(() => {
+    // 새로고침으로 sessionStorage access가 사라져도 refresh 쿠키로 무중단 복구
+    bootSilentRefresh('operator')
+      .then((ok) => setOperatorAuthed(ok))
+      .finally(() => setOperatorBooting(false))
+  }, [])
+
+  const handleOperatorLogin = () => setOperatorAuthed(true)
+  const handleOperatorLogout = () => {
+    clearAccess('operator')
+    setOperatorAuthed(false)
   }
 
   const handleTenantLogin = (token, username) => {
@@ -20,11 +32,6 @@ export default function App() {
     localStorage.setItem('agent_username', username)
     setAgentToken(token)
     setAgentUsername(username)
-  }
-
-  const handleOperatorLogout = () => {
-    localStorage.removeItem('op_token')
-    setOperatorToken(null)
   }
 
   const handleTenantLogout = () => {
@@ -40,9 +47,11 @@ export default function App() {
       <Route
         path="/operator"
         element={
-          operatorToken
-            ? <OperatorDashboard token={operatorToken} onLogout={handleOperatorLogout} />
-            : <OperatorLogin onLogin={handleOperatorLogin} />
+          operatorBooting
+            ? null
+            : operatorAuthed
+              ? <OperatorDashboard onLogout={handleOperatorLogout} />
+              : <OperatorLogin onLogin={handleOperatorLogin} />
         }
       />
       <Route

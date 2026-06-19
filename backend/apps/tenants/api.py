@@ -2,12 +2,17 @@ import secrets
 from typing import List
 from ninja import Router, Schema
 from django.contrib.auth import authenticate
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from apps.tenants.auth import (
     create_operator_token, create_tenant_agent_token,
     operator_auth, tenant_key_auth, tenant_agent_auth,
 )
-from apps.tenants.models import Tenant, TenantConfig, TenantAgent
+from apps.tenants.auth_cookies import (
+    set_refresh_cookie, clear_refresh_cookie, cookie_name, OPERATOR, TENANT_AGENT,
+)
+from apps.tenants.refresh_tokens import issue_session, rotate, revoke_family, revoke_all, RefreshRejected
+from apps.tenants.models import Operator, Tenant, TenantConfig, TenantAgent
 
 operator_router = Router(tags=["operator"])
 tenant_router = Router(tags=["tenant"], auth=tenant_agent_auth)
@@ -216,12 +221,27 @@ def change_password(request, body: ChangePasswordIn):
 
 
 @operator_router.post("/auth/login", response={200: LoginOut, 401: dict}, auth=None)
-def login(request, body: LoginIn):
+def login(request, body: LoginIn, response: HttpResponse):
     user = authenticate(username=body.username, password=body.password)
     if not user:
         return 401, {"detail": "Invalid credentials"}
-    token = create_operator_token(user)
-    return 200, {"access_token": token}
+    set_refresh_cookie(response, user, issue_session(user))
+    return 200, {"access_token": create_operator_token(user)}
+
+
+@operator_router.post("/auth/refresh", response={200: LoginOut, 401: dict}, auth=None)
+def operator_refresh(request, response: HttpResponse):
+    raw = request.COOKIES.get(cookie_name(OPERATOR))
+    if not raw:
+        return 401, {"detail": "No refresh token"}
+    try:
+        subject, new_raw = rotate(raw)
+    except RefreshRejected:
+        return 401, {"detail": "Invalid refresh token"}
+    if not isinstance(subject, Operator):
+        return 401, {"detail": "Invalid refresh token"}
+    set_refresh_cookie(response, subject, new_raw)
+    return 200, {"access_token": create_operator_token(subject)}
 
 
 @operator_router.post("/tenants/", response={201: TenantCreatedOut}, auth=operator_auth)

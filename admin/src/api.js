@@ -1,3 +1,5 @@
+import { authFetch, setAccess } from './auth'
+
 const BASE = import.meta.env.VITE_API_BASE || ''
 
 function getHeaders(token) {
@@ -6,45 +8,46 @@ function getHeaders(token) {
   return h
 }
 
+const JSON_HEADERS = { 'Content-Type': 'application/json' }
+
 // ── Operator ─────────────────────────────────────────────────────────────
 
 export async function operatorLogin(username, password) {
   const res = await fetch(`${BASE}/api/operator/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include', // 서버가 내려주는 refresh 쿠키 수신
+    headers: JSON_HEADERS,
     body: JSON.stringify({ username, password }),
   })
   if (!res.ok) throw new Error('Invalid credentials')
+  const data = await res.json()
+  setAccess('operator', data.access_token)
+  return data
+}
+
+export async function listTenants() {
+  const res = await authFetch('operator', '/api/operator/tenants/')
   return res.json()
 }
 
-export async function listTenants(token) {
-  const res = await fetch(`${BASE}/api/operator/tenants/`, { headers: getHeaders(token) })
-  return res.json()
-}
-
-export async function createTenant(token, name) {
-  const res = await fetch(`${BASE}/api/operator/tenants/`, {
+export async function createTenant(name) {
+  const res = await authFetch('operator', '/api/operator/tenants/', {
     method: 'POST',
-    headers: getHeaders(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ name }),
   })
   return res.json()
 }
 
-export async function suspendTenant(token, id) {
-  const res = await fetch(`${BASE}/api/operator/tenants/${id}/suspend`, {
+export async function suspendTenant(id) {
+  const res = await authFetch('operator', `/api/operator/tenants/${id}/suspend`, {
     method: 'PATCH',
-    headers: getHeaders(token),
   })
   return res.json()
 }
 
-export async function deleteTenant(token, id) {
-  await fetch(`${BASE}/api/operator/tenants/${id}`, {
-    method: 'DELETE',
-    headers: getHeaders(token),
-  })
+export async function deleteTenant(id) {
+  await authFetch('operator', `/api/operator/tenants/${id}`, { method: 'DELETE' })
 }
 
 // ── TenantAgent Auth ──────────────────────────────────────────────────────

@@ -2,14 +2,14 @@ import { useState, useEffect } from 'react'
 import { listTenants, createTenant, suspendTenant, deleteTenant } from '../api'
 import { s } from '../styles'
 
-export default function OperatorDashboard({ token, onLogout }) {
+export default function OperatorDashboard({ onLogout }) {
   const [tenants, setTenants] = useState([])
   const [newName, setNewName] = useState('')
   const [createdKey, setCreatedKey] = useState(null)
   const [loading, setLoading] = useState(false)
 
   const load = async () => {
-    const data = await listTenants(token)
+    const data = await listTenants()
     setTenants(data)
   }
 
@@ -19,7 +19,7 @@ export default function OperatorDashboard({ token, onLogout }) {
     e.preventDefault()
     if (!newName.trim()) return
     setLoading(true)
-    const data = await createTenant(token, newName.trim())
+    const data = await createTenant(newName.trim())
     setCreatedKey({ name: data.name, key: data.tenant_key, agentUsername: data.agent_username, agentPassword: data.agent_temp_password })
     setNewName('')
     await load()
@@ -27,13 +27,13 @@ export default function OperatorDashboard({ token, onLogout }) {
   }
 
   const handleSuspend = async (id) => {
-    await suspendTenant(token, id)
+    await suspendTenant(id)
     await load()
   }
 
   const handleDelete = async (id) => {
     if (!confirm('삭제하시겠습니까?')) return
-    await deleteTenant(token, id)
+    await deleteTenant(id)
     await load()
   }
 

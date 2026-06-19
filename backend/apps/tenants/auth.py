@@ -6,7 +6,8 @@ from ninja.security import HttpBearer
 
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+# 단수명 access(ADR-0013): 탈취 시 피해를 줄이려 짧게 유지. 만료는 refresh로 무중단 재발급.
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 
 def create_operator_token(operator) -> str:

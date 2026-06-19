@@ -11,8 +11,8 @@ export default function OperatorLogin({ onLogin }) {
     e.preventDefault()
     setError('')
     try {
-      const { access_token } = await operatorLogin(username, password)
-      onLogin(access_token)
+      await operatorLogin(username, password) // access는 sessionStorage에 저장됨
+      onLogin()
     } catch {
       setError('아이디 또는 비밀번호가 올바르지 않습니다.')
     }
