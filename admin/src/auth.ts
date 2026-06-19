@@ -2,37 +2,42 @@
 // access는 sessionStorage(단수명), refresh는 httpOnly 쿠키(JS가 못 읽음).
 // authFetch가 401 시 1회 투명 refresh→재시도하고, 부팅 시 silent refresh로 access를 복구한다.
 
-const BASE = import.meta.env.VITE_API_BASE || ''
+export type AuthKind = 'operator' | 'agent'
 
-const ACCESS_KEY = { operator: 'op_access', agent: 'agent_access' }
-const REFRESH_PATH = {
+const BASE: string = import.meta.env.VITE_API_BASE || ''
+
+const ACCESS_KEY: Record<AuthKind, string> = { operator: 'op_access', agent: 'agent_access' }
+const REFRESH_PATH: Record<AuthKind, string> = {
   operator: '/api/operator/auth/refresh',
   agent: '/api/tenant/agents/auth/refresh',
 }
 
 // access 갱신 구독자(kind별). silent refresh로 토큰이 바뀌면 SSE 재오픈 등에 알린다.
-const accessListeners = { operator: new Set(), agent: new Set() }
+const accessListeners: Record<AuthKind, Set<() => void>> = {
+  operator: new Set(),
+  agent: new Set(),
+}
 
-export function onAccessChange(kind, cb) {
+export function onAccessChange(kind: AuthKind, cb: () => void): () => void {
   accessListeners[kind].add(cb)
   return () => accessListeners[kind].delete(cb)
 }
 
-function notifyAccessChange(kind) {
+function notifyAccessChange(kind: AuthKind): void {
   for (const cb of accessListeners[kind]) cb()
 }
 
-export function getAccess(kind) {
+export function getAccess(kind: AuthKind): string | null {
   return sessionStorage.getItem(ACCESS_KEY[kind])
 }
-export function setAccess(kind, token) {
+export function setAccess(kind: AuthKind, token: string): void {
   sessionStorage.setItem(ACCESS_KEY[kind], token)
 }
-export function clearAccess(kind) {
+export function clearAccess(kind: AuthKind): void {
   sessionStorage.removeItem(ACCESS_KEY[kind])
 }
 
-export async function refresh(kind) {
+export async function refresh(kind: AuthKind): Promise<boolean> {
   const res = await fetch(`${BASE}${REFRESH_PATH[kind]}`, {
     method: 'POST',
     credentials: 'include', // refresh 쿠키 동봉
@@ -47,7 +52,7 @@ export async function refresh(kind) {
   return true
 }
 
-export async function authFetch(kind, path, opts = {}) {
+export async function authFetch(kind: AuthKind, path: string, opts: RequestInit = {}): Promise<Response> {
   const send = () =>
     fetch(`${BASE}${path}`, {
       ...opts,
@@ -62,7 +67,7 @@ export async function authFetch(kind, path, opts = {}) {
   return res
 }
 
-export async function bootSilentRefresh(kind) {
+export async function bootSilentRefresh(kind: AuthKind): Promise<boolean> {
   if (getAccess(kind)) return true
   return refresh(kind)
 }
