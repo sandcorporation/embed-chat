@@ -15,8 +15,8 @@ const baseConfig = {
 }
 
 function mockConfig(overrides = {}) {
-  api.getTenantConfig.mockResolvedValue({ ...baseConfig, ...overrides })
-  api.updateTenantConfig.mockResolvedValue({})
+  vi.mocked(api.getTenantConfig).mockResolvedValue({ ...baseConfig, ...overrides } as any)
+  vi.mocked(api.updateTenantConfig).mockResolvedValue({} as any)
 }
 
 async function save() {
@@ -102,7 +102,7 @@ describe('ConfigTab — Embedding Provider', () => {
 
 describe('ConfigTab — Tenant Slug', () => {
   it('slug 입력 후 Slug 저장을 누르면 updateTenantSlug를 호출한다', async () => {
-    api.updateTenantSlug.mockResolvedValue({ slug: 'abc-shop' })
+    vi.mocked(api.updateTenantSlug).mockResolvedValue({ slug: 'abc-shop' } as any)
     render(<ConfigTab />)
     await userEvent.type(await screen.findByLabelText('Tenant Slug'), 'abc-shop')
     await userEvent.click(screen.getByRole('button', { name: /Slug 저장/ }))

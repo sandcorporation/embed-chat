@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { listMemories, updateMemory, deleteMemory } from '../api'
 import { s } from '../styles'
+import type { MemoryOut } from '../generated/model'
 
 export default function MemoryTab() {
   const [visitorId, setVisitorId] = useState('')
-  const [memories, setMemories] = useState([])
+  const [memories, setMemories] = useState<MemoryOut[]>([])
   const [searched, setSearched] = useState(false)
-  const [editing, setEditing] = useState(null)
+  const [editing, setEditing] = useState<MemoryOut | null>(null)
 
   const search = async () => {
     if (!visitorId.trim()) return
@@ -15,12 +16,12 @@ export default function MemoryTab() {
     setSearched(true)
   }
 
-  const handleDelete = async (memId) => {
+  const handleDelete = async (memId: string) => {
     await deleteMemory(visitorId, memId)
     setMemories(m => m.filter(x => x.id !== memId))
   }
 
-  const handleUpdate = async (mem) => {
+  const handleUpdate = async (mem: MemoryOut) => {
     const updated = await updateMemory(visitorId, mem.id, { key: mem.key, value: mem.value })
     setMemories(m => m.map(x => x.id === mem.id ? updated : x))
     setEditing(null)
@@ -56,18 +57,18 @@ export default function MemoryTab() {
                   <tr key={m.id}>
                     <td style={s.td}>
                       {editing?.id === m.id
-                        ? <input style={s.input} value={editing.key} onChange={e => setEditing(x => ({...x, key: e.target.value}))} />
+                        ? <input style={s.input} value={editing.key} onChange={e => setEditing(x => x ? {...x, key: e.target.value} : x)} />
                         : m.key}
                     </td>
                     <td style={s.td}>
                       {editing?.id === m.id
-                        ? <input style={s.input} value={editing.value} onChange={e => setEditing(x => ({...x, value: e.target.value}))} />
+                        ? <input style={s.input} value={editing.value} onChange={e => setEditing(x => x ? {...x, value: e.target.value} : x)} />
                         : m.value}
                     </td>
                     <td style={s.td}>
                       {editing?.id === m.id
                         ? <>
-                            <button style={s.btnSm} onClick={() => handleUpdate(editing)}>저장</button>
+                            <button style={s.btnSm} onClick={() => handleUpdate(editing!)}>저장</button>
                             <button style={{ ...s.btnSm, marginLeft: 4 }} onClick={() => setEditing(null)}>취소</button>
                           </>
                         : <>

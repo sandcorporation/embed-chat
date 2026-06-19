@@ -36,7 +36,7 @@ export default function App() {
     setOperatorAuthed(false)
   }
 
-  const handleTenantLogin = (username) => {
+  const handleTenantLogin = (username: string) => {
     localStorage.setItem('agent_username', username)
     setAgentUsername(username)
     setAgentAuthed(true)

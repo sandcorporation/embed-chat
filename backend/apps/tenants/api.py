@@ -38,6 +38,7 @@ class TenantOut(Schema):
     id: str
     name: str
     is_active: bool
+    created_at: str
 
 
 class TenantCreatedOut(Schema):
@@ -316,7 +317,7 @@ def create_tenant(request, body: TenantIn):
 @operator_router.get("/tenants/", response=List[TenantOut], auth=operator_auth)
 def list_tenants(request):
     return [
-        {"id": str(t.id), "name": t.name, "is_active": t.is_active}
+        {"id": str(t.id), "name": t.name, "is_active": t.is_active, "created_at": t.created_at.isoformat()}
         for t in Tenant.objects.all()
     ]
 
@@ -326,7 +327,7 @@ def suspend_tenant(request, tenant_id: str):
     tenant = get_object_or_404(Tenant, id=tenant_id)
     tenant.is_active = False
     tenant.save()
-    return {"id": str(tenant.id), "name": tenant.name, "is_active": tenant.is_active}
+    return {"id": str(tenant.id), "name": tenant.name, "is_active": tenant.is_active, "created_at": tenant.created_at.isoformat()}
 
 
 @operator_router.delete("/tenants/{tenant_id}", response={204: None}, auth=operator_auth)

@@ -1,16 +1,21 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, ChangeEvent } from 'react'
 import { listEscalations, claimEscalation, sendEscalationMessage, resolveEscalation, openEscalationStream, sendTypingIndicator, getEscalationMessages } from '../api'
+import type { StreamHandle } from '../api'
 import { s } from '../styles'
+import type { EscalationOut } from '../generated/model'
 
-const STATUS_LABEL = { pending: '대기 중', claimed: '진행 중', resolved: '완료' }
-const STATUS_COLOR = { pending: '#e53e3e', claimed: '#d69e2e', resolved: '#38a169' }
+const STATUS_LABEL: Record<string, string> = { pending: '대기 중', claimed: '진행 중', resolved: '완료' }
+const STATUS_COLOR: Record<string, string> = { pending: '#e53e3e', claimed: '#d69e2e', resolved: '#38a169' }
 
-const ROLE_LABEL = { user: 'Visitor', assistant: 'AI', human_agent: '상담원' }
-const ROLE_ALIGN = { user: 'flex-start', assistant: 'flex-end', human_agent: 'flex-end' }
-const ROLE_BG = { user: '#edf2f7', assistant: '#ebf8ff', human_agent: '#f0fff4' }
+const ROLE_LABEL: Record<string, string> = { user: 'Visitor', assistant: 'AI', human_agent: '상담원' }
+const ROLE_ALIGN: Record<string, string> = { user: 'flex-start', assistant: 'flex-end', human_agent: 'flex-end' }
+const ROLE_BG: Record<string, string> = { user: '#edf2f7', assistant: '#ebf8ff', human_agent: '#f0fff4' }
 
-function ChatHistory({ messages }) {
-  const bottomRef = useRef(null)
+// API 메시지(EscalationMessageOut)와 로컬 추가 메시지(id 없음)를 함께 담는다.
+type ChatMsg = { id?: string; role: string; content: string; created_at?: string }
+
+function ChatHistory({ messages }: { messages: ChatMsg[] }) {
+  const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -42,11 +47,11 @@ function ChatHistory({ messages }) {
   )
 }
 
-function EscalationCard({ esc, onUpdate, incomingMessage }) {
+function EscalationCard({ esc, onUpdate, incomingMessage }: { esc: EscalationOut; onUpdate: () => void; incomingMessage: ChatMsg | null }) {
   const [msg, setMsg] = useState('')
   const [sending, setSending] = useState(false)
-  const [messages, setMessages] = useState([])
-  const typingDebounceRef = useRef(null)
+  const [messages, setMessages] = useState<ChatMsg[]>([])
+  const typingDebounceRef = useRef<number | undefined>(undefined)
 
   useEffect(() => {
     getEscalationMessages(esc.id).then(data => {
@@ -66,10 +71,10 @@ function EscalationCard({ esc, onUpdate, incomingMessage }) {
     else if (res.status === 409) alert('이미 다른 상담원이 수락한 세션입니다.')
   }
 
-  const handleMsgChange = (e) => {
+  const handleMsgChange = (e: ChangeEvent<HTMLInputElement>) => {
     setMsg(e.target.value)
     clearTimeout(typingDebounceRef.current)
-    typingDebounceRef.current = setTimeout(() => {
+    typingDebounceRef.current = window.setTimeout(() => {
       sendTypingIndicator(esc.id)
     }, 500)
   }
@@ -154,10 +159,10 @@ function EscalationCard({ esc, onUpdate, incomingMessage }) {
 }
 
 export default function HitlTab() {
-  const [escalations, setEscalations] = useState([])
+  const [escalations, setEscalations] = useState<EscalationOut[]>([])
   const [loading, setLoading] = useState(true)
-  const [incomingBySession, setIncomingBySession] = useState({})
-  const esRef = useRef(null)
+  const [incomingBySession, setIncomingBySession] = useState<Record<string, ChatMsg>>({})
+  const esRef = useRef<StreamHandle | null>(null)
 
   const refresh = () => {
     listEscalations().then(data => {
@@ -171,7 +176,7 @@ export default function HitlTab() {
 
     esRef.current = openEscalationStream((event) => {
       if (event.type === 'visitor_message') {
-        const msg = {
+        const msg: ChatMsg = {
           role: 'user',
           content: event.content,
           created_at: new Date().toISOString(),
@@ -201,7 +206,6 @@ export default function HitlTab() {
           <EscalationCard
             key={esc.id}
             esc={esc}
-           
             onUpdate={refresh}
             incomingMessage={incomingBySession[esc.session_id] ?? null}
           />

@@ -1,21 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, ChangeEvent } from 'react'
 import { listDocuments, uploadDocument, updateDocument, deleteDocument, listDocumentChunks, getGraphStatus, rebuildGraph } from '../api'
 import { s } from '../styles'
+import type { DocumentOut, ChunkOut } from '../generated/model'
 
-const STATUS_COLORS = { pending: '#ed8936', processing: '#4299e1', ready: '#48bb78', failed: '#fc8181' }
-const FRESHNESS_LABEL = { fresh: '최신', stale: '재구축 필요', rebuilding: '재구축 중…' }
-const FRESHNESS_COLOR = { fresh: '#48bb78', stale: '#ed8936', rebuilding: '#4299e1' }
+const STATUS_COLORS: Record<string, string> = { pending: '#ed8936', processing: '#4299e1', ready: '#48bb78', failed: '#fc8181' }
+const FRESHNESS_LABEL: Record<string, string> = { fresh: '최신', stale: '재구축 필요', rebuilding: '재구축 중…' }
+const FRESHNESS_COLOR: Record<string, string> = { fresh: '#48bb78', stale: '#ed8936', rebuilding: '#4299e1' }
+
+type ChunkState = ChunkOut[] | 'loading' | undefined
 
 export default function DocumentsTab() {
-  const [docs, setDocs] = useState([])
+  const [docs, setDocs] = useState<DocumentOut[]>([])
   const [uploading, setUploading] = useState(false)
-  const fileRef = useRef()
-  const [pendingFile, setPendingFile] = useState(null)   // 업로드 대기 중인 File
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)   // 업로드 대기 중인 File
   const [uploadLabel, setUploadLabel] = useState('')      // 업로드 모달의 레이블 값
-  const [editingId, setEditingId] = useState(null)        // 인라인 편집 중인 문서 id
+  const [editingId, setEditingId] = useState<string | null>(null)        // 인라인 편집 중인 문서 id
   const [editLabel, setEditLabel] = useState('')
-  const [expandedChunks, setExpandedChunks] = useState({})  // docId → chunks[] | 'loading'
-  const [graphFreshness, setGraphFreshness] = useState(null)
+  const [expandedChunks, setExpandedChunks] = useState<Record<string, ChunkState>>({})  // docId → chunks[] | 'loading'
+  const [graphFreshness, setGraphFreshness] = useState<string | null>(null)
 
   const loadGraphStatus = async () => {
     try {
@@ -42,8 +45,8 @@ export default function DocumentsTab() {
     return () => clearInterval(interval)
   }, [])
 
-  const handleFileSelect = (e) => {
-    const file = e.target.files[0]
+  const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
     if (!file) return
     setPendingFile(file)
     setUploadLabel(file.name)  // 파일명을 레이블 기본값으로 미리 채움
@@ -64,12 +67,12 @@ export default function DocumentsTab() {
     cancelUpload()
   }
 
-  const startEdit = (doc) => {
+  const startEdit = (doc: DocumentOut) => {
     setEditingId(doc.id)
     setEditLabel(doc.name)
   }
 
-  const saveEdit = async (id) => {
+  const saveEdit = async (id: string) => {
     const name = editLabel.trim()
     if (!name) return
     await updateDocument(id, name)
@@ -78,14 +81,14 @@ export default function DocumentsTab() {
     await load()
   }
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('삭제하시겠습니까?')) return
     await deleteDocument(id)
     setExpandedChunks(prev => { const n = { ...prev }; delete n[id]; return n })
     await load()
   }
 
-  const toggleChunks = async (docId) => {
+  const toggleChunks = async (docId: string) => {
     if (expandedChunks[docId] !== undefined) {
       setExpandedChunks(prev => { const n = { ...prev }; delete n[docId]; return n })
       return
@@ -165,7 +168,9 @@ export default function DocumentsTab() {
           </tr>
         </thead>
         <tbody>
-          {docs.map(d => (
+          {docs.map(d => {
+            const chunkState = expandedChunks[d.id]
+            return (
             <React.Fragment key={d.id}>
               <tr>
                 <td style={s.td}>
@@ -211,22 +216,22 @@ export default function DocumentsTab() {
                     onClick={() => toggleChunks(d.id)}
                     data-testid={`chunks-toggle-${d.id}`}
                   >
-                    {expandedChunks[d.id] !== undefined ? '청크 닫기' : '청크 보기'}
+                    {chunkState !== undefined ? '청크 닫기' : '청크 보기'}
                   </button>
                   <button style={s.btnDanger} onClick={() => handleDelete(d.id)}>삭제</button>
                 </td>
               </tr>
-              {expandedChunks[d.id] !== undefined && (
+              {chunkState !== undefined && (
                 <tr>
                   <td colSpan={3} style={{ ...s.td, background: '#f7fafc', padding: 0 }}>
                     <div style={{ padding: 12 }} data-testid={`chunks-panel-${d.id}`}>
-                      {expandedChunks[d.id] === 'loading' && (
+                      {chunkState === 'loading' && (
                         <div style={{ color: '#718096', fontSize: 13 }}>청크 로딩 중...</div>
                       )}
-                      {Array.isArray(expandedChunks[d.id]) && expandedChunks[d.id].length === 0 && (
+                      {Array.isArray(chunkState) && chunkState.length === 0 && (
                         <div style={{ color: '#a0aec0', fontSize: 13 }}>청크 없음</div>
                       )}
-                      {Array.isArray(expandedChunks[d.id]) && expandedChunks[d.id].map(c => (
+                      {Array.isArray(chunkState) && chunkState.map(c => (
                         <div key={c.chunk_index} data-testid="chunk-item" style={{ marginBottom: 8, fontSize: 12, borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
                           <span style={{ fontWeight: 700, color: '#4299e1', marginRight: 8 }}>#{c.chunk_index}</span>
                           <span data-testid="chunk-content" style={{ color: '#4a5568' }}>{c.content.slice(0, 200)}{c.content.length > 200 ? '…' : ''}</span>
@@ -237,7 +242,8 @@ export default function DocumentsTab() {
                 </tr>
               )}
             </React.Fragment>
-          ))}
+            )
+          })}
           {docs.length === 0 && (
             <tr><td colSpan={3} style={{ ...s.td, textAlign: 'center', color: '#a0aec0' }}>문서가 없습니다</td></tr>
           )}

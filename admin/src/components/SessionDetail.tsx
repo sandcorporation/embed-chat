@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { getSessionMessages, getSessionCheckpoint } from '../api'
 import { s } from '../styles'
+import type { SessionMessageOut } from '../generated/model'
 
-const ROLE_LABEL = { user: 'Visitor', assistant: 'AI', human_agent: '상담원' }
-const ROLE_ALIGN = { user: 'flex-end', assistant: 'flex-start', human_agent: 'flex-start' }
-const ROLE_BG = { user: '#4299e1', assistant: '#edf2f7', human_agent: '#9f7aea' }
-const ROLE_COLOR = { user: '#fff', assistant: '#2d3748', human_agent: '#fff' }
+const ROLE_LABEL: Record<string, string> = { user: 'Visitor', assistant: 'AI', human_agent: '상담원' }
+const ROLE_ALIGN: Record<string, string> = { user: 'flex-end', assistant: 'flex-start', human_agent: 'flex-start' }
+const ROLE_BG: Record<string, string> = { user: '#4299e1', assistant: '#edf2f7', human_agent: '#9f7aea' }
+const ROLE_COLOR: Record<string, string> = { user: '#fff', assistant: '#2d3748', human_agent: '#fff' }
 
-function ChatHistory({ messages }) {
-  const bottomRef = useRef(null)
+function ChatHistory({ messages }: { messages: SessionMessageOut[] }) {
+  const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -49,8 +50,8 @@ function ChatHistory({ messages }) {
   )
 }
 
-function CheckpointView({ sessionId }) {
-  const [data, setData] = useState(undefined)
+function CheckpointView({ sessionId }: { sessionId: string }) {
+  const [data, setData] = useState<unknown>(undefined)
 
   useEffect(() => {
     getSessionCheckpoint(sessionId).then(setData)
@@ -79,9 +80,9 @@ function CheckpointView({ sessionId }) {
   )
 }
 
-export default function SessionDetail({ sessionId, onBack }) {
+export default function SessionDetail({ sessionId, onBack }: { sessionId: string; onBack: () => void }) {
   const [subTab, setSubTab] = useState('history')
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState<SessionMessageOut[]>([])
 
   useEffect(() => {
     getSessionMessages(sessionId).then(data => {
@@ -109,7 +110,7 @@ export default function SessionDetail({ sessionId, onBack }) {
             }}
             onClick={() => setSubTab(t)}
           >
-            {{ history: '대화 내역', checkpoint: 'Checkpoint' }[t]}
+            {({ history: '대화 내역', checkpoint: 'Checkpoint' } as Record<string, string>)[t]}
           </button>
         ))}
       </div>

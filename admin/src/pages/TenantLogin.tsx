@@ -1,14 +1,14 @@
-import { useState } from 'react'
+import { useState, FormEvent } from 'react'
 import { tenantAgentLogin } from '../api'
 import { s } from '../styles'
 
-export default function TenantLogin({ onLogin }) {
+export default function TenantLogin({ onLogin }: { onLogin: (username: string) => void }) {
   const [tenantName, setTenantName] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (!tenantName.trim() || !username.trim() || !password) {
       setError('모든 필드를 입력하세요.')

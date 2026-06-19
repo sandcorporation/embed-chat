@@ -1,13 +1,13 @@
-import { useState } from 'react'
+import { useState, FormEvent } from 'react'
 import { operatorLogin } from '../api'
 import { s } from '../styles'
 
-export default function OperatorLogin({ onLogin }) {
+export default function OperatorLogin({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
     try {

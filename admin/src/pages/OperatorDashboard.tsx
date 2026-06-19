@@ -1,11 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, FormEvent } from 'react'
 import { listTenants, createTenant, suspendTenant, deleteTenant } from '../api'
 import { s } from '../styles'
+import type { TenantOut } from '../generated/model'
 
-export default function OperatorDashboard({ onLogout, onLogoutAll }) {
-  const [tenants, setTenants] = useState([])
+type CreatedKey = { name: string; key: string; agentUsername: string; agentPassword: string }
+
+export default function OperatorDashboard({ onLogout, onLogoutAll }: { onLogout: () => void; onLogoutAll: () => void }) {
+  const [tenants, setTenants] = useState<TenantOut[]>([])
   const [newName, setNewName] = useState('')
-  const [createdKey, setCreatedKey] = useState(null)
+  const [createdKey, setCreatedKey] = useState<CreatedKey | null>(null)
   const [loading, setLoading] = useState(false)
 
   const load = async () => {
@@ -15,7 +18,7 @@ export default function OperatorDashboard({ onLogout, onLogoutAll }) {
 
   useEffect(() => { load() }, [])
 
-  const handleCreate = async (e) => {
+  const handleCreate = async (e: FormEvent) => {
     e.preventDefault()
     if (!newName.trim()) return
     setLoading(true)
@@ -26,12 +29,12 @@ export default function OperatorDashboard({ onLogout, onLogoutAll }) {
     setLoading(false)
   }
 
-  const handleSuspend = async (id) => {
+  const handleSuspend = async (id: string) => {
     await suspendTenant(id)
     await load()
   }
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('삭제하시겠습니까?')) return
     await deleteTenant(id)
     await load()

@@ -7,7 +7,7 @@ import AgentsTab from '../components/AgentsTab'
 import HitlTab from '../components/HitlTab'
 import { s } from '../styles'
 
-export default function TenantDashboard({ username, onLogout, onLogoutAll }) {
+export default function TenantDashboard({ username, onLogout, onLogoutAll }: { username: string | null; onLogout: () => void; onLogoutAll: () => void }) {
   const [tab, setTab] = useState('documents')
 
   return (

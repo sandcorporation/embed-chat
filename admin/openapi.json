@@ -776,6 +776,10 @@
       },
       "TenantOut": {
         "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -792,7 +796,8 @@
         "required": [
           "id",
           "name",
-          "is_active"
+          "is_active",
+          "created_at"
         ],
         "title": "TenantOut",
         "type": "object"

@@ -2,10 +2,11 @@ import { useState, useCallback } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import { searchGraph, graphNeighbors } from '../api'
 import { s } from '../styles'
+import type { GraphNode, GraphEdge } from '../generated/model'
 
 // 백엔드 {nodes:[{name,...}], edges:[{source,target,description}]} →
 // react-force-graph {nodes:[{id,...}], links:[{source,target,...}]}
-function toGraphData(nodes, edges) {
+function toGraphData(nodes: GraphNode[], edges: GraphEdge[]) {
   return {
     nodes: nodes.map(n => ({ id: n.name, ...n })),
     links: edges.map(e => ({ source: e.source, target: e.target, description: e.description })),
@@ -16,13 +17,14 @@ export default function KnowledgeGraphTab() {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
-  const [nodes, setNodes] = useState([])   // [{name,type,description,source_document_ids}]
-  const [edges, setEdges] = useState([])   // [{source,target,description}]
-  const [selected, setSelected] = useState(null)
+  const [nodes, setNodes] = useState<GraphNode[]>([])
+  const [edges, setEdges] = useState<GraphEdge[]>([])
+  const [selected, setSelected] = useState<GraphNode | null>(null)
 
-  const mergeSubgraph = useCallback((subNodes, subEdges) => {
+  const mergeSubgraph = useCallback((subNodes: GraphNode[], subEdges: GraphEdge[]) => {
     setNodes(prev => {
-      const byName = Object.fromEntries(prev.map(n => [n.name, n]))
+      const byName: Record<string, GraphNode> = {}
+      for (const n of prev) byName[n.name] = n
       for (const n of subNodes) byName[n.name] = n
       return Object.values(byName)
     })
@@ -37,7 +39,7 @@ export default function KnowledgeGraphTab() {
     })
   }, [])
 
-  const runSearch = async (q) => {
+  const runSearch = async (q: string) => {
     if (!q.trim()) return
     setLoading(true)
     const data = await searchGraph(q)
@@ -48,7 +50,7 @@ export default function KnowledgeGraphTab() {
     setLoading(false)
   }
 
-  const expandNode = async (name) => {
+  const expandNode = async (name: string) => {
     setSelected(nodes.find(n => n.name === name) || { name })
     const data = await graphNeighbors(name)
     mergeSubgraph(data.nodes || [], data.edges || [])
@@ -63,7 +65,7 @@ export default function KnowledgeGraphTab() {
           placeholder="엔티티를 검색하세요 (이름·설명)"
           value={query}
           onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && runSearch(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && runSearch(e.currentTarget.value)}
         />
         <button style={s.btn} onClick={() => runSearch(query)} disabled={loading}>
           {loading ? '검색 중…' : '검색'}
@@ -93,7 +95,7 @@ export default function KnowledgeGraphTab() {
               linkDirectionalArrowLength={4}
               width={560}
               height={420}
-              onNodeClick={(n) => expandNode(n.id)}
+              onNodeClick={(n: any) => expandNode(n.id)}
             />
           </div>
 
@@ -124,11 +126,6 @@ export default function KnowledgeGraphTab() {
                 <div data-testid="kg-detail-name" style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{selected.name}</div>
                 <div style={{ fontSize: 12, color: '#718096', marginBottom: 6 }}>{selected.entity_type}</div>
                 <div style={{ fontSize: 13, color: '#4a5568', whiteSpace: 'pre-wrap' }}>{selected.description}</div>
-                {selected.source_document_ids && selected.source_document_ids.length > 0 && (
-                  <div style={{ fontSize: 11, color: '#a0aec0', marginTop: 8 }}>
-                    출처 문서 {selected.source_document_ids.length}개
-                  </div>
-                )}
               </div>
             )}
           </div>

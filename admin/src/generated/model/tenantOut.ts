@@ -6,6 +6,7 @@
  */
 
 export interface TenantOut {
+  created_at: string;
   id: string;
   is_active: boolean;
   name: string;

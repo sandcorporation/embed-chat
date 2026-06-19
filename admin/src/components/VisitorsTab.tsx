@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, CSSProperties, ReactNode } from 'react'
 import { listVisitors, listVisitorSessions, listMemories, updateMemory, deleteMemory } from '../api'
 import SessionDetail from './SessionDetail'
 import { s } from '../styles'
+import type { VisitorOut, VisitorSessionOut, MemoryOut } from '../generated/model'
 
-const HITL_BADGE = {
+const HITL_BADGE: CSSProperties = {
   display: 'inline-block',
   fontSize: 10,
   fontWeight: 700,
@@ -14,11 +15,11 @@ const HITL_BADGE = {
   marginLeft: 6,
 }
 
-function VisitorList({ selectedId, onSelect }) {
+function VisitorList({ selectedId, onSelect }: { selectedId: string | null; onSelect: (id: string) => void }) {
   const [search, setSearch] = useState('')
-  const [visitors, setVisitors] = useState([])
+  const [visitors, setVisitors] = useState<VisitorOut[]>([])
 
-  const load = async (q) => {
+  const load = async (q?: string) => {
     const data = await listVisitors(q || undefined)
     setVisitors(Array.isArray(data) ? data : [])
   }
@@ -33,7 +34,7 @@ function VisitorList({ selectedId, onSelect }) {
           placeholder="visitor_id 검색"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && load(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && load(e.currentTarget.value)}
         />
         <button style={{ ...s.btnSm, flexShrink: 0 }} onClick={() => load(search)}>검색</button>
       </div>
@@ -62,8 +63,8 @@ function VisitorList({ selectedId, onSelect }) {
   )
 }
 
-function SessionList({ visitorId, onSelectSession }) {
-  const [sessions, setSessions] = useState([])
+function SessionList({ visitorId, onSelectSession }: { visitorId: string; onSelectSession: (id: string) => void }) {
+  const [sessions, setSessions] = useState<VisitorSessionOut[]>([])
 
   useEffect(() => {
     listVisitorSessions(visitorId).then(data => {
@@ -102,9 +103,9 @@ function SessionList({ visitorId, onSelectSession }) {
   )
 }
 
-function MemoryEditor({ visitorId }) {
-  const [memories, setMemories] = useState([])
-  const [editing, setEditing] = useState(null)
+function MemoryEditor({ visitorId }: { visitorId: string }) {
+  const [memories, setMemories] = useState<MemoryOut[]>([])
+  const [editing, setEditing] = useState<MemoryOut | null>(null)
 
   useEffect(() => {
     listMemories(visitorId).then(data => {
@@ -112,12 +113,12 @@ function MemoryEditor({ visitorId }) {
     })
   }, [visitorId])
 
-  const handleDelete = async (memId) => {
+  const handleDelete = async (memId: string) => {
     await deleteMemory(visitorId, memId)
     setMemories(m => m.filter(x => x.id !== memId))
   }
 
-  const handleUpdate = async (mem) => {
+  const handleUpdate = async (mem: MemoryOut) => {
     const updated = await updateMemory(visitorId, mem.id, { key: mem.key, value: mem.value })
     setMemories(m => m.map(x => x.id === mem.id ? updated : x))
     setEditing(null)
@@ -141,18 +142,18 @@ function MemoryEditor({ visitorId }) {
           <tr key={m.id}>
             <td style={s.td}>
               {editing?.id === m.id
-                ? <input style={s.input} value={editing.key} onChange={e => setEditing(x => ({ ...x, key: e.target.value }))} />
+                ? <input style={s.input} value={editing.key} onChange={e => setEditing(x => x ? { ...x, key: e.target.value } : x)} />
                 : m.key}
             </td>
             <td style={s.td}>
               {editing?.id === m.id
-                ? <input style={s.input} value={editing.value} onChange={e => setEditing(x => ({ ...x, value: e.target.value }))} />
+                ? <input style={s.input} value={editing.value} onChange={e => setEditing(x => x ? { ...x, value: e.target.value } : x)} />
                 : m.value}
             </td>
             <td style={s.td}>
               {editing?.id === m.id
                 ? <>
-                    <button style={s.btnSm} onClick={() => handleUpdate(editing)}>저장</button>
+                    <button style={s.btnSm} onClick={() => handleUpdate(editing!)}>저장</button>
                     <button style={{ ...s.btnSm, marginLeft: 4 }} onClick={() => setEditing(null)}>취소</button>
                   </>
                 : <>
@@ -168,10 +169,10 @@ function MemoryEditor({ visitorId }) {
 }
 
 export default function VisitorsTab() {
-  const [selectedVisitor, setSelectedVisitor] = useState(null)
-  const [selectedSession, setSelectedSession] = useState(null)
+  const [selectedVisitor, setSelectedVisitor] = useState<string | null>(null)
+  const [selectedSession, setSelectedSession] = useState<string | null>(null)
 
-  const handleSelectVisitor = (visitorId) => {
+  const handleSelectVisitor = (visitorId: string) => {
     setSelectedVisitor(visitorId)
     setSelectedSession(null)
   }
@@ -179,7 +180,6 @@ export default function VisitorsTab() {
   return (
     <div style={{ display: 'flex', gap: 24, minHeight: 500 }}>
       <VisitorList
-       
         selectedId={selectedVisitor}
         onSelect={handleSelectVisitor}
       />
@@ -191,7 +191,6 @@ export default function VisitorsTab() {
           </p>
         ) : selectedSession ? (
           <SessionDetail
-           
             sessionId={selectedSession}
             onBack={() => setSelectedSession(null)}
           />
@@ -202,7 +201,6 @@ export default function VisitorsTab() {
             </h4>
             <Section title="세션 목록">
               <SessionList
-               
                 visitorId={selectedVisitor}
                 onSelectSession={setSelectedSession}
               />
@@ -217,7 +215,7 @@ export default function VisitorsTab() {
   )
 }
 
-function Section({ title, children }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div style={{ marginBottom: 24 }}>
       <h5 style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 600, color: '#4a5568' }}>{title}</h5>
@@ -225,4 +223,3 @@ function Section({ title, children }) {
     </div>
   )
 }
-

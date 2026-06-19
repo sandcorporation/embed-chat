@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getTenantConfig, updateTenantConfig, resetTenantKey, updateTenantSlug } from '../api'
 import { s } from '../styles'
+import type { TenantConfigOut } from '../generated/model'
 
 const POPULAR_MODELS = [
   'openrouter/owl-alpha',
@@ -20,17 +21,17 @@ const WEBHOOK_TYPES = [
 ]
 
 export default function ConfigTab() {
-  const [config, setConfig] = useState({
+  const [config, setConfig] = useState<TenantConfigOut>({
     model_id: '',
     system_prompt: '',
     agent_display_name: '상담원',
     webhook_url: '',
     webhook_type: '',
     welcome_message: '',
-  })
+  } as unknown as TenantConfigOut)
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [newKey, setNewKey] = useState(null)
+  const [newKey, setNewKey] = useState<string | null>(null)
   const [resetConfirm, setResetConfirm] = useState(false)
   const [slug, setSlug] = useState('')
   const [slugSaved, setSlugSaved] = useState(false)
@@ -41,7 +42,7 @@ export default function ConfigTab() {
       setSlugSaved(true)
       setTimeout(() => setSlugSaved(false), 2000)
     } catch (e) {
-      alert(e.message)
+      alert(e instanceof Error ? e.message : String(e))
     }
   }
 

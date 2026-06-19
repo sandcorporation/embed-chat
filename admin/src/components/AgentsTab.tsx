@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, FormEvent } from 'react'
 import { listAgents, createAgent, deactivateAgent, changePassword } from '../api'
 import { s } from '../styles'
+import type { AgentOut } from '../generated/model'
 
 export default function AgentsTab() {
-  const [agents, setAgents] = useState([])
+  const [agents, setAgents] = useState<AgentOut[]>([])
   const [newUsername, setNewUsername] = useState('')
-  const [createdCred, setCreatedCred] = useState(null)
+  const [createdCred, setCreatedCred] = useState<{ username: string; password: string } | null>(null)
   const [loading, setLoading] = useState(false)
   const [pwForm, setPwForm] = useState({ current: '', next: '', error: '', success: false })
 
@@ -16,7 +17,7 @@ export default function AgentsTab() {
 
   useEffect(() => { load() }, [])
 
-  const handleCreate = async (e) => {
+  const handleCreate = async (e: FormEvent) => {
     e.preventDefault()
     if (!newUsername.trim()) return
     setLoading(true)
@@ -27,20 +28,20 @@ export default function AgentsTab() {
     setLoading(false)
   }
 
-  const handleDeactivate = async (id) => {
+  const handleDeactivate = async (id: string) => {
     if (!confirm('비활성화하시겠습니까?')) return
     await deactivateAgent(id)
     await load()
   }
 
-  const handleChangePassword = async (e) => {
+  const handleChangePassword = async (e: FormEvent) => {
     e.preventDefault()
     try {
       await changePassword(pwForm.current, pwForm.next)
       setPwForm({ current: '', next: '', error: '', success: true })
       setTimeout(() => setPwForm(f => ({ ...f, success: false })), 2000)
     } catch (err) {
-      setPwForm(f => ({ ...f, error: err.message }))
+      setPwForm(f => ({ ...f, error: err instanceof Error ? err.message : String(err) }))
     }
   }
 
