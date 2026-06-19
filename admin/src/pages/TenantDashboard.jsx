@@ -7,7 +7,7 @@ import AgentsTab from '../components/AgentsTab'
 import HitlTab from '../components/HitlTab'
 import { s } from '../styles'
 
-export default function TenantDashboard({ username, onLogout }) {
+export default function TenantDashboard({ username, onLogout, onLogoutAll }) {
   const [tab, setTab] = useState('documents')
 
   return (
@@ -17,6 +17,7 @@ export default function TenantDashboard({ username, onLogout }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 13, color: '#718096' }}>{username}</span>
           <button style={s.btnSm} onClick={onLogout}>로그아웃</button>
+          <button style={s.btnSm} onClick={onLogoutAll}>모든 기기에서 로그아웃</button>
         </div>
       </div>
 

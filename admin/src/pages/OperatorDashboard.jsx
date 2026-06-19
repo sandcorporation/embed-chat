@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { listTenants, createTenant, suspendTenant, deleteTenant } from '../api'
 import { s } from '../styles'
 
-export default function OperatorDashboard({ onLogout }) {
+export default function OperatorDashboard({ onLogout, onLogoutAll }) {
   const [tenants, setTenants] = useState([])
   const [newName, setNewName] = useState('')
   const [createdKey, setCreatedKey] = useState(null)
@@ -41,7 +41,10 @@ export default function OperatorDashboard({ onLogout }) {
     <div style={s.page}>
       <div style={s.header}>
         <h1 style={s.pageTitle}>Operator 대시보드</h1>
-        <button style={s.btnSm} onClick={onLogout}>로그아웃</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button style={s.btnSm} onClick={onLogout}>로그아웃</button>
+          <button style={s.btnSm} onClick={onLogoutAll}>모든 기기에서 로그아웃</button>
+        </div>
       </div>
 
       {createdKey && (

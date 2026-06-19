@@ -11,7 +11,9 @@ from apps.tenants.auth import (
 from apps.tenants.auth_cookies import (
     set_refresh_cookie, clear_refresh_cookie, cookie_name, OPERATOR, TENANT_AGENT,
 )
-from apps.tenants.refresh_tokens import issue_session, rotate, revoke_family, revoke_all, RefreshRejected
+from apps.tenants.refresh_tokens import (
+    issue_session, rotate, revoke_all, revoke_session, RefreshRejected,
+)
 from apps.tenants.models import Operator, Tenant, TenantConfig, TenantAgent
 
 operator_router = Router(tags=["operator"])
@@ -186,6 +188,22 @@ def agent_refresh(request, response: HttpResponse):
     return 200, {"access_token": create_tenant_agent_token(subject)}
 
 
+@agent_router.post("/auth/logout", response={200: dict}, auth=None)
+def agent_logout(request, response: HttpResponse):
+    raw = request.COOKIES.get(cookie_name(TENANT_AGENT))
+    if raw:
+        revoke_session(raw)  # 이 기기 Family만 폐기
+    clear_refresh_cookie(response, TENANT_AGENT)
+    return 200, {"detail": "logged out"}
+
+
+@agent_router.post("/auth/logout-all", response={200: dict}, auth=tenant_agent_auth)
+def agent_logout_all(request, response: HttpResponse):
+    revoke_all(request.auth)  # 주체의 전 기기 Family 폐기
+    clear_refresh_cookie(response, TENANT_AGENT)
+    return 200, {"detail": "logged out everywhere"}
+
+
 def _get_tenant_from_auth(auth_obj):
     if isinstance(auth_obj, TenantAgent):
         return auth_obj.tenant
@@ -233,6 +251,7 @@ def change_password(request, body: ChangePasswordIn):
         return 400, {"detail": "현재 비밀번호가 올바르지 않습니다."}
     agent.set_password(body.new_password)
     agent.save()
+    revoke_all(agent)  # 비번 변경 시 기존 모든 세션의 refresh 폐기(침해 대응)
     return 200, {"detail": "비밀번호가 변경되었습니다."}
 
 
@@ -258,6 +277,22 @@ def operator_refresh(request, response: HttpResponse):
         return 401, {"detail": "Invalid refresh token"}
     set_refresh_cookie(response, subject, new_raw)
     return 200, {"access_token": create_operator_token(subject)}
+
+
+@operator_router.post("/auth/logout", response={200: dict}, auth=None)
+def operator_logout(request, response: HttpResponse):
+    raw = request.COOKIES.get(cookie_name(OPERATOR))
+    if raw:
+        revoke_session(raw)  # 이 기기 Family만 폐기
+    clear_refresh_cookie(response, OPERATOR)
+    return 200, {"detail": "logged out"}
+
+
+@operator_router.post("/auth/logout-all", response={200: dict}, auth=operator_auth)
+def operator_logout_all(request, response: HttpResponse):
+    revoke_all(request.auth)  # 주체의 전 기기 Family 폐기
+    clear_refresh_cookie(response, OPERATOR)
+    return 200, {"detail": "logged out everywhere"}
 
 
 @operator_router.post("/tenants/", response={201: TenantCreatedOut}, auth=operator_auth)

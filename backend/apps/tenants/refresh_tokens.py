@@ -78,3 +78,10 @@ def revoke_family(family_id) -> None:
 
 def revoke_all(subject) -> None:
     RefreshToken.objects.filter(revoked=False, **_subject_kwargs(subject)).update(revoked=True)
+
+
+def revoke_session(raw: str) -> None:
+    """주어진 refresh 원문이 속한 Family(=이 기기 세션)를 폐기한다. 미존재면 무시."""
+    row = RefreshToken.objects.filter(token_hash=_hash(raw)).first()
+    if row:
+        revoke_family(row.family_id)

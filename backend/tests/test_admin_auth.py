@@ -120,3 +120,60 @@ def test_agent_refresh_rotates_cookie_and_returns_new_access(client, tenant_with
 def test_agent_refresh_without_cookie_rejected(client):
     r = client.post("/api/tenant/agents/auth/refresh")
     assert r.status_code == 401
+
+
+# ── 로그아웃 3종 (issue 100) ──────────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_operator_logout_revokes_current_session(client):
+    _make_operator(client)
+    _operator_login(client)
+    raw = client.cookies["op_refresh"].value
+
+    client.post("/api/operator/auth/logout")
+
+    client.cookies["op_refresh"] = raw  # 폐기된 세션의 쿠키 재생
+    r = client.post("/api/operator/auth/refresh")
+    assert r.status_code == 401
+
+
+@pytest.mark.django_db
+def test_operator_logout_all_revokes_every_device(client):
+    from django.test import Client
+    _make_operator(client)
+
+    # 기기 1·2에서 각각 로그인(별도 클라이언트 = 별도 Family)
+    c1, c2 = Client(), Client()
+    login1 = _operator_login(c1)
+    _operator_login(c2)
+    access1 = login1.json()["access_token"]
+    raw2 = c2.cookies["op_refresh"].value
+
+    # 기기 1에서 전체 로그아웃(access 토큰으로 주체 식별)
+    c1.post("/api/operator/auth/logout-all", HTTP_AUTHORIZATION=f"Bearer {access1}")
+
+    # 기기 2도 죽는다
+    c2.cookies["op_refresh"] = raw2
+    r = c2.post("/api/operator/auth/refresh")
+    assert r.status_code == 401
+
+
+@pytest.mark.django_db
+def test_change_password_revokes_all_agent_sessions(client, tenant_with_key):
+    tenant, _ = tenant_with_key
+    _make_agent(tenant)
+    login = _agent_login(client, tenant)
+    access = login.json()["access_token"]
+    raw = client.cookies["agent_refresh"].value
+
+    client.post(
+        "/api/tenant/agents/me/change-password",
+        {"current_password": "secret123", "new_password": "newpass456"},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {access}",
+    )
+
+    # 비번 변경으로 기존 모든 세션의 refresh가 폐기됨
+    client.cookies["agent_refresh"] = raw
+    r = client.post("/api/tenant/agents/auth/refresh")
+    assert r.status_code == 401

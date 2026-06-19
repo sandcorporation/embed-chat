@@ -1,4 +1,4 @@
-import { authFetch, setAccess, getAccess } from './auth'
+import { authFetch, setAccess, getAccess, clearAccess } from './auth'
 
 const BASE = import.meta.env.VITE_API_BASE || ''
 
@@ -44,6 +44,18 @@ export async function deleteTenant(id) {
   await authFetch('operator', `/api/operator/tenants/${id}`, { method: 'DELETE' })
 }
 
+// 이 기기 로그아웃: 쿠키 기반(access 불필요), 서버가 현재 Family 폐기 + 쿠키 삭제
+export async function operatorLogout() {
+  await fetch(`${BASE}/api/operator/auth/logout`, { method: 'POST', credentials: 'include' })
+  clearAccess('operator')
+}
+
+// 모든 기기 로그아웃: access로 주체 식별 → 전 Family 폐기
+export async function operatorLogoutAll() {
+  await authFetch('operator', '/api/operator/auth/logout-all', { method: 'POST' })
+  clearAccess('operator')
+}
+
 // ── TenantAgent Auth ──────────────────────────────────────────────────────
 
 export async function tenantAgentLogin(tenantName, username, password) {
@@ -57,6 +69,17 @@ export async function tenantAgentLogin(tenantName, username, password) {
   const data = await res.json()
   setAccess('agent', data.access_token)
   return data
+}
+
+// 이 기기 로그아웃(쿠키 기반) / 모든 기기 로그아웃(access로 주체 식별)
+export async function agentLogout() {
+  await fetch(`${BASE}/api/tenant/agents/auth/logout`, { method: 'POST', credentials: 'include' })
+  clearAccess('agent')
+}
+
+export async function agentLogoutAll() {
+  await authFetch('agent', '/api/tenant/agents/auth/logout-all', { method: 'POST' })
+  clearAccess('agent')
 }
 
 // ── Tenant Config ─────────────────────────────────────────────────────────

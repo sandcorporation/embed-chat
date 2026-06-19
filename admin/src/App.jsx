@@ -4,7 +4,8 @@ import OperatorLogin from './pages/OperatorLogin'
 import OperatorDashboard from './pages/OperatorDashboard'
 import TenantLogin from './pages/TenantLogin'
 import TenantDashboard from './pages/TenantDashboard'
-import { getAccess, clearAccess, bootSilentRefresh } from './auth'
+import { getAccess, bootSilentRefresh } from './auth'
+import { operatorLogout, operatorLogoutAll, agentLogout, agentLogoutAll } from './api'
 
 export default function App() {
   // Operator: access는 sessionStorage, refresh는 httpOnly 쿠키(ADR-0013).
@@ -26,8 +27,12 @@ export default function App() {
   }, [])
 
   const handleOperatorLogin = () => setOperatorAuthed(true)
-  const handleOperatorLogout = () => {
-    clearAccess('operator')
+  const handleOperatorLogout = async () => {
+    await operatorLogout()  // 이 기기 세션 서버 폐기 + access 제거
+    setOperatorAuthed(false)
+  }
+  const handleOperatorLogoutAll = async () => {
+    await operatorLogoutAll()
     setOperatorAuthed(false)
   }
 
@@ -37,11 +42,18 @@ export default function App() {
     setAgentAuthed(true)
   }
 
-  const handleTenantLogout = () => {
-    clearAccess('agent')
+  const endAgentSession = () => {
     localStorage.removeItem('agent_username')
     setAgentAuthed(false)
     setAgentUsername(null)
+  }
+  const handleTenantLogout = async () => {
+    await agentLogout()
+    endAgentSession()
+  }
+  const handleTenantLogoutAll = async () => {
+    await agentLogoutAll()
+    endAgentSession()
   }
 
   return (
@@ -53,7 +65,7 @@ export default function App() {
           operatorBooting
             ? null
             : operatorAuthed
-              ? <OperatorDashboard onLogout={handleOperatorLogout} />
+              ? <OperatorDashboard onLogout={handleOperatorLogout} onLogoutAll={handleOperatorLogoutAll} />
               : <OperatorLogin onLogin={handleOperatorLogin} />
         }
       />
@@ -63,7 +75,7 @@ export default function App() {
           agentBooting
             ? null
             : agentAuthed
-              ? <TenantDashboard username={agentUsername} onLogout={handleTenantLogout} />
+              ? <TenantDashboard username={agentUsername} onLogout={handleTenantLogout} onLogoutAll={handleTenantLogoutAll} />
               : <TenantLogin onLogin={handleTenantLogin} />
         }
       />
