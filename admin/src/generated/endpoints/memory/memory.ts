@@ -5,10 +5,12 @@
  * OpenAPI spec version: 1.0.0
  */
 import type {
-  AppsMemoryApiDeleteMemoryEntry404,
   AppsMemoryApiListVisitorsParams,
+  DetailOut,
   MemoryIn,
-  MemoryOut
+  MemoryOut,
+  VisitorOut,
+  VisitorSessionOut
 } from '../../model';
 
 import { customInstance } from '../../../mutator';
@@ -17,7 +19,7 @@ import { customInstance } from '../../../mutator';
  * @summary List Visitors
  */
 export type appsMemoryApiListVisitorsResponse200 = {
-  data: unknown[]
+  data: VisitorOut[]
   status: 200
 }
     
@@ -99,7 +101,7 @@ export type appsMemoryApiDeleteMemoryEntryResponse204 = {
 }
 
 export type appsMemoryApiDeleteMemoryEntryResponse404 = {
-  data: AppsMemoryApiDeleteMemoryEntry404
+  data: DetailOut
   status: 404
 }
     
@@ -177,7 +179,7 @@ export const appsMemoryApiUpdateMemory = async (visitorId: string,
  * @summary List Visitor Sessions
  */
 export type appsMemoryApiListVisitorSessionsResponse200 = {
-  data: unknown[]
+  data: VisitorSessionOut[]
   status: 200
 }
     

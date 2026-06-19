@@ -9,7 +9,31 @@ memory_router = Router(tags=["memory"], auth=tenant_agent_auth)
 session_router = Router(tags=["sessions"], auth=tenant_agent_auth)
 
 
-@session_router.get("/{session_id}/checkpoint", response={200: dict, 404: dict})
+class DetailOut(Schema):
+    detail: str
+
+
+class SessionMessageOut(Schema):
+    id: str
+    role: str
+    content: str
+    created_at: str
+
+
+class VisitorOut(Schema):
+    visitor_id: str
+
+
+class VisitorSessionOut(Schema):
+    session_id: str
+    visitor_id: str
+    is_hitl: bool
+    created_at: str
+
+
+# checkpoint의 200 body는 LangGraph channel_values라 그래프 상태에 따라 구조가 달라지는
+# 동적 맵이다 → 고정 Schema가 부적합하므로 dict로 유지(ADR-0014 와이어 불변). 404만 정형화.
+@session_router.get("/{session_id}/checkpoint", response={200: dict, 404: DetailOut})
 def get_session_checkpoint(request, session_id: str):
     from apps.chat.models import ChatSession
     from apps.agent.graph import _create_checkpointer
@@ -32,7 +56,7 @@ def get_session_checkpoint(request, session_id: str):
     return 200, checkpoint.get("channel_values", {})
 
 
-@session_router.get("/{session_id}/messages/", response={200: list, 404: dict})
+@session_router.get("/{session_id}/messages/", response={200: List[SessionMessageOut], 404: DetailOut})
 def get_session_messages(request, session_id: str):
     from apps.chat.models import ChatSession, ChatMessage
 
@@ -54,7 +78,7 @@ def get_session_messages(request, session_id: str):
     ]
 
 
-@memory_router.get("/", response=list)
+@memory_router.get("/", response=List[VisitorOut])
 def list_visitors(request, search: Optional[str] = None):
     from apps.chat.models import ChatSession
 
@@ -77,7 +101,7 @@ class MemoryIn(Schema):
     value: str
 
 
-@memory_router.get("/{visitor_id}/sessions/", response=list)
+@memory_router.get("/{visitor_id}/sessions/", response=List[VisitorSessionOut])
 def list_visitor_sessions(request, visitor_id: str):
     from apps.chat.models import ChatSession
 
@@ -113,7 +137,7 @@ def update_memory(request, visitor_id: str, memory_id: str, body: MemoryIn):
     return {"id": str(memory.id), "key": memory.key, "value": memory.value}
 
 
-@memory_router.delete("/{visitor_id}/memory/{memory_id}", response={204: None, 404: dict})
+@memory_router.delete("/{visitor_id}/memory/{memory_id}", response={204: None, 404: DetailOut})
 def delete_memory_entry(request, visitor_id: str, memory_id: str):
     tenant = request.auth.tenant
     deleted = delete_memory(str(tenant.id), visitor_id, memory_id)

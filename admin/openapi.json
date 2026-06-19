@@ -506,6 +506,34 @@
         "title": "ResetKeyOut",
         "type": "object"
       },
+      "SessionMessageOut": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "created_at"
+        ],
+        "title": "SessionMessageOut",
+        "type": "object"
+      },
       "SlugIn": {
         "properties": {
           "slug": {
@@ -783,6 +811,47 @@
           "urls"
         ],
         "title": "UrlsIn",
+        "type": "object"
+      },
+      "VisitorOut": {
+        "properties": {
+          "visitor_id": {
+            "title": "Visitor Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "visitor_id"
+        ],
+        "title": "VisitorOut",
+        "type": "object"
+      },
+      "VisitorSessionOut": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "is_hitl": {
+            "title": "Is Hitl",
+            "type": "boolean"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "visitor_id": {
+            "title": "Visitor Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "visitor_id",
+          "is_hitl",
+          "created_at"
+        ],
+        "title": "VisitorSessionOut",
         "type": "object"
       }
     },
@@ -2355,9 +2424,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DetailOut"
                 }
               }
             },
@@ -2394,7 +2461,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {},
+                  "items": {
+                    "$ref": "#/components/schemas/SessionMessageOut"
+                  },
                   "title": "Response",
                   "type": "array"
                 }
@@ -2406,9 +2475,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DetailOut"
                 }
               }
             },
@@ -2489,7 +2556,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {},
+                  "items": {
+                    "$ref": "#/components/schemas/VisitorOut"
+                  },
                   "title": "Response",
                   "type": "array"
                 }
@@ -2581,9 +2650,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DetailOut"
                 }
               }
             },
@@ -2674,7 +2741,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {},
+                  "items": {
+                    "$ref": "#/components/schemas/VisitorSessionOut"
+                  },
                   "title": "Response",
                   "type": "array"
                 }

@@ -6,8 +6,8 @@
  */
 import type {
   AppsMemoryApiGetSessionCheckpoint200,
-  AppsMemoryApiGetSessionCheckpoint404,
-  AppsMemoryApiGetSessionMessages404
+  DetailOut,
+  SessionMessageOut
 } from '../../model';
 
 import { customInstance } from '../../../mutator';
@@ -21,7 +21,7 @@ export type appsMemoryApiGetSessionCheckpointResponse200 = {
 }
 
 export type appsMemoryApiGetSessionCheckpointResponse404 = {
-  data: AppsMemoryApiGetSessionCheckpoint404
+  data: DetailOut
   status: 404
 }
     
@@ -58,12 +58,12 @@ export const appsMemoryApiGetSessionCheckpoint = async (sessionId: string, optio
  * @summary Get Session Messages
  */
 export type appsMemoryApiGetSessionMessagesResponse200 = {
-  data: unknown[]
+  data: SessionMessageOut[]
   status: 200
 }
 
 export type appsMemoryApiGetSessionMessagesResponse404 = {
-  data: AppsMemoryApiGetSessionMessages404
+  data: DetailOut
   status: 404
 }
     
