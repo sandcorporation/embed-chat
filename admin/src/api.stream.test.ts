@@ -3,14 +3,16 @@ import { openEscalationStream } from './api'
 import { setAccess, refresh } from './auth'
 
 class FakeEventSource {
-  static instances = []
-  constructor(url) {
+  static instances: FakeEventSource[] = []
+  url: string
+  closed = false
+  listeners: Record<string, (e: unknown) => void> = {}
+  onmessage: ((e: unknown) => void) | null = null
+  constructor(url: string) {
     this.url = url
-    this.closed = false
-    this.listeners = {}
     FakeEventSource.instances.push(this)
   }
-  addEventListener(type, cb) { this.listeners[type] = cb }
+  addEventListener(type: string, cb: (e: unknown) => void) { this.listeners[type] = cb }
   close() { this.closed = true }
 }
 
@@ -18,7 +20,7 @@ beforeEach(() => {
   sessionStorage.clear()
   vi.restoreAllMocks()
   FakeEventSource.instances = []
-  globalThis.EventSource = FakeEventSource
+  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource
 })
 
 describe('openEscalationStream — silent refresh 시 재오픈', () => {

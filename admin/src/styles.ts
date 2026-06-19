@@ -1,4 +1,4 @@
-export const s = {
+export const s: Record<string, any> = {
   center: { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' },
   card: { background: '#fff', borderRadius: 12, padding: 32, boxShadow: '0 4px 20px rgba(0,0,0,.08)', width: 360 },
   title: { fontSize: 22, fontWeight: 700, marginBottom: 20 },
@@ -16,11 +16,11 @@ export const s = {
   table: { width: '100%', borderCollapse: 'collapse' },
   th: { textAlign: 'left', padding: '10px 12px', borderBottom: '2px solid #e2e8f0', fontSize: 13, fontWeight: 600, color: '#4a5568' },
   td: { padding: '10px 12px', borderBottom: '1px solid #f7fafc', fontSize: 14 },
-  badge: (active) => ({ padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: active ? '#c6f6d5' : '#fed7d7', color: active ? '#276749' : '#9b2c2c' }),
+  badge: (active: boolean) => ({ padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: active ? '#c6f6d5' : '#fed7d7', color: active ? '#276749' : '#9b2c2c' }),
   alert: { background: '#ebf8ff', border: '1px solid #90cdf4', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 14 },
   code: { background: '#e2e8f0', padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 13 },
   tabs: { display: 'flex', gap: 4, marginBottom: 20, background: '#fff', padding: 6, borderRadius: 10, boxShadow: '0 1px 6px rgba(0,0,0,.06)' },
-  tab: (active) => ({ padding: '8px 20px', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: active ? 600 : 400, background: active ? '#4299e1' : 'transparent', color: active ? '#fff' : '#4a5568', fontSize: 14 }),
+  tab: (active: boolean) => ({ padding: '8px 20px', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: active ? 600 : 400, background: active ? '#4299e1' : 'transparent', color: active ? '#fff' : '#4a5568', fontSize: 14 }),
   tabContent: { background: '#fff', borderRadius: 10, padding: 20, boxShadow: '0 1px 6px rgba(0,0,0,.06)' },
   label: { display: 'block', fontWeight: 600, fontSize: 14, marginBottom: 6, color: '#4a5568' },
 }
