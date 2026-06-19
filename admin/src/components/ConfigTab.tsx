@@ -42,24 +42,27 @@ export default function ConfigTab() {
   const [slugSaved, setSlugSaved] = useState(false)
   const [llmModels, setLlmModels] = useState<string[]>([])
   const [embedModels, setEmbedModels] = useState<string[]>([])
-  const [modelError, setModelError] = useState('')
+  // 조회 에러는 각 provider 섹션에 따로 표시한다(엉뚱한 곳에 뜨지 않도록).
+  const [llmModelError, setLlmModelError] = useState('')
+  const [embedModelError, setEmbedModelError] = useState('')
   const [saveError, setSaveError] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const loadLlmModels = async () => {
-    setModelError('')
+    setLlmModelError('')
     try {
       setLlmModels(await fetchProviderModels('llm', config.llm_provider_type, config.llm_base_url, config.llm_api_key, config.model_id))
     } catch {
-      setModelError('모델 조회 실패 — Base URL / API Key를 확인하세요')
+      setLlmModelError('LLM 모델 조회 실패 — Base URL / API Key를 확인하세요')
     }
   }
 
   const loadEmbedModels = async () => {
-    setModelError('')
+    setEmbedModelError('')
     try {
       setEmbedModels(await fetchProviderModels('embed', config.embed_provider_type, config.embed_base_url, config.embed_api_key, config.embed_model))
     } catch {
-      setModelError('모델 조회 실패 — Base URL / API Key를 확인하세요')
+      setEmbedModelError('Embedding 모델 조회 실패 — Base URL / API Key를 확인하세요')
     }
   }
 
@@ -128,27 +131,6 @@ export default function ConfigTab() {
         </div>
         <p style={{ marginTop: 4, fontSize: 12, color: '#718096' }}>
           변경하면 사이트에 박아둔 기존 임베드 URL이 끊깁니다.
-        </p>
-      </div>
-
-      <div style={{ marginBottom: 20 }}>
-        <label style={s.label}>LLM 모델</label>
-        <select
-          aria-label="LLM 모델 선택"
-          style={{ ...s.input, width: '100%' }}
-          value={config.model_id}
-          onChange={e => setConfig(c => ({ ...c, model_id: e.target.value }))}
-        >
-          {modelOptions(llmModels, config.model_id, POPULAR_MODELS).map(m => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </select>
-        <p style={{ marginTop: 4, fontSize: 12, color: '#718096' }}>
-          직접 입력: <input
-            style={{ ...s.input, width: 300, marginLeft: 8 }}
-            value={config.model_id}
-            onChange={e => setConfig(c => ({ ...c, model_id: e.target.value }))}
-          />
         </p>
       </div>
 
@@ -266,7 +248,10 @@ export default function ConfigTab() {
           aria-label="LLM Provider 타입"
           style={{ ...s.input, width: '100%' }}
           value={config.llm_provider_type || ''}
-          onChange={e => setConfig(c => ({ ...c, llm_provider_type: e.target.value }))}
+          onChange={e => {
+            const v = e.target.value
+            setConfig(c => ({ ...c, llm_provider_type: v, llm_base_url: v === 'custom' ? c.llm_base_url : '' }))
+          }}
         >
           {config.platform_default_providers_enabled && <option value="">기본 (OpenRouter)</option>}
           <option value="openai">OpenAI</option>
@@ -274,13 +259,15 @@ export default function ConfigTab() {
           <option value="custom">Custom (OpenAI-호환)</option>
         </select>
       </div>
-      <div style={{ marginBottom: 12 }}>
-        <label style={s.label}>LLM Base URL</label>
-        <input aria-label="LLM Base URL" style={{ ...s.input, width: '100%' }}
-          value={config.llm_base_url || ''}
-          onChange={e => setConfig(c => ({ ...c, llm_base_url: e.target.value }))}
-          placeholder="Custom일 때 (예: https://openrouter.ai/api/v1)" />
-      </div>
+      {config.llm_provider_type === 'custom' && (
+        <div style={{ marginBottom: 12 }}>
+          <label style={s.label}>LLM Base URL</label>
+          <input aria-label="LLM Base URL" style={{ ...s.input, width: '100%' }}
+            value={config.llm_base_url || ''}
+            onChange={e => setConfig(c => ({ ...c, llm_base_url: e.target.value }))}
+            placeholder="예: https://openrouter.ai/api/v1" />
+        </div>
+      )}
       <div style={{ marginBottom: 12 }}>
         <label style={s.label}>LLM API Key</label>
         <input type="password" aria-label="LLM API Key" style={{ ...s.input, width: '100%' }}
@@ -291,24 +278,56 @@ export default function ConfigTab() {
       <div style={{ marginBottom: 12 }}>
         <button style={s.btnSm} type="button" onClick={loadLlmModels}>LLM 모델 불러오기</button>
         <span style={{ marginLeft: 8, fontSize: 12, color: '#718096' }}>
-          provider에서 사용가능 모델을 조회해 아래 LLM 모델·추출 모델 목록에 채웁니다.
+          provider에서 사용가능 모델을 조회해 아래 AI 모델 목록에 채웁니다.
         </span>
+        {llmModelError && <p style={s.error}>{llmModelError}</p>}
       </div>
       <div style={{ marginBottom: 12 }}>
-        <label style={s.label}>추출 모델 (비우면 플랫폼 기본)</label>
-        <select aria-label="추출 모델" style={{ ...s.input, width: '100%' }}
-          value={config.extraction_model || ''}
-          onChange={e => setConfig(c => ({ ...c, extraction_model: e.target.value }))}>
-          <option value="">(플랫폼 기본)</option>
-          {modelOptions(llmModels, config.extraction_model).map(m => (
+        <label style={s.label}>AI 모델</label>
+        <select aria-label="AI 모델" style={{ ...s.input, width: '100%' }}
+          value={config.model_id}
+          onChange={e => setConfig(c => ({ ...c, model_id: e.target.value }))}>
+          {modelOptions(llmModels, config.model_id, POPULAR_MODELS).map(m => (
             <option key={m} value={m}>{m}</option>
           ))}
         </select>
-        <input aria-label="추출 모델 직접 입력" style={{ ...s.input, width: '100%', marginTop: 4, fontSize: 12 }}
-          value={config.extraction_model || ''}
-          onChange={e => setConfig(c => ({ ...c, extraction_model: e.target.value }))}
+        <input aria-label="AI 모델 직접 입력" style={{ ...s.input, width: '100%', marginTop: 4, fontSize: 12 }}
+          value={config.model_id}
+          onChange={e => setConfig(c => ({ ...c, model_id: e.target.value }))}
           placeholder="직접 입력(목록에 없는 모델)" />
+        <p style={{ marginTop: 4, fontSize: 12, color: '#718096' }}>
+          손님과 대화하고, 올린 자료도 이 AI가 정리합니다.
+        </p>
       </div>
+      <div style={{ marginBottom: 12 }}>
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(v => !v)}
+          style={{ background: 'transparent', border: 'none', padding: 0, fontSize: 13, color: '#4a5568', cursor: 'pointer' }}
+        >
+          {showAdvanced ? '▾' : '▸'} 고급 설정
+        </button>
+      </div>
+      {showAdvanced && (
+        <div style={{ marginBottom: 12, paddingLeft: 12, borderLeft: '2px solid #e2e8f0' }}>
+          <label style={s.label}>자료 정리 모델</label>
+          <select aria-label="자료 정리 모델" style={{ ...s.input, width: '100%' }}
+            value={config.extraction_model || ''}
+            onChange={e => setConfig(c => ({ ...c, extraction_model: e.target.value }))}>
+            <option value="">(대화 모델과 동일)</option>
+            {modelOptions(llmModels, config.extraction_model).map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          <input aria-label="자료 정리 모델 직접 입력" style={{ ...s.input, width: '100%', marginTop: 4, fontSize: 12 }}
+            value={config.extraction_model || ''}
+            onChange={e => setConfig(c => ({ ...c, extraction_model: e.target.value }))}
+            placeholder="비우면 대화 모델과 동일" />
+          <p style={{ marginTop: 4, fontSize: 12, color: '#718096' }}>
+            문서를 올릴 때 내용을 정리하는 모델입니다. 보통 비워두면 됩니다.
+          </p>
+        </div>
+      )}
 
       <hr style={{ margin: '24px 0', borderColor: '#e2e8f0' }} />
       <h3 style={{ marginBottom: 8, fontSize: 15, fontWeight: 600 }}>Embedding Provider</h3>
@@ -322,19 +341,24 @@ export default function ConfigTab() {
           aria-label="Embedding Provider 타입"
           style={{ ...s.input, width: '100%' }}
           value={config.embed_provider_type || ''}
-          onChange={e => setConfig(c => ({ ...c, embed_provider_type: e.target.value }))}
+          onChange={e => {
+            const v = e.target.value
+            setConfig(c => ({ ...c, embed_provider_type: v, embed_base_url: v === 'custom' ? c.embed_base_url : '' }))
+          }}
         >
           {config.platform_default_providers_enabled && <option value="">기본 (dev: ollama)</option>}
           <option value="openai">OpenAI</option>
           <option value="custom">Custom (OpenAI-호환)</option>
         </select>
       </div>
-      <div style={{ marginBottom: 12 }}>
-        <label style={s.label}>Embedding Base URL</label>
-        <input aria-label="Embedding Base URL" style={{ ...s.input, width: '100%' }}
-          value={config.embed_base_url || ''}
-          onChange={e => setConfig(c => ({ ...c, embed_base_url: e.target.value }))} />
-      </div>
+      {config.embed_provider_type === 'custom' && (
+        <div style={{ marginBottom: 12 }}>
+          <label style={s.label}>Embedding Base URL</label>
+          <input aria-label="Embedding Base URL" style={{ ...s.input, width: '100%' }}
+            value={config.embed_base_url || ''}
+            onChange={e => setConfig(c => ({ ...c, embed_base_url: e.target.value }))} />
+        </div>
+      )}
       <div style={{ marginBottom: 12 }}>
         <label style={s.label}>Embedding API Key</label>
         <input type="password" aria-label="Embedding API Key" style={{ ...s.input, width: '100%' }}
@@ -344,6 +368,7 @@ export default function ConfigTab() {
       </div>
       <div style={{ marginBottom: 12 }}>
         <button style={s.btnSm} type="button" onClick={loadEmbedModels}>Embedding 모델 불러오기</button>
+        {embedModelError && <p style={s.error}>{embedModelError}</p>}
       </div>
       <div style={{ marginBottom: 12 }}>
         <label style={s.label}>Embedding 모델</label>
@@ -360,7 +385,6 @@ export default function ConfigTab() {
           onChange={e => setConfig(c => ({ ...c, embed_model: e.target.value }))}
           placeholder="직접 입력(목록에 없는 모델)" />
       </div>
-      {modelError && <p style={s.error}>{modelError}</p>}
       <div style={{ marginBottom: 20 }}>
         <label style={s.label}>Embedding 차원</label>
         <input type="number" aria-label="Embedding 차원" style={{ ...s.input, width: 160 }}

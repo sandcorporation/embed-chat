@@ -74,19 +74,47 @@ describe('ConfigTab — LLM Provider', () => {
     await userEvent.selectOptions(await screen.findByLabelText('LLM Provider 타입'), 'custom')
     await userEvent.type(screen.getByLabelText('LLM Base URL'), 'https://x/v1')
     await userEvent.type(screen.getByLabelText('LLM API Key'), 'sk-llm')
-    await userEvent.type(screen.getByLabelText('추출 모델 직접 입력'), 'gpt-4o-mini')
     await save()
     await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(expect.objectContaining({
-      llm_provider_type: 'custom', llm_base_url: 'https://x/v1',
-      llm_api_key: 'sk-llm', extraction_model: 'gpt-4o-mini',
+      llm_provider_type: 'custom', llm_base_url: 'https://x/v1', llm_api_key: 'sk-llm',
     })))
+  })
+})
+
+describe('ConfigTab — AI 모델', () => {
+  it('단일 "AI 모델" 선택을 model_id로 저장한다', async () => {
+    render(<ConfigTab />)
+    await userEvent.selectOptions(await screen.findByLabelText('AI 모델'), 'openai/gpt-4o')
+    await save()
+    await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ model_id: 'openai/gpt-4o' }),
+    ))
+  })
+})
+
+describe('ConfigTab — 고급 설정(자료 정리 모델)', () => {
+  it('기본적으로 자료 정리 모델은 접혀 있다(비개발자 단순 뷰)', async () => {
+    render(<ConfigTab />)
+    await screen.findByLabelText('AI 모델')
+    expect(screen.queryByLabelText('자료 정리 모델')).toBeNull()
+  })
+
+  it('고급 설정을 펼쳐 자료 정리 모델을 지정하면 extraction_model로 저장한다', async () => {
+    render(<ConfigTab />)
+    await screen.findByLabelText('AI 모델')
+    await userEvent.click(screen.getByRole('button', { name: /고급 설정/ }))
+    await userEvent.type(screen.getByLabelText('자료 정리 모델 직접 입력'), 'extract-model')
+    await save()
+    await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ extraction_model: 'extract-model' }),
+    ))
   })
 })
 
 describe('ConfigTab — Embedding Provider', () => {
   it('embedding provider 설정(차원 포함)을 저장 payload에 담는다', async () => {
     render(<ConfigTab />)
-    await userEvent.selectOptions(await screen.findByLabelText('Embedding Provider 타입'), 'openai')
+    await userEvent.selectOptions(await screen.findByLabelText('Embedding Provider 타입'), 'custom')
     await userEvent.type(screen.getByLabelText('Embedding Base URL'), 'https://api.openai.com/v1')
     await userEvent.type(screen.getByLabelText('Embedding API Key'), 'sk-emb')
     await userEvent.type(screen.getByLabelText('Embedding 모델 직접 입력'), 'text-embedding-3-small')
@@ -95,9 +123,38 @@ describe('ConfigTab — Embedding Provider', () => {
     await userEvent.type(dim, '1536')
     await save()
     await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(expect.objectContaining({
-      embed_provider_type: 'openai', embed_base_url: 'https://api.openai.com/v1',
+      embed_provider_type: 'custom', embed_base_url: 'https://api.openai.com/v1',
       embed_api_key: 'sk-emb', embed_model: 'text-embedding-3-small', embed_dim: 1536,
     })))
+  })
+})
+
+describe('ConfigTab — Base URL은 custom일 때만 노출', () => {
+  it('기본/openai 타입에선 Base URL 입력이 숨겨진다', async () => {
+    render(<ConfigTab />)
+    await screen.findByLabelText('LLM Provider 타입')  // 기본 type=''
+    expect(screen.queryByLabelText('LLM Base URL')).toBeNull()
+    expect(screen.queryByLabelText('Embedding Base URL')).toBeNull()
+    await userEvent.selectOptions(screen.getByLabelText('LLM Provider 타입'), 'openai')
+    expect(screen.queryByLabelText('LLM Base URL')).toBeNull()
+  })
+
+  it('custom 타입을 고르면 Base URL 입력이 나타난다', async () => {
+    render(<ConfigTab />)
+    await userEvent.selectOptions(await screen.findByLabelText('LLM Provider 타입'), 'custom')
+    expect(screen.getByLabelText('LLM Base URL')).toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByLabelText('Embedding Provider 타입'), 'custom')
+    expect(screen.getByLabelText('Embedding Base URL')).toBeInTheDocument()
+  })
+
+  it('custom→openai로 바꾸면 base_url을 비워 저장한다(표준 주소 사용)', async () => {
+    mockConfig({ embed_provider_type: 'custom', embed_base_url: 'https://old-custom/v1' })
+    render(<ConfigTab />)
+    await userEvent.selectOptions(await screen.findByLabelText('Embedding Provider 타입'), 'openai')
+    await save()
+    await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ embed_provider_type: 'openai', embed_base_url: '' }),
+    ))
   })
 })
 
@@ -137,12 +194,22 @@ describe('ConfigTab — 모델 불러오기', () => {
     expect(vi.mocked(api.fetchProviderModels).mock.calls[0][0]).toBe('embed')
   })
 
-  it('모델 불러오기 실패 시 에러를 표시한다', async () => {
+  it('LLM 조회 실패 시 LLM 섹션에 에러를 표시한다(임베딩 에러와 별개)', async () => {
     vi.mocked(api.fetchProviderModels).mockRejectedValue(new Error('연결 실패'))
     render(<ConfigTab />)
     await screen.findByLabelText('LLM Provider 타입')
     await userEvent.click(screen.getByRole('button', { name: 'LLM 모델 불러오기' }))
-    await waitFor(() => expect(screen.getByText(/모델 조회 실패/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/LLM 모델 조회 실패/)).toBeInTheDocument())
+    expect(screen.queryByText(/Embedding 모델 조회 실패/)).toBeNull()
+  })
+
+  it('Embedding 조회 실패 시 Embedding 섹션에 에러를 표시한다(LLM 에러와 별개)', async () => {
+    vi.mocked(api.fetchProviderModels).mockRejectedValue(new Error('연결 실패'))
+    render(<ConfigTab />)
+    await screen.findByLabelText('Embedding Provider 타입')
+    await userEvent.click(screen.getByRole('button', { name: 'Embedding 모델 불러오기' }))
+    await waitFor(() => expect(screen.getByText(/Embedding 모델 조회 실패/)).toBeInTheDocument())
+    expect(screen.queryByText(/LLM 모델 조회 실패/)).toBeNull()
   })
 })
 
