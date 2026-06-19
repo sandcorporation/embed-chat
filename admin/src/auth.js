@@ -10,6 +10,18 @@ const REFRESH_PATH = {
   agent: '/api/tenant/agents/auth/refresh',
 }
 
+// access 갱신 구독자(kind별). silent refresh로 토큰이 바뀌면 SSE 재오픈 등에 알린다.
+const accessListeners = { operator: new Set(), agent: new Set() }
+
+export function onAccessChange(kind, cb) {
+  accessListeners[kind].add(cb)
+  return () => accessListeners[kind].delete(cb)
+}
+
+function notifyAccessChange(kind) {
+  for (const cb of accessListeners[kind]) cb()
+}
+
 export function getAccess(kind) {
   return sessionStorage.getItem(ACCESS_KEY[kind])
 }
@@ -31,6 +43,7 @@ export async function refresh(kind) {
   }
   const { access_token } = await res.json()
   setAccess(kind, access_token)
+  notifyAccessChange(kind) // 새 토큰으로 갱신됨 → 구독자(SSE 등)에 통지
   return true
 }
 

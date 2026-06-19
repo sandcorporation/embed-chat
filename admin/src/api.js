@@ -1,4 +1,4 @@
-import { authFetch, setAccess, getAccess, clearAccess } from './auth'
+import { authFetch, setAccess, getAccess, clearAccess, onAccessChange } from './auth'
 
 const BASE = import.meta.env.VITE_API_BASE || ''
 
@@ -283,13 +283,24 @@ export async function getEscalationMessages(escalationId) {
 }
 
 export function openEscalationStream(onEvent) {
-  // SSE는 access를 쿼리로 전달(EventSource는 헤더 미지원). 단수명 access 만료 시
-  // 재오픈은 issue 101에서 처리. 토큰은 sessionStorage에서 라이브로 읽는다.
-  const es = new EventSource(`${BASE}/api/tenant/escalations/stream?token=${getAccess('agent')}`)
-  es.onmessage = (e) => onEvent(JSON.parse(e.data))
-  es.addEventListener('hitl_new', (e) => onEvent({ ...JSON.parse(e.data), type: 'hitl_new' }))
-  es.addEventListener('hitl_claimed', (e) => onEvent({ ...JSON.parse(e.data), type: 'hitl_claimed' }))
-  es.addEventListener('hitl_resolved', (e) => onEvent({ ...JSON.parse(e.data), type: 'hitl_resolved' }))
-  es.addEventListener('visitor_message', (e) => onEvent({ ...JSON.parse(e.data), type: 'visitor_message' }))
-  return es
+  // SSE는 access를 쿼리로 전달(EventSource는 헤더 미지원). 단수명 access라 silent
+  // refresh로 토큰이 바뀌면 connect()로 close→재오픈한다(ADR-0013 Q7-A).
+  let es = null
+  const connect = () => {
+    if (es) es.close()
+    es = new EventSource(`${BASE}/api/tenant/escalations/stream?token=${getAccess('agent')}`)
+    es.onmessage = (e) => onEvent(JSON.parse(e.data))
+    es.addEventListener('hitl_new', (e) => onEvent({ ...JSON.parse(e.data), type: 'hitl_new' }))
+    es.addEventListener('hitl_claimed', (e) => onEvent({ ...JSON.parse(e.data), type: 'hitl_claimed' }))
+    es.addEventListener('hitl_resolved', (e) => onEvent({ ...JSON.parse(e.data), type: 'hitl_resolved' }))
+    es.addEventListener('visitor_message', (e) => onEvent({ ...JSON.parse(e.data), type: 'visitor_message' }))
+  }
+  connect()
+  const unsubscribe = onAccessChange('agent', connect)
+  return {
+    close() {
+      if (es) es.close()
+      unsubscribe()
+    },
+  }
 }
