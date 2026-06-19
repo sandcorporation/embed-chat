@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# orval 생성물 드리프트 차단 (ADR-0014, issue 111).
+# 백엔드 Ninja Schema/엔드포인트(또는 orval 설정) 변경이 스테이징됐는데 admin 클라이언트를
+# 재생성·스테이징하지 않았으면 커밋을 막는다. codegen은 docker로 실행한다(CLAUDE.md 규칙).
+#
+# 활성화: git config core.hooksPath scripts/hooks
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+# 백엔드 스키마에 영향 줄 수 있는 변경이 스테이징됐는가?
+if ! git diff --cached --name-only | grep -qE '^backend/.*api\.py$|^backend/config/api\.py$|^admin/orval\.config\.ts$'; then
+  exit 0
+fi
+
+echo "[pre-commit] 백엔드 API 변경 감지 → admin 클라이언트 재생성·드리프트 검사…"
+bash scripts/gen-admin-api.sh >/dev/null 2>&1 || { echo "✗ codegen 실패"; exit 1; }
+
+if ! git diff --exit-code -- admin/openapi.json admin/src/generated >/dev/null 2>&1; then
+  echo "✗ 생성물이 백엔드 스키마와 어긋났습니다."
+  echo "  → 'bash scripts/gen-admin-api.sh' 실행 후 admin/openapi.json·admin/src/generated 변경분을 스테이징하세요."
+  exit 1
+fi
+
+echo "✓ admin 클라이언트가 백엔드 스키마와 최신 상태입니다."

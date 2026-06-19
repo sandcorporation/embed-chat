@@ -15,6 +15,13 @@
 - **프론트(admin/widget)**: Docker node 컨테이너에서 vitest 실행. 예) `docker compose -f docker-compose.dev.yml run --rm --no-deps admin sh -c "npm install && npm run test:run"`. (vitest는 jsdom+fetch mock이라 백엔드 인프라가 불필요하므로 `--no-deps`로 `api` 의존만 건너뛰는 것은 정상입니다.)
 - **백엔드에선 테스트가 요구하는 인프라(DB·Redis·Neo4j·Ollama·PaddleOCR)를 건너뛰지 마세요.** 일부만 띄우고 돌리면(`--no-deps`로 neo4j/ollama 생략 등) 통과처럼 보여도 인프라 의존 테스트가 조용히 실패·누락됩니다. 백엔드 검증은 항상 `scripts/test.sh`로 풀스택에서.
 
+# admin API 클라이언트 (OpenAPI 코드젠)
+
+- admin의 HTTP 클라이언트(`admin/src/generated`)는 백엔드 OpenAPI에서 **orval로 자동 생성**됩니다(ADR-0014). **손으로 편집하지 마세요.**
+- **백엔드 Ninja Schema/엔드포인트를 바꾸면** `bash scripts/gen-admin-api.sh`로 재생성하고 `admin/openapi.json`·`admin/src/generated` 변경분을 **함께 커밋**하세요(전부 docker로 실행).
+- 드리프트 방지: `git config core.hooksPath scripts/hooks`로 pre-commit 훅을 켜면, 백엔드 API 변경을 재생성 없이 커밋하려 할 때 차단됩니다.
+- 인증·refresh·SSE는 생성 코드가 아니라 `admin/src/mutator.ts`(custom instance)와 손작성 `auth.ts`에 있습니다 — 이쪽은 직접 관리합니다.
+
 ## Agent skills
 
 ### Issue tracker

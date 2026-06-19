@@ -1,0 +1,4 @@
+# orval 생성물·OpenAPI 산출물은 LF로 고정한다 (ADR-0014, issue 111).
+# codegen은 항상 LF를 출력하므로, 체크아웃이 CRLF면 드리프트 체크가 거짓 양성이 된다.
+admin/openapi.json text eol=lf
+admin/src/generated/** text eol=lf
