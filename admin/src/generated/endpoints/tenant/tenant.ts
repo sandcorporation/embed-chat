@@ -5,6 +5,10 @@
  * OpenAPI spec version: 1.0.0
  */
 import type {
+  AppsTenantsApiProviderModels400,
+  AppsTenantsApiUpdateConfig400,
+  ProviderModelsIn,
+  ProviderModelsOut,
   ResetKeyOut,
   SlugIn,
   TenantConfigIn,
@@ -55,13 +59,20 @@ export type appsTenantsApiUpdateConfigResponse200 = {
   data: TenantConfigOut
   status: 200
 }
+
+export type appsTenantsApiUpdateConfigResponse400 = {
+  data: AppsTenantsApiUpdateConfig400
+  status: 400
+}
     
 export type appsTenantsApiUpdateConfigResponseSuccess = (appsTenantsApiUpdateConfigResponse200) & {
   headers: Headers;
 };
-;
+export type appsTenantsApiUpdateConfigResponseError = (appsTenantsApiUpdateConfigResponse400) & {
+  headers: Headers;
+};
 
-export type appsTenantsApiUpdateConfigResponse = (appsTenantsApiUpdateConfigResponseSuccess)
+export type appsTenantsApiUpdateConfigResponse = (appsTenantsApiUpdateConfigResponseSuccess | appsTenantsApiUpdateConfigResponseError)
 
 export const getAppsTenantsApiUpdateConfigUrl = () => {
 
@@ -80,6 +91,53 @@ export const appsTenantsApiUpdateConfig = async (tenantConfigIn: TenantConfigIn,
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(
       tenantConfigIn,)
+  }
+);}
+
+
+/**
+ * 폼의 현재 provider 값으로 모델 목록을 조회한다(어드민 "모델 불러오기").
+
+마스크 키(********)면 저장된 키를 복호화해 쓰고, type=""(플랫폼 기본)은 kind로
+base_url/api_key를 해석한다. 응답엔 모델 id만(키 미노출). 실패 시 400 + 메시지.
+ * @summary Provider Models
+ */
+export type appsTenantsApiProviderModelsResponse200 = {
+  data: ProviderModelsOut
+  status: 200
+}
+
+export type appsTenantsApiProviderModelsResponse400 = {
+  data: AppsTenantsApiProviderModels400
+  status: 400
+}
+    
+export type appsTenantsApiProviderModelsResponseSuccess = (appsTenantsApiProviderModelsResponse200) & {
+  headers: Headers;
+};
+export type appsTenantsApiProviderModelsResponseError = (appsTenantsApiProviderModelsResponse400) & {
+  headers: Headers;
+};
+
+export type appsTenantsApiProviderModelsResponse = (appsTenantsApiProviderModelsResponseSuccess | appsTenantsApiProviderModelsResponseError)
+
+export const getAppsTenantsApiProviderModelsUrl = () => {
+
+
+  
+
+  return `/api/tenant/providers/models`
+}
+
+export const appsTenantsApiProviderModels = async (providerModelsIn: ProviderModelsIn, options?: RequestInit): Promise<appsTenantsApiProviderModelsResponse> => {
+  
+  return customInstance<appsTenantsApiProviderModelsResponse>(getAppsTenantsApiProviderModelsUrl(),
+  {      
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      providerModelsIn,)
   }
 );}
 

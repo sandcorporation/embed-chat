@@ -74,7 +74,7 @@ describe('ConfigTab — LLM Provider', () => {
     await userEvent.selectOptions(await screen.findByLabelText('LLM Provider 타입'), 'custom')
     await userEvent.type(screen.getByLabelText('LLM Base URL'), 'https://x/v1')
     await userEvent.type(screen.getByLabelText('LLM API Key'), 'sk-llm')
-    await userEvent.type(screen.getByLabelText('추출 모델'), 'gpt-4o-mini')
+    await userEvent.type(screen.getByLabelText('추출 모델 직접 입력'), 'gpt-4o-mini')
     await save()
     await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(expect.objectContaining({
       llm_provider_type: 'custom', llm_base_url: 'https://x/v1',
@@ -89,7 +89,7 @@ describe('ConfigTab — Embedding Provider', () => {
     await userEvent.selectOptions(await screen.findByLabelText('Embedding Provider 타입'), 'openai')
     await userEvent.type(screen.getByLabelText('Embedding Base URL'), 'https://api.openai.com/v1')
     await userEvent.type(screen.getByLabelText('Embedding API Key'), 'sk-emb')
-    await userEvent.type(screen.getByLabelText('Embedding 모델'), 'text-embedding-3-small')
+    await userEvent.type(screen.getByLabelText('Embedding 모델 직접 입력'), 'text-embedding-3-small')
     const dim = screen.getByLabelText('Embedding 차원')
     await userEvent.clear(dim)
     await userEvent.type(dim, '1536')
@@ -115,6 +115,34 @@ describe('ConfigTab — 플랫폼 기본 Provider 게이팅', () => {
     render(<ConfigTab />)
     await screen.findByLabelText('LLM Provider 타입')
     expect(screen.queryByRole('option', { name: /기본 \(OpenRouter\)/ })).not.toBeNull()
+  })
+})
+
+describe('ConfigTab — 모델 불러오기', () => {
+  it('LLM 모델 불러오기가 model_id 옵션을 채운다', async () => {
+    vi.mocked(api.fetchProviderModels).mockResolvedValue(['gpt-4o', 'gpt-4o-mini'])
+    render(<ConfigTab />)
+    await screen.findByLabelText('LLM Provider 타입')
+    await userEvent.click(screen.getByRole('button', { name: 'LLM 모델 불러오기' }))
+    await waitFor(() => expect(screen.getAllByRole('option', { name: 'gpt-4o-mini' }).length).toBeGreaterThan(0))
+    expect(vi.mocked(api.fetchProviderModels).mock.calls[0][0]).toBe('llm')
+  })
+
+  it('Embedding 모델 불러오기가 embed_model 옵션을 채운다', async () => {
+    vi.mocked(api.fetchProviderModels).mockResolvedValue(['text-embedding-3-small'])
+    render(<ConfigTab />)
+    await screen.findByLabelText('Embedding Provider 타입')
+    await userEvent.click(screen.getByRole('button', { name: 'Embedding 모델 불러오기' }))
+    await waitFor(() => expect(screen.getByRole('option', { name: 'text-embedding-3-small' })).toBeInTheDocument())
+    expect(vi.mocked(api.fetchProviderModels).mock.calls[0][0]).toBe('embed')
+  })
+
+  it('모델 불러오기 실패 시 에러를 표시한다', async () => {
+    vi.mocked(api.fetchProviderModels).mockRejectedValue(new Error('연결 실패'))
+    render(<ConfigTab />)
+    await screen.findByLabelText('LLM Provider 타입')
+    await userEvent.click(screen.getByRole('button', { name: 'LLM 모델 불러오기' }))
+    await waitFor(() => expect(screen.getByText(/모델 조회 실패/)).toBeInTheDocument())
   })
 })
 

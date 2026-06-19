@@ -480,6 +480,55 @@
         "title": "MessageIn",
         "type": "object"
       },
+      "ProviderModelsIn": {
+        "properties": {
+          "api_key": {
+            "default": "",
+            "title": "Api Key",
+            "type": "string"
+          },
+          "base_url": {
+            "default": "",
+            "title": "Base Url",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "type"
+        ],
+        "title": "ProviderModelsIn",
+        "type": "object"
+      },
+      "ProviderModelsOut": {
+        "properties": {
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "ProviderModelsOut",
+        "type": "object"
+      },
       "RebuildOut": {
         "properties": {
           "status": {
@@ -1638,6 +1687,18 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
           }
         },
         "security": [
@@ -2373,6 +2434,56 @@
         "summary": "Send Typing Indicator",
         "tags": [
           "escalations"
+        ]
+      }
+    },
+    "/api/tenant/providers/models": {
+      "post": {
+        "description": "폼의 현재 provider 값으로 모델 목록을 조회한다(어드민 \"모델 불러오기\").\n\n마스크 키(********)면 저장된 키를 복호화해 쓰고, type=\"\"(플랫폼 기본)은 kind로\nbase_url/api_key를 해석한다. 응답엔 모델 id만(키 미노출). 실패 시 400 + 메시지.",
+        "operationId": "apps_tenants_api_provider_models",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderModelsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderModelsOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "TenantAgentAuth": []
+          }
+        ],
+        "summary": "Provider Models",
+        "tags": [
+          "tenant"
         ]
       }
     },

@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react'
-import { getTenantConfig, updateTenantConfig, resetTenantKey, updateTenantSlug } from '../api'
+import { getTenantConfig, updateTenantConfig, resetTenantKey, updateTenantSlug, fetchProviderModels } from '../api'
 import { s } from '../styles'
 import type { TenantConfigOut } from '../generated/model'
+
+// 조회된 모델 + 현재 저장값을 합쳐 중복 없는 옵션 목록을 만든다(저장값 보존).
+function modelOptions(loaded: string[], current: string, extra: string[] = []): string[] {
+  return Array.from(new Set([...extra, ...loaded, current].filter(Boolean)))
+}
 
 const POPULAR_MODELS = [
   'openrouter/owl-alpha',
@@ -35,6 +40,28 @@ export default function ConfigTab() {
   const [resetConfirm, setResetConfirm] = useState(false)
   const [slug, setSlug] = useState('')
   const [slugSaved, setSlugSaved] = useState(false)
+  const [llmModels, setLlmModels] = useState<string[]>([])
+  const [embedModels, setEmbedModels] = useState<string[]>([])
+  const [modelError, setModelError] = useState('')
+  const [saveError, setSaveError] = useState('')
+
+  const loadLlmModels = async () => {
+    setModelError('')
+    try {
+      setLlmModels(await fetchProviderModels('llm', config.llm_provider_type, config.llm_base_url, config.llm_api_key, config.model_id))
+    } catch {
+      setModelError('모델 조회 실패 — Base URL / API Key를 확인하세요')
+    }
+  }
+
+  const loadEmbedModels = async () => {
+    setModelError('')
+    try {
+      setEmbedModels(await fetchProviderModels('embed', config.embed_provider_type, config.embed_base_url, config.embed_api_key, config.embed_model))
+    } catch {
+      setModelError('모델 조회 실패 — Base URL / API Key를 확인하세요')
+    }
+  }
 
   const handleSaveSlug = async () => {
     try {
@@ -54,9 +81,14 @@ export default function ConfigTab() {
   }, [])
 
   const handleSave = async () => {
-    await updateTenantConfig(config)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    setSaveError('')
+    try {
+      await updateTenantConfig(config)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch {
+      setSaveError('저장 실패 — Provider 연결 검증에 실패했을 수 있습니다(Base URL / API Key 확인)')
+    }
   }
 
   const handleResetKey = async () => {
@@ -107,12 +139,9 @@ export default function ConfigTab() {
           value={config.model_id}
           onChange={e => setConfig(c => ({ ...c, model_id: e.target.value }))}
         >
-          {POPULAR_MODELS.map(m => (
+          {modelOptions(llmModels, config.model_id, POPULAR_MODELS).map(m => (
             <option key={m} value={m}>{m}</option>
           ))}
-          {!POPULAR_MODELS.includes(config.model_id) && (
-            <option value={config.model_id}>{config.model_id}</option>
-          )}
         </select>
         <p style={{ marginTop: 4, fontSize: 12, color: '#718096' }}>
           직접 입력: <input
@@ -260,10 +289,25 @@ export default function ConfigTab() {
           placeholder="설정됨이면 ******** (변경할 때만 입력)" />
       </div>
       <div style={{ marginBottom: 12 }}>
+        <button style={s.btnSm} type="button" onClick={loadLlmModels}>LLM 모델 불러오기</button>
+        <span style={{ marginLeft: 8, fontSize: 12, color: '#718096' }}>
+          provider에서 사용가능 모델을 조회해 아래 LLM 모델·추출 모델 목록에 채웁니다.
+        </span>
+      </div>
+      <div style={{ marginBottom: 12 }}>
         <label style={s.label}>추출 모델 (비우면 플랫폼 기본)</label>
-        <input aria-label="추출 모델" style={{ ...s.input, width: '100%' }}
+        <select aria-label="추출 모델" style={{ ...s.input, width: '100%' }}
           value={config.extraction_model || ''}
-          onChange={e => setConfig(c => ({ ...c, extraction_model: e.target.value }))} />
+          onChange={e => setConfig(c => ({ ...c, extraction_model: e.target.value }))}>
+          <option value="">(플랫폼 기본)</option>
+          {modelOptions(llmModels, config.extraction_model).map(m => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+        <input aria-label="추출 모델 직접 입력" style={{ ...s.input, width: '100%', marginTop: 4, fontSize: 12 }}
+          value={config.extraction_model || ''}
+          onChange={e => setConfig(c => ({ ...c, extraction_model: e.target.value }))}
+          placeholder="직접 입력(목록에 없는 모델)" />
       </div>
 
       <hr style={{ margin: '24px 0', borderColor: '#e2e8f0' }} />
@@ -299,11 +343,24 @@ export default function ConfigTab() {
           placeholder="설정됨이면 ******** (변경할 때만 입력)" />
       </div>
       <div style={{ marginBottom: 12 }}>
-        <label style={s.label}>Embedding 모델</label>
-        <input aria-label="Embedding 모델" style={{ ...s.input, width: '100%' }}
-          value={config.embed_model || ''}
-          onChange={e => setConfig(c => ({ ...c, embed_model: e.target.value }))} />
+        <button style={s.btnSm} type="button" onClick={loadEmbedModels}>Embedding 모델 불러오기</button>
       </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={s.label}>Embedding 모델</label>
+        <select aria-label="Embedding 모델" style={{ ...s.input, width: '100%' }}
+          value={config.embed_model || ''}
+          onChange={e => setConfig(c => ({ ...c, embed_model: e.target.value }))}>
+          <option value="">(선택)</option>
+          {modelOptions(embedModels, config.embed_model).map(m => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+        <input aria-label="Embedding 모델 직접 입력" style={{ ...s.input, width: '100%', marginTop: 4, fontSize: 12 }}
+          value={config.embed_model || ''}
+          onChange={e => setConfig(c => ({ ...c, embed_model: e.target.value }))}
+          placeholder="직접 입력(목록에 없는 모델)" />
+      </div>
+      {modelError && <p style={s.error}>{modelError}</p>}
       <div style={{ marginBottom: 20 }}>
         <label style={s.label}>Embedding 차원</label>
         <input type="number" aria-label="Embedding 차원" style={{ ...s.input, width: 160 }}
@@ -311,6 +368,7 @@ export default function ConfigTab() {
           onChange={e => setConfig(c => ({ ...c, embed_dim: Number(e.target.value) }))} />
       </div>
 
+      {saveError && <p style={s.error}>{saveError}</p>}
       <button style={s.btn} onClick={handleSave}>
         {saved ? '✓ 저장됨' : '저장'}
       </button>
