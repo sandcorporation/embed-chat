@@ -73,9 +73,9 @@ def test_embedding_provider_dev_fallback_and_prod_required(tenant_with_key, sett
     tenant, _ = tenant_with_key
     config = TenantConfig.objects.get(tenant=tenant)  # embed provider 미설정
 
-    settings.EMBEDDING_PLATFORM_DEFAULT_ENABLED = True
+    settings.PLATFORM_DEFAULT_PROVIDERS_ENABLED = True
     assert embedding_provider(config).type == ""  # dev 폴백(ollama)
 
-    settings.EMBEDDING_PLATFORM_DEFAULT_ENABLED = False
+    settings.PLATFORM_DEFAULT_PROVIDERS_ENABLED = False
     with pytest.raises(ValueError):
         embedding_provider(config)  # prod는 거부

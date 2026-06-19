@@ -162,7 +162,7 @@ START → route_search → (local_search | global_search) → call_llm → (need
 | `GRAPH_EXTRACTION_MODEL` | 플랫폼 기본 추출 모델 | (미지정 시 기본 모델) |
 | `OLLAMA_BASE_URL` | Ollama URL(dev 기본 임베딩) | `http://ollama:11434` |
 | `OLLAMA_EMBED_MODEL` | dev 기본 임베딩 모델 | `bge-m3` |
-| `EMBEDDING_PLATFORM_DEFAULT_ENABLED` | 임베딩 플랫폼 폴백. **prod(GPU 없음)는 `false`** → Tenant Embedding Provider 필수 | `true`(dev)/`false`(prod) |
+| `PLATFORM_DEFAULT_PROVIDERS_ENABLED` | 플랫폼 기본 Provider 폴백(OpenRouter LLM + ollama 임베딩). **dev만 `true`**, prod(GPU 없음)는 `false` → Tenant가 LLM·Embedding Provider 설정 필수. `dev.py`/`prod.py`에서 명시(env 아님) | `True`(dev)/`False`(prod) |
 | `CHAT_RATE_LIMIT_PER_VISITOR` / `CHAT_RATE_LIMIT_PER_TENANT` | 공개 URL 레이트리밋(분당) | `20` / `300` |
 | `PADDLE_OCR_URL` | PaddleOCR 서비스 URL | `http://paddle-ocr:8080` |
 | `DEBUG` | 디버그 모드 | `False`(운영) |

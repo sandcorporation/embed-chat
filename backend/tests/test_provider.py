@@ -143,3 +143,31 @@ def test_chat_falls_back_to_platform_provider_when_unset(tenant_with_key, fake_c
 
     prov = fake_chat_llm.last_provider
     assert prov is not None and prov.type == ""  # 플랫폼 기본
+
+
+@pytest.mark.django_db
+def test_llm_provider_dev_fallback_and_prod_required(tenant_with_key, settings):
+    """LLM 미설정 시 dev는 OpenRouter 폴백, prod(플래그 off)는 Tenant 설정을 강제한다."""
+    from apps.tenants.models import TenantConfig
+    from apps.agent.providers import chat_provider
+
+    tenant, _ = tenant_with_key
+    config = TenantConfig.objects.get(tenant=tenant)
+    config.llm_provider_type = ""  # 미설정
+    config.save()
+
+    settings.PLATFORM_DEFAULT_PROVIDERS_ENABLED = True
+    assert chat_provider(config).type == ""  # dev 폴백(OpenRouter)
+
+    settings.PLATFORM_DEFAULT_PROVIDERS_ENABLED = False
+    with pytest.raises(ValueError):
+        chat_provider(config)
+
+
+@pytest.mark.django_db
+def test_config_exposes_platform_default_providers_flag(client, tenant_agent_token, settings):
+    """어드민 UI가 prod에서 '기본' Provider 옵션을 숨기도록 config가 플래그를 노출한다."""
+    settings.PLATFORM_DEFAULT_PROVIDERS_ENABLED = False
+    resp = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}")
+    assert resp.status_code == 200
+    assert resp.json()["platform_default_providers_enabled"] is False

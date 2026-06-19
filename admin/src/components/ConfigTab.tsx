@@ -239,7 +239,7 @@ export default function ConfigTab() {
           value={config.llm_provider_type || ''}
           onChange={e => setConfig(c => ({ ...c, llm_provider_type: e.target.value }))}
         >
-          <option value="">기본 (OpenRouter)</option>
+          {config.platform_default_providers_enabled && <option value="">기본 (OpenRouter)</option>}
           <option value="openai">OpenAI</option>
           <option value="anthropic">Claude (Anthropic)</option>
           <option value="custom">Custom (OpenAI-호환)</option>
@@ -280,7 +280,7 @@ export default function ConfigTab() {
           value={config.embed_provider_type || ''}
           onChange={e => setConfig(c => ({ ...c, embed_provider_type: e.target.value }))}
         >
-          <option value="">기본 (dev: ollama)</option>
+          {config.platform_default_providers_enabled && <option value="">기본 (dev: ollama)</option>}
           <option value="openai">OpenAI</option>
           <option value="custom">Custom (OpenAI-호환)</option>
         </select>

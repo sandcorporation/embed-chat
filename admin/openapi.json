@@ -679,6 +679,10 @@
             "title": "Model Id",
             "type": "string"
           },
+          "platform_default_providers_enabled": {
+            "title": "Platform Default Providers Enabled",
+            "type": "boolean"
+          },
           "require_identity_verification": {
             "title": "Require Identity Verification",
             "type": "boolean"
@@ -718,7 +722,8 @@
           "embed_base_url",
           "embed_api_key",
           "embed_model",
-          "embed_dim"
+          "embed_dim",
+          "platform_default_providers_enabled"
         ],
         "title": "TenantConfigOut",
         "type": "object"

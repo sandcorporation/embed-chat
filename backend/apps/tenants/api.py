@@ -69,6 +69,9 @@ class TenantConfigOut(Schema):
     embed_api_key: str
     embed_model: str
     embed_dim: int
+    # 서버 capability(저장 필드 아님): dev에서만 플랫폼 기본(OpenRouter/ollama) Provider 폴백이
+    # 켜진다. 어드민 UI는 이 값이 false면 "기본" Provider 옵션을 숨긴다(ADR-0012).
+    platform_default_providers_enabled: bool
 
 
 class TenantConfigIn(Schema):
@@ -342,6 +345,8 @@ _KEY_MASK = "********"
 
 
 def _config_out(config):
+    from django.conf import settings
+
     return {
         "model_id": config.model_id,
         "system_prompt": config.system_prompt,
@@ -362,6 +367,9 @@ def _config_out(config):
         "embed_api_key": _KEY_MASK if config.embed_api_key else "",
         "embed_model": config.embed_model,
         "embed_dim": config.embed_dim,
+        "platform_default_providers_enabled": getattr(
+            settings, "PLATFORM_DEFAULT_PROVIDERS_ENABLED", False
+        ),
     }
 
 

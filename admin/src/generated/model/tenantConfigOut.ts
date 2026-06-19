@@ -19,6 +19,7 @@ export interface TenantConfigOut {
   llm_base_url: string;
   llm_provider_type: string;
   model_id: string;
+  platform_default_providers_enabled: boolean;
   require_identity_verification: boolean;
   system_prompt: string;
   webhook_type: string;

@@ -12,6 +12,7 @@ const baseConfig = {
   brand_name: '', hitl_enabled: true, require_identity_verification: false,
   llm_provider_type: '', llm_base_url: '', llm_api_key: '', extraction_model: '',
   embed_provider_type: '', embed_base_url: '', embed_api_key: '', embed_model: '', embed_dim: 1024,
+  platform_default_providers_enabled: true,
 }
 
 function mockConfig(overrides = {}) {
@@ -97,6 +98,23 @@ describe('ConfigTab — Embedding Provider', () => {
       embed_provider_type: 'openai', embed_base_url: 'https://api.openai.com/v1',
       embed_api_key: 'sk-emb', embed_model: 'text-embedding-3-small', embed_dim: 1536,
     })))
+  })
+})
+
+describe('ConfigTab — 플랫폼 기본 Provider 게이팅', () => {
+  it('platform_default_providers_enabled=false면 "기본" Provider 옵션을 숨긴다', async () => {
+    mockConfig({ platform_default_providers_enabled: false })
+    render(<ConfigTab />)
+    await screen.findByLabelText('LLM Provider 타입')
+    expect(screen.queryByRole('option', { name: /기본 \(OpenRouter\)/ })).toBeNull()
+    expect(screen.queryByRole('option', { name: /기본.*ollama/ })).toBeNull()
+  })
+
+  it('platform_default_providers_enabled=true면 "기본" 옵션을 보여준다', async () => {
+    mockConfig({ platform_default_providers_enabled: true })
+    render(<ConfigTab />)
+    await screen.findByLabelText('LLM Provider 타입')
+    expect(screen.queryByRole('option', { name: /기본 \(OpenRouter\)/ })).not.toBeNull()
   })
 })
 

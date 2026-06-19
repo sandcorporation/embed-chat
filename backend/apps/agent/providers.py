@@ -50,7 +50,8 @@ def build_llm_client(provider: LLMProvider):
 
 
 def _provider_from_config(config, model: str) -> LLMProvider:
-    """TenantConfig + 모델명 → LLMProvider. type이 비면 플랫폼 기본(OpenRouter)으로 폴백."""
+    """TenantConfig + 모델명 → LLMProvider. type이 비면 dev는 플랫폼 기본(OpenRouter)으로
+    폴백하고, prod(PLATFORM_DEFAULT_PROVIDERS_ENABLED=False)는 Tenant 설정을 강제한다."""
     if config.llm_provider_type:
         from apps.tenants.crypto import decrypt_secret
 
@@ -62,6 +63,8 @@ def _provider_from_config(config, model: str) -> LLMProvider:
         )
     from django.conf import settings
 
+    if not getattr(settings, "PLATFORM_DEFAULT_PROVIDERS_ENABLED", False):
+        raise ValueError("LLM Provider가 설정되지 않았습니다 (프로덕션은 Tenant 설정 필수)")
     return LLMProvider(
         type="", model=model,
         base_url=settings.OPEN_ROUTER_BASE_URL, api_key=settings.OPEN_ROUTER_API_KEY,
@@ -95,7 +98,7 @@ def extraction_provider(config) -> LLMProvider:
 
 def embedding_provider(config) -> EmbeddingProvider:
     """LLM Provider와 독립된 Embedding Provider. 미설정 시 dev는 ollama 폴백,
-    prod(EMBEDDING_PLATFORM_DEFAULT_ENABLED=False)는 Tenant 설정을 강제한다."""
+    prod(PLATFORM_DEFAULT_PROVIDERS_ENABLED=False)는 Tenant 설정을 강제한다."""
     from django.conf import settings
 
     if config and config.embed_provider_type:
@@ -108,7 +111,7 @@ def embedding_provider(config) -> EmbeddingProvider:
             dim=config.embed_dim,
             api_key=decrypt_secret(config.embed_api_key),
         )
-    if getattr(settings, "EMBEDDING_PLATFORM_DEFAULT_ENABLED", True):
+    if getattr(settings, "PLATFORM_DEFAULT_PROVIDERS_ENABLED", False):
         return EmbeddingProvider(
             type="", base_url=f"{settings.OLLAMA_BASE_URL}/v1",
             model=settings.OLLAMA_EMBED_MODEL, dim=1024, api_key="ollama",
