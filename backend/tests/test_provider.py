@@ -173,6 +173,30 @@ def test_llm_provider_dev_fallback_and_prod_required(tenant_with_key, settings):
 
 
 @pytest.mark.django_db
+def test_extraction_falls_back_to_chat_model_when_unset(tenant_with_key):
+    """추출 모델 미설정 시 챗 모델(model_id)을 그대로 쓴다(어드민 '대화 모델과 동일').
+
+    어드민에서 'AI 모델' 하나만 고른 비개발자 테넌트는 자료 정리도 그 모델로 한다.
+    명시한 추출 모델이 있으면 그쪽이 우선한다.
+    """
+    from apps.tenants.models import TenantConfig
+    from apps.agent.providers import extraction_provider
+
+    tenant, _ = tenant_with_key
+    config = TenantConfig.objects.get(tenant=tenant)
+    config.llm_provider_type = "custom"  # 타입 지정 → 플랫폼 플래그와 무관하게 결정적
+    config.llm_base_url = "https://x/v1"
+    config.model_id = "chat-model-x"
+    config.extraction_model = ""  # 미설정 → 챗 모델로 폴백
+    config.save()
+    assert extraction_provider(config).model == "chat-model-x"
+
+    config.extraction_model = "explicit-extract"  # 명시 시 그쪽 우선
+    config.save()
+    assert extraction_provider(config).model == "explicit-extract"
+
+
+@pytest.mark.django_db
 def test_config_exposes_platform_default_providers_flag(client, tenant_agent_token, settings):
     """어드민 UI가 prod에서 '기본' Provider 옵션을 숨기도록 config가 플래그를 노출한다."""
     settings.PLATFORM_DEFAULT_PROVIDERS_ENABLED = False

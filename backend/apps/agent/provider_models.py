@@ -7,11 +7,18 @@ import httpx
 
 DEFAULT_TIMEOUT = 15.0
 ANTHROPIC_DEFAULT_BASE = "https://api.anthropic.com/v1"
+OPENAI_DEFAULT_BASE = "https://api.openai.com/v1"
 ANTHROPIC_VERSION = "2023-06-01"
 
 
 class ProviderError(Exception):
     """provider 조회·검증 실패(연결 불가·키 오류 등). 사람이 읽는 메시지."""
+
+
+def _openai_base(type: str, base_url: str) -> str:
+    """openai 타입은 base_url 미입력 시 표준 OpenAI 주소로 보정한다.
+    어드민은 custom일 때만 base_url을 노출하므로 openai는 빈 값으로 들어온다."""
+    return base_url or (OPENAI_DEFAULT_BASE if type == "openai" else base_url)
 
 
 def _ollama_tags(base_url: str) -> list[str]:
@@ -55,7 +62,7 @@ def list_provider_models(kind: str, type: str, base_url: str, api_key: str) -> l
         if type == "" and kind == "embed":
             return _ollama_tags(base_url)
         # openai / custom / "" (llm, OpenAI-호환) → /models
-        return _openai_models(base_url, api_key)
+        return _openai_models(_openai_base(type, base_url), api_key)
     except httpx.HTTPError as e:
         raise ProviderError(f"모델 조회 실패: {e}") from e
 
@@ -69,7 +76,7 @@ def validate_provider(kind: str, type: str, base_url: str, api_key: str, model: 
     if kind == "embed":
         try:
             r = httpx.post(
-                f"{base_url.rstrip('/')}/embeddings",
+                f"{_openai_base(type, base_url).rstrip('/')}/embeddings",
                 json={"model": model, "input": ["ok"]},
                 headers={"Authorization": f"Bearer {api_key or 'x'}"},
                 timeout=DEFAULT_TIMEOUT,

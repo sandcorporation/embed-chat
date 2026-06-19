@@ -90,10 +90,13 @@ def get_chat_provider():
 
 
 def extraction_provider(config) -> LLMProvider:
-    """GraphRAG 추출용 LLM provider (모델 = extraction_model 또는 플랫폼 기본)."""
+    """GraphRAG 추출용 LLM provider. 모델 우선순위: 명시한 추출 모델 → 챗 모델(model_id)
+    → 플랫폼 기본. 어드민에서 'AI 모델' 하나만 고른 테넌트는 자료 정리도 챗 모델로 한다
+    (테넌트 자기 provider에 없을 수 있는 플랫폼 모델명 대신 본인이 고른 모델 사용)."""
     from django.conf import settings
 
-    return _provider_from_config(config, config.extraction_model or settings.GRAPH_EXTRACTION_MODEL)
+    model = config.extraction_model or config.model_id or settings.GRAPH_EXTRACTION_MODEL
+    return _provider_from_config(config, model)
 
 
 def embedding_provider(config) -> EmbeddingProvider:
@@ -103,10 +106,12 @@ def embedding_provider(config) -> EmbeddingProvider:
 
     if config and config.embed_provider_type:
         from apps.tenants.crypto import decrypt_secret
+        from apps.agent.provider_models import _openai_base
 
         return EmbeddingProvider(
             type=config.embed_provider_type,
-            base_url=config.embed_base_url,
+            # openai는 어드민에서 base_url을 노출하지 않으므로 표준 주소로 보정한다.
+            base_url=_openai_base(config.embed_provider_type, config.embed_base_url),
             model=config.embed_model,
             dim=config.embed_dim,
             api_key=decrypt_secret(config.embed_api_key),

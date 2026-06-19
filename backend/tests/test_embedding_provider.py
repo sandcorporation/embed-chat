@@ -30,11 +30,19 @@ def test_get_embeddings_default_platform_still_works():
 
 
 @pytest.mark.django_db
-def test_embedding_provider_independent_config_key_encrypted(client, tenant_agent_token, tenant_with_key):
+def test_embedding_provider_independent_config_key_encrypted(client, tenant_agent_token, tenant_with_key, monkeypatch):
     """Embedding Provider는 LLM과 독립 설정되고, 키는 암호화·마스킹된다."""
     from apps.tenants.models import TenantConfig
     from apps.tenants.crypto import decrypt_secret
     from apps.agent.providers import embedding_provider
+    from apps.agent import provider_models
+
+    # embed provider 저장은 연결을 검증한다(issue 116) → provider HTTP를 Fake로 통과시킨다.
+    class _Resp:
+        status_code = 200
+        def json(self): return {"data": [{"embedding": [0.1]}]}
+        def raise_for_status(self): pass
+    monkeypatch.setattr(provider_models.httpx, "post", lambda *a, **k: _Resp())
 
     tenant, _ = tenant_with_key
     r = client.patch(
@@ -62,6 +70,25 @@ def test_embedding_provider_independent_config_key_encrypted(client, tenant_agen
     ep = embedding_provider(config)
     assert ep.type == "openai" and ep.model == "text-embedding-3-small" and ep.dim == 1536
     assert ep.api_key == "sk-embed-secret"  # 복호화 전달
+
+
+@pytest.mark.django_db
+def test_embedding_provider_openai_defaults_base_url(tenant_with_key):
+    """openai 임베딩 타입은 base_url 미입력 시 표준 OpenAI 주소로 보정된다.
+
+    어드민은 custom일 때만 base_url을 노출하므로, openai는 빈 base_url로 저장된다.
+    런타임 임베딩이 `f"{base_url}/embeddings"`로 조립되므로 보정이 없으면 깨진다.
+    """
+    from apps.tenants.models import TenantConfig
+    from apps.agent.providers import embedding_provider
+
+    tenant, _ = tenant_with_key
+    config = TenantConfig.objects.get(tenant=tenant)
+    config.embed_provider_type = "openai"
+    config.embed_base_url = ""
+    config.embed_model = "text-embedding-3-small"
+    config.save()
+    assert embedding_provider(config).base_url == "https://api.openai.com/v1"
 
 
 @pytest.mark.django_db

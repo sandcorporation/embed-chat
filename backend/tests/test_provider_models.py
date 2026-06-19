@@ -35,6 +35,36 @@ def test_list_openai_compatible_models(monkeypatch):
     assert models == ["gpt-4o", "gpt-4o-mini"]
 
 
+def test_openai_empty_base_url_defaults_to_canonical(monkeypatch):
+    """openai 타입은 base_url 미입력 시 표준 OpenAI 주소로 보정한다(어드민 custom만 base_url)."""
+    from apps.agent import provider_models
+
+    seen = {}
+
+    def fake_get(url, headers=None, timeout=None):
+        seen["url"] = url
+        return _FakeResp(200, {"data": [{"id": "gpt-4o"}]})
+
+    monkeypatch.setattr(provider_models.httpx, "get", fake_get)
+    provider_models.list_provider_models("llm", "openai", "", "sk-x")
+    assert seen["url"] == "https://api.openai.com/v1/models"
+
+
+def test_validate_embed_openai_empty_base_defaults(monkeypatch):
+    """openai 임베딩 검증도 base_url 미입력 시 표준 OpenAI 주소로 보정한다."""
+    from apps.agent import provider_models
+
+    seen = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        seen["url"] = url
+        return _FakeResp(200, {"data": [{"embedding": [0.1]}]})
+
+    monkeypatch.setattr(provider_models.httpx, "post", fake_post)
+    provider_models.validate_provider("embed", "openai", "", "sk", "text-embedding-3-small")
+    assert seen["url"] == "https://api.openai.com/v1/embeddings"
+
+
 def test_list_anthropic_models(monkeypatch):
     from apps.agent import provider_models
 
