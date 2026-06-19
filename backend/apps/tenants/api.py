@@ -383,10 +383,46 @@ def _embed_signature(config):
     return (config.embed_provider_type, config.embed_base_url, config.embed_model, config.embed_dim)
 
 
-@tenant_router.patch("/config/", response=TenantConfigOut)
+def _validate_changed_provider(config, body, kind):
+    """provider 연결 필드가 바뀌었고 type이 non-empty면 connectivity를 검증한다.
+    검증 실패 시 ProviderError를 올린다. 미변경/플랫폼기본이면 검증하지 않는다(연결성만)."""
+    from apps.agent.provider_models import validate_provider
+    from apps.tenants.crypto import decrypt_secret
+
+    if kind == "llm":
+        new_type = body.llm_provider_type if body.llm_provider_type is not None else config.llm_provider_type
+        new_base = body.llm_base_url if body.llm_base_url is not None else config.llm_base_url
+        new_key_raw, stored_enc = body.llm_api_key, config.llm_api_key
+        cur_type, cur_base = config.llm_provider_type, config.llm_base_url
+        model = body.model_id if body.model_id is not None else config.model_id
+    else:
+        new_type = body.embed_provider_type if body.embed_provider_type is not None else config.embed_provider_type
+        new_base = body.embed_base_url if body.embed_base_url is not None else config.embed_base_url
+        new_key_raw, stored_enc = body.embed_api_key, config.embed_api_key
+        cur_type, cur_base = config.embed_provider_type, config.embed_base_url
+        model = body.embed_model if body.embed_model is not None else config.embed_model
+
+    key_changed = new_key_raw is not None and new_key_raw != _KEY_MASK
+    changed = (new_type != cur_type) or (new_base != cur_base) or key_changed
+    if not changed or not new_type:
+        return
+    eff_key = new_key_raw if key_changed else (decrypt_secret(stored_enc) if stored_enc else "")
+    validate_provider(kind, new_type, new_base, eff_key, model)
+
+
+@tenant_router.patch("/config/", response={200: TenantConfigOut, 400: dict})
 def update_config(request, body: TenantConfigIn):
     config = request.auth.tenant.config
     _old_embed = _embed_signature(config)
+
+    # provider 연결 필드가 바뀌었으면 저장 전에 검증 — 실패하면 broken provider를 거부한다.
+    from apps.agent.provider_models import ProviderError
+    try:
+        _validate_changed_provider(config, body, "llm")
+        _validate_changed_provider(config, body, "embed")
+    except ProviderError as e:
+        return 400, {"detail": str(e)}
+
     for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message", "brand_name", "hitl_enabled", "require_identity_verification", "llm_provider_type", "llm_base_url", "extraction_model", "embed_provider_type", "embed_base_url", "embed_model", "embed_dim"):
         value = getattr(body, field)
         if value is not None:

@@ -45,10 +45,18 @@ def test_resolver_builds_anthropic_native_for_anthropic():
 # ── Issue 92: provider 설정 API — 키 암호화·write-only ─────────────────────────
 
 @pytest.mark.django_db
-def test_llm_provider_config_key_encrypted_and_masked(client, tenant_agent_token, tenant_with_key):
+def test_llm_provider_config_key_encrypted_and_masked(client, tenant_agent_token, tenant_with_key, monkeypatch):
     """LLM provider 설정 저장 시 키는 암호화되고, GET 응답엔 평문이 노출되지 않는다."""
     from apps.tenants.models import TenantConfig
     from apps.tenants.crypto import decrypt_secret
+    from apps.agent import provider_models
+
+    # provider 저장은 이제 연결을 검증한다(issue 116) → provider HTTP를 Fake로 통과시킨다.
+    class _Resp:
+        status_code = 200
+        def json(self): return {"data": [{"id": "gpt-4o-mini"}]}
+        def raise_for_status(self): pass
+    monkeypatch.setattr(provider_models.httpx, "get", lambda *a, **k: _Resp())
 
     tenant, _ = tenant_with_key
     r = client.patch(

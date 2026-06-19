@@ -183,3 +183,62 @@ def test_provider_models_endpoint_requires_auth(client):
         content_type="application/json",
     )
     assert resp.status_code == 401
+
+
+# ── update_config provider 검증 (issue 116) ──────────────────────────────────
+
+def _patch_validate(monkeypatch, get_status=200, get_payload=None, counter=None):
+    """provider HTTP(get/post)를 Fake로 — validate_provider가 이걸 친다."""
+    from apps.agent import provider_models
+
+    def fake_get(url, headers=None, timeout=None):
+        if counter is not None:
+            counter["n"] += 1
+        return _FakeResp(get_status, get_payload if get_payload is not None else {"data": []})
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        if counter is not None:
+            counter["n"] += 1
+        return _FakeResp(get_status, {"data": [{"embedding": [0.1]}]})
+
+    monkeypatch.setattr(provider_models.httpx, "get", fake_get)
+    monkeypatch.setattr(provider_models.httpx, "post", fake_post)
+
+
+def _patch_config(client, token, body):
+    return client.patch(
+        "/api/tenant/config/", body, content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {token}",
+    )
+
+
+@pytest.mark.django_db
+def test_update_config_rejects_invalid_provider(client, tenant_agent_token, monkeypatch):
+    _patch_validate(monkeypatch, get_status=401)  # provider 연결 실패
+    resp = _patch_config(client, tenant_agent_token, {
+        "llm_provider_type": "openai", "llm_base_url": "https://x/v1", "llm_api_key": "bad-key",
+    })
+    assert resp.status_code == 400
+    # 저장되지 않아야 한다(롤백)
+    g = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}").json()
+    assert g["llm_provider_type"] == ""
+
+
+@pytest.mark.django_db
+def test_update_config_saves_when_provider_valid(client, tenant_agent_token, monkeypatch):
+    _patch_validate(monkeypatch, get_status=200, get_payload={"data": [{"id": "m"}]})
+    resp = _patch_config(client, tenant_agent_token, {
+        "llm_provider_type": "openai", "llm_base_url": "https://x/v1", "llm_api_key": "sk-new",
+    })
+    assert resp.status_code == 200
+    assert resp.json()["llm_provider_type"] == "openai"
+
+
+@pytest.mark.django_db
+def test_update_config_skips_validation_when_provider_unchanged(client, tenant_agent_token, monkeypatch):
+    counter = {"n": 0}
+    _patch_validate(monkeypatch, counter=counter)
+    resp = _patch_config(client, tenant_agent_token, {"system_prompt": "새 프롬프트"})
+    assert resp.status_code == 200
+    assert counter["n"] == 0  # provider 미변경 → 검증(HTTP) 미호출
+    assert resp.json()["system_prompt"] == "새 프롬프트"
