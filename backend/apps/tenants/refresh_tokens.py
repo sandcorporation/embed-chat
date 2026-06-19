@@ -85,3 +85,17 @@ def revoke_session(raw: str) -> None:
     row = RefreshToken.objects.filter(token_hash=_hash(raw)).first()
     if row:
         revoke_family(row.family_id)
+
+
+def prune_refresh_tokens() -> int:
+    """만료(절대 캡 경과)·폐기 RefreshToken row를 삭제하고 삭제 건수를 반환한다.
+
+    동시 Family 수 상한이 없으므로 이 정리가 유일한 GC 경로(주기 작업으로 호출).
+    """
+    from django.db.models import Q
+
+    qs = RefreshToken.objects.filter(
+        Q(revoked=True) | Q(family_expires_at__lt=timezone.now())
+    )
+    deleted, _ = qs.delete()
+    return deleted
