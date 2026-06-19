@@ -7,7 +7,7 @@ import AgentsTab from '../components/AgentsTab'
 import HitlTab from '../components/HitlTab'
 import { s } from '../styles'
 
-export default function TenantDashboard({ agentToken, username, onLogout }) {
+export default function TenantDashboard({ username, onLogout }) {
   const [tab, setTab] = useState('documents')
 
   return (
@@ -33,12 +33,12 @@ export default function TenantDashboard({ agentToken, username, onLogout }) {
       </div>
 
       <div style={s.tabContent}>
-        {tab === 'documents' && <DocumentsTab agentToken={agentToken} />}
-        {tab === 'graph' && <KnowledgeGraphTab agentToken={agentToken} />}
-        {tab === 'visitors' && <VisitorsTab agentToken={agentToken} />}
-        {tab === 'config' && <ConfigTab agentToken={agentToken} />}
-        {tab === 'agents' && <AgentsTab agentToken={agentToken} />}
-        {tab === 'hitl' && <HitlTab agentToken={agentToken} />}
+        {tab === 'documents' && <DocumentsTab />}
+        {tab === 'graph' && <KnowledgeGraphTab />}
+        {tab === 'visitors' && <VisitorsTab />}
+        {tab === 'config' && <ConfigTab />}
+        {tab === 'agents' && <AgentsTab />}
+        {tab === 'hitl' && <HitlTab />}
       </div>
     </div>
   )

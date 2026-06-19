@@ -156,7 +156,7 @@ _dual_auth = _make_agent_auth()
 
 
 @agent_router.post("/auth/login", response={200: AgentLoginOut, 401: dict}, auth=None)
-def agent_login(request, body: AgentLoginIn):
+def agent_login(request, body: AgentLoginIn, response: HttpResponse):
     try:
         agent = TenantAgent.objects.select_related("tenant").get(
             tenant__name=body.tenant_name, username=body.username, is_active=True
@@ -167,7 +167,23 @@ def agent_login(request, body: AgentLoginIn):
         return 401, {"detail": "Invalid credentials"}
     if not agent.check_password(body.password):
         return 401, {"detail": "Invalid credentials"}
+    set_refresh_cookie(response, agent, issue_session(agent))
     return 200, {"access_token": create_tenant_agent_token(agent)}
+
+
+@agent_router.post("/auth/refresh", response={200: AgentLoginOut, 401: dict}, auth=None)
+def agent_refresh(request, response: HttpResponse):
+    raw = request.COOKIES.get(cookie_name(TENANT_AGENT))
+    if not raw:
+        return 401, {"detail": "No refresh token"}
+    try:
+        subject, new_raw = rotate(raw)
+    except RefreshRejected:
+        return 401, {"detail": "Invalid refresh token"}
+    if not isinstance(subject, TenantAgent) or not subject.is_active:
+        return 401, {"detail": "Invalid refresh token"}
+    set_refresh_cookie(response, subject, new_raw)
+    return 200, {"access_token": create_tenant_agent_token(subject)}
 
 
 def _get_tenant_from_auth(auth_obj):

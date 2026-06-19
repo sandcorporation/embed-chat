@@ -6,7 +6,7 @@ const STATUS_COLORS = { pending: '#ed8936', processing: '#4299e1', ready: '#48bb
 const FRESHNESS_LABEL = { fresh: '최신', stale: '재구축 필요', rebuilding: '재구축 중…' }
 const FRESHNESS_COLOR = { fresh: '#48bb78', stale: '#ed8936', rebuilding: '#4299e1' }
 
-export default function DocumentsTab({ agentToken }) {
+export default function DocumentsTab() {
   const [docs, setDocs] = useState([])
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef()
@@ -19,19 +19,19 @@ export default function DocumentsTab({ agentToken }) {
 
   const loadGraphStatus = async () => {
     try {
-      const data = await getGraphStatus(agentToken)
+      const data = await getGraphStatus()
       setGraphFreshness(data.freshness)
     } catch { /* ignore */ }
   }
 
   const handleRebuildGraph = async () => {
-    await rebuildGraph(agentToken)
+    await rebuildGraph()
     setGraphFreshness('rebuilding')
     setTimeout(loadGraphStatus, 1500)
   }
 
   const load = async () => {
-    const data = await listDocuments(agentToken)
+    const data = await listDocuments()
     setDocs(data)
   }
 
@@ -58,7 +58,7 @@ export default function DocumentsTab({ agentToken }) {
   const confirmUpload = async () => {
     if (!pendingFile) return
     setUploading(true)
-    await uploadDocument(agentToken, pendingFile, uploadLabel.trim())
+    await uploadDocument(pendingFile, uploadLabel.trim())
     await load()
     setUploading(false)
     cancelUpload()
@@ -72,7 +72,7 @@ export default function DocumentsTab({ agentToken }) {
   const saveEdit = async (id) => {
     const name = editLabel.trim()
     if (!name) return
-    await updateDocument(agentToken, id, name)
+    await updateDocument(id, name)
     setEditingId(null)
     setEditLabel('')
     await load()
@@ -80,7 +80,7 @@ export default function DocumentsTab({ agentToken }) {
 
   const handleDelete = async (id) => {
     if (!confirm('삭제하시겠습니까?')) return
-    await deleteDocument(agentToken, id)
+    await deleteDocument(id)
     setExpandedChunks(prev => { const n = { ...prev }; delete n[id]; return n })
     await load()
   }
@@ -91,7 +91,7 @@ export default function DocumentsTab({ agentToken }) {
       return
     }
     setExpandedChunks(prev => ({ ...prev, [docId]: 'loading' }))
-    const chunks = await listDocumentChunks(agentToken, docId)
+    const chunks = await listDocumentChunks(docId)
     setExpandedChunks(prev => ({ ...prev, [docId]: chunks }))
   }
 

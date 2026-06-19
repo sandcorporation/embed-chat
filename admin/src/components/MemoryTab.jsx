@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { listMemories, updateMemory, deleteMemory } from '../api'
 import { s } from '../styles'
 
-export default function MemoryTab({ agentToken }) {
+export default function MemoryTab() {
   const [visitorId, setVisitorId] = useState('')
   const [memories, setMemories] = useState([])
   const [searched, setSearched] = useState(false)
@@ -10,18 +10,18 @@ export default function MemoryTab({ agentToken }) {
 
   const search = async () => {
     if (!visitorId.trim()) return
-    const data = await listMemories(agentToken, visitorId.trim())
+    const data = await listMemories(visitorId.trim())
     setMemories(data)
     setSearched(true)
   }
 
   const handleDelete = async (memId) => {
-    await deleteMemory(agentToken, visitorId, memId)
+    await deleteMemory(visitorId, memId)
     setMemories(m => m.filter(x => x.id !== memId))
   }
 
   const handleUpdate = async (mem) => {
-    const updated = await updateMemory(agentToken, visitorId, mem.id, { key: mem.key, value: mem.value })
+    const updated = await updateMemory(visitorId, mem.id, { key: mem.key, value: mem.value })
     setMemories(m => m.map(x => x.id === mem.id ? updated : x))
     setEditing(null)
   }

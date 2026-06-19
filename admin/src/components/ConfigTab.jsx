@@ -19,7 +19,7 @@ const WEBHOOK_TYPES = [
   { value: 'generic', label: 'Generic' },
 ]
 
-export default function ConfigTab({ agentToken }) {
+export default function ConfigTab() {
   const [config, setConfig] = useState({
     model_id: '',
     system_prompt: '',
@@ -37,7 +37,7 @@ export default function ConfigTab({ agentToken }) {
 
   const handleSaveSlug = async () => {
     try {
-      await updateTenantSlug(agentToken, slug)
+      await updateTenantSlug(slug)
       setSlugSaved(true)
       setTimeout(() => setSlugSaved(false), 2000)
     } catch (e) {
@@ -46,14 +46,14 @@ export default function ConfigTab({ agentToken }) {
   }
 
   useEffect(() => {
-    getTenantConfig(agentToken).then(data => {
+    getTenantConfig().then(data => {
       setConfig(data)
       setLoading(false)
     })
   }, [])
 
   const handleSave = async () => {
-    await updateTenantConfig(agentToken, config)
+    await updateTenantConfig(config)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -64,7 +64,7 @@ export default function ConfigTab({ agentToken }) {
       return
     }
     try {
-      const data = await resetTenantKey(agentToken)
+      const data = await resetTenantKey()
       setNewKey(data.new_tenant_key)
       setResetConfirm(false)
     } catch {

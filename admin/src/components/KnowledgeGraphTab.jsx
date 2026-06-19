@@ -12,7 +12,7 @@ function toGraphData(nodes, edges) {
   }
 }
 
-export default function KnowledgeGraphTab({ agentToken }) {
+export default function KnowledgeGraphTab() {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
@@ -40,7 +40,7 @@ export default function KnowledgeGraphTab({ agentToken }) {
   const runSearch = async (q) => {
     if (!q.trim()) return
     setLoading(true)
-    const data = await searchGraph(agentToken, q)
+    const data = await searchGraph(q)
     setNodes(data.nodes || [])
     setEdges(data.edges || [])
     setSelected(null)
@@ -50,7 +50,7 @@ export default function KnowledgeGraphTab({ agentToken }) {
 
   const expandNode = async (name) => {
     setSelected(nodes.find(n => n.name === name) || { name })
-    const data = await graphNeighbors(agentToken, name)
+    const data = await graphNeighbors(name)
     mergeSubgraph(data.nodes || [], data.edges || [])
   }
 

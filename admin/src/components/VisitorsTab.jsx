@@ -14,16 +14,16 @@ const HITL_BADGE = {
   marginLeft: 6,
 }
 
-function VisitorList({ agentToken, selectedId, onSelect }) {
+function VisitorList({ selectedId, onSelect }) {
   const [search, setSearch] = useState('')
   const [visitors, setVisitors] = useState([])
 
   const load = async (q) => {
-    const data = await listVisitors(agentToken, q || undefined)
+    const data = await listVisitors(q || undefined)
     setVisitors(Array.isArray(data) ? data : [])
   }
 
-  useEffect(() => { load('') }, [agentToken])
+  useEffect(() => { load('') }, [])
 
   return (
     <div style={{ width: 220, flexShrink: 0, borderRight: '1px solid #e2e8f0', paddingRight: 16 }}>
@@ -62,14 +62,14 @@ function VisitorList({ agentToken, selectedId, onSelect }) {
   )
 }
 
-function SessionList({ agentToken, visitorId, onSelectSession }) {
+function SessionList({ visitorId, onSelectSession }) {
   const [sessions, setSessions] = useState([])
 
   useEffect(() => {
-    listVisitorSessions(agentToken, visitorId).then(data => {
+    listVisitorSessions(visitorId).then(data => {
       setSessions(Array.isArray(data) ? data : [])
     })
-  }, [visitorId, agentToken])
+  }, [visitorId])
 
   if (sessions.length === 0) {
     return <p style={{ fontSize: 12, color: '#a0aec0' }}>세션 없음</p>
@@ -102,23 +102,23 @@ function SessionList({ agentToken, visitorId, onSelectSession }) {
   )
 }
 
-function MemoryEditor({ agentToken, visitorId }) {
+function MemoryEditor({ visitorId }) {
   const [memories, setMemories] = useState([])
   const [editing, setEditing] = useState(null)
 
   useEffect(() => {
-    listMemories(agentToken, visitorId).then(data => {
+    listMemories(visitorId).then(data => {
       setMemories(Array.isArray(data) ? data : [])
     })
-  }, [visitorId, agentToken])
+  }, [visitorId])
 
   const handleDelete = async (memId) => {
-    await deleteMemory(agentToken, visitorId, memId)
+    await deleteMemory(visitorId, memId)
     setMemories(m => m.filter(x => x.id !== memId))
   }
 
   const handleUpdate = async (mem) => {
-    const updated = await updateMemory(agentToken, visitorId, mem.id, { key: mem.key, value: mem.value })
+    const updated = await updateMemory(visitorId, mem.id, { key: mem.key, value: mem.value })
     setMemories(m => m.map(x => x.id === mem.id ? updated : x))
     setEditing(null)
   }
@@ -167,7 +167,7 @@ function MemoryEditor({ agentToken, visitorId }) {
   )
 }
 
-export default function VisitorsTab({ agentToken }) {
+export default function VisitorsTab() {
   const [selectedVisitor, setSelectedVisitor] = useState(null)
   const [selectedSession, setSelectedSession] = useState(null)
 
@@ -179,7 +179,7 @@ export default function VisitorsTab({ agentToken }) {
   return (
     <div style={{ display: 'flex', gap: 24, minHeight: 500 }}>
       <VisitorList
-        agentToken={agentToken}
+       
         selectedId={selectedVisitor}
         onSelect={handleSelectVisitor}
       />
@@ -191,7 +191,7 @@ export default function VisitorsTab({ agentToken }) {
           </p>
         ) : selectedSession ? (
           <SessionDetail
-            agentToken={agentToken}
+           
             sessionId={selectedSession}
             onBack={() => setSelectedSession(null)}
           />
@@ -202,13 +202,13 @@ export default function VisitorsTab({ agentToken }) {
             </h4>
             <Section title="세션 목록">
               <SessionList
-                agentToken={agentToken}
+               
                 visitorId={selectedVisitor}
                 onSelectSession={setSelectedSession}
               />
             </Section>
             <Section title="Memory">
-              <MemoryEditor agentToken={agentToken} visitorId={selectedVisitor} />
+              <MemoryEditor visitorId={selectedVisitor} />
             </Section>
           </div>
         )}

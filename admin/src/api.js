@@ -1,12 +1,6 @@
-import { authFetch, setAccess } from './auth'
+import { authFetch, setAccess, getAccess } from './auth'
 
 const BASE = import.meta.env.VITE_API_BASE || ''
-
-function getHeaders(token) {
-  const h = { 'Content-Type': 'application/json' }
-  if (token) h['Authorization'] = `Bearer ${token}`
-  return h
-}
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
@@ -55,44 +49,44 @@ export async function deleteTenant(id) {
 export async function tenantAgentLogin(tenantName, username, password) {
   const res = await fetch(`${BASE}/api/tenant/agents/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include', // 서버가 내려주는 refresh 쿠키 수신
+    headers: JSON_HEADERS,
     body: JSON.stringify({ tenant_name: tenantName, username, password }),
   })
   if (!res.ok) throw new Error('Invalid credentials')
-  return res.json()
+  const data = await res.json()
+  setAccess('agent', data.access_token)
+  return data
 }
 
 // ── Tenant Config ─────────────────────────────────────────────────────────
 
-export async function getTenantConfig(agentToken) {
-  const res = await fetch(`${BASE}/api/tenant/config/`, { headers: getHeaders(agentToken) })
+export async function getTenantConfig() {
+  const res = await authFetch('agent', '/api/tenant/config/')
   return res.json()
 }
 
-export async function updateTenantConfig(agentToken, data) {
-  const res = await fetch(`${BASE}/api/tenant/config/`, {
+export async function updateTenantConfig(data) {
+  const res = await authFetch('agent', '/api/tenant/config/', {
     method: 'PATCH',
-    headers: getHeaders(agentToken),
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   })
   return res.json()
 }
 
-export async function updateTenantSlug(agentToken, slug) {
-  const res = await fetch(`${BASE}/api/tenant/slug/`, {
+export async function updateTenantSlug(slug) {
+  const res = await authFetch('agent', '/api/tenant/slug/', {
     method: 'PATCH',
-    headers: getHeaders(agentToken),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ slug }),
   })
   if (!res.ok) throw new Error('slug 저장 실패 (형식·중복·예약어 확인)')
   return res.json()
 }
 
-export async function resetTenantKey(agentToken) {
-  const res = await fetch(`${BASE}/api/tenant/reset-key`, {
-    method: 'POST',
-    headers: getHeaders(agentToken),
-  })
+export async function resetTenantKey() {
+  const res = await authFetch('agent', '/api/tenant/reset-key', { method: 'POST' })
   if (!res.ok) throw new Error('재발급 실패')
   return res.json()
 }
@@ -100,158 +94,131 @@ export async function resetTenantKey(agentToken) {
 
 // ── Documents ─────────────────────────────────────────────────────────────
 
-export async function listDocuments(agentToken) {
-  const res = await fetch(`${BASE}/api/tenant/documents/`, { headers: { Authorization: `Bearer ${agentToken}` } })
+export async function listDocuments() {
+  const res = await authFetch('agent', '/api/tenant/documents/')
   return res.json()
 }
 
-export async function uploadDocument(agentToken, file, name) {
+export async function uploadDocument(file, name) {
   const formData = new FormData()
   formData.append('file', file)
   if (name) formData.append('name', name)
-  const res = await fetch(`${BASE}/api/tenant/documents/`, {
+  const res = await authFetch('agent', '/api/tenant/documents/', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${agentToken}` },
-    body: formData,
+    body: formData, // Content-Type은 브라우저가 multipart boundary로 설정
   })
   return res.json()
 }
 
-export async function updateDocument(agentToken, id, name) {
-  const res = await fetch(`${BASE}/api/tenant/documents/${id}`, {
+export async function updateDocument(id, name) {
+  const res = await authFetch('agent', `/api/tenant/documents/${id}`, {
     method: 'PATCH',
-    headers: getHeaders(agentToken),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ name }),
   })
   return res.json()
 }
 
-export async function deleteDocument(agentToken, id) {
-  await fetch(`${BASE}/api/tenant/documents/${id}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${agentToken}` },
-  })
+export async function deleteDocument(id) {
+  await authFetch('agent', `/api/tenant/documents/${id}`, { method: 'DELETE' })
 }
 
-export async function listDocumentChunks(agentToken, docId) {
-  const res = await fetch(`${BASE}/api/tenant/documents/${docId}/chunks`, {
-    headers: { Authorization: `Bearer ${agentToken}` },
-  })
+export async function listDocumentChunks(docId) {
+  const res = await authFetch('agent', `/api/tenant/documents/${docId}/chunks`)
   return res.json()
 }
 
-export async function searchGraph(agentToken, q) {
-  const res = await fetch(`${BASE}/api/tenant/documents/graph/search?q=${encodeURIComponent(q)}`, {
-    headers: getHeaders(agentToken),
-  })
+export async function searchGraph(q) {
+  const res = await authFetch('agent', `/api/tenant/documents/graph/search?q=${encodeURIComponent(q)}`)
   return res.json()
 }
 
-export async function graphNeighbors(agentToken, entity) {
-  const res = await fetch(`${BASE}/api/tenant/documents/graph/neighbors?entity=${encodeURIComponent(entity)}`, {
-    headers: getHeaders(agentToken),
-  })
+export async function graphNeighbors(entity) {
+  const res = await authFetch('agent', `/api/tenant/documents/graph/neighbors?entity=${encodeURIComponent(entity)}`)
   return res.json()
 }
 
-export async function getGraphStatus(agentToken) {
-  const res = await fetch(`${BASE}/api/tenant/documents/graph/status`, { headers: getHeaders(agentToken) })
+export async function getGraphStatus() {
+  const res = await authFetch('agent', '/api/tenant/documents/graph/status')
   return res.json()
 }
 
-export async function rebuildGraph(agentToken) {
-  const res = await fetch(`${BASE}/api/tenant/documents/graph/rebuild`, {
-    method: 'POST',
-    headers: getHeaders(agentToken),
-  })
+export async function rebuildGraph() {
+  const res = await authFetch('agent', '/api/tenant/documents/graph/rebuild', { method: 'POST' })
   return res.json()
 }
 
 // ── Visitors ──────────────────────────────────────────────────────────────
 
-export async function listVisitors(agentToken, search) {
+export async function listVisitors(search) {
   const url = search
-    ? `${BASE}/api/tenant/visitors/?search=${encodeURIComponent(search)}`
-    : `${BASE}/api/tenant/visitors/`
-  const res = await fetch(url, { headers: getHeaders(agentToken) })
+    ? `/api/tenant/visitors/?search=${encodeURIComponent(search)}`
+    : '/api/tenant/visitors/'
+  const res = await authFetch('agent', url)
   return res.json()
 }
 
-export async function listVisitorSessions(agentToken, visitorId) {
-  const res = await fetch(`${BASE}/api/tenant/visitors/${visitorId}/sessions/`, {
-    headers: getHeaders(agentToken),
-  })
+export async function listVisitorSessions(visitorId) {
+  const res = await authFetch('agent', `/api/tenant/visitors/${visitorId}/sessions/`)
   return res.json()
 }
 
-export async function getSessionMessages(agentToken, sessionId) {
-  const res = await fetch(`${BASE}/api/tenant/sessions/${sessionId}/messages/`, {
-    headers: getHeaders(agentToken),
-  })
+export async function getSessionMessages(sessionId) {
+  const res = await authFetch('agent', `/api/tenant/sessions/${sessionId}/messages/`)
   return res.json()
 }
 
-export async function getSessionCheckpoint(agentToken, sessionId) {
-  const res = await fetch(`${BASE}/api/tenant/sessions/${sessionId}/checkpoint`, {
-    headers: getHeaders(agentToken),
-  })
+export async function getSessionCheckpoint(sessionId) {
+  const res = await authFetch('agent', `/api/tenant/sessions/${sessionId}/checkpoint`)
   if (res.status === 404) return null
   return res.json()
 }
 
 // ── Memory ────────────────────────────────────────────────────────────────
 
-export async function listMemories(agentToken, visitorId) {
-  const res = await fetch(`${BASE}/api/tenant/visitors/${visitorId}/memory/`, {
-    headers: getHeaders(agentToken),
-  })
+export async function listMemories(visitorId) {
+  const res = await authFetch('agent', `/api/tenant/visitors/${visitorId}/memory/`)
   return res.json()
 }
 
-export async function updateMemory(agentToken, visitorId, memoryId, data) {
-  const res = await fetch(`${BASE}/api/tenant/visitors/${visitorId}/memory/${memoryId}`, {
+export async function updateMemory(visitorId, memoryId, data) {
+  const res = await authFetch('agent', `/api/tenant/visitors/${visitorId}/memory/${memoryId}`, {
     method: 'PATCH',
-    headers: getHeaders(agentToken),
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   })
   return res.json()
 }
 
-export async function deleteMemory(agentToken, visitorId, memoryId) {
-  await fetch(`${BASE}/api/tenant/visitors/${visitorId}/memory/${memoryId}`, {
-    method: 'DELETE',
-    headers: getHeaders(agentToken),
-  })
+export async function deleteMemory(visitorId, memoryId) {
+  await authFetch('agent', `/api/tenant/visitors/${visitorId}/memory/${memoryId}`, { method: 'DELETE' })
 }
 
 // ── TenantAgent Management ────────────────────────────────────────────────
 
-export async function listAgents(agentToken) {
-  const res = await fetch(`${BASE}/api/tenant/agents/`, { headers: getHeaders(agentToken) })
+export async function listAgents() {
+  const res = await authFetch('agent', '/api/tenant/agents/')
   return res.json()
 }
 
-export async function createAgent(agentToken, username) {
-  const res = await fetch(`${BASE}/api/tenant/agents/`, {
+export async function createAgent(username) {
+  const res = await authFetch('agent', '/api/tenant/agents/', {
     method: 'POST',
-    headers: getHeaders(agentToken),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ username }),
   })
   return res.json()
 }
 
-export async function deactivateAgent(agentToken, agentId) {
-  const res = await fetch(`${BASE}/api/tenant/agents/${agentId}/deactivate`, {
-    method: 'PATCH',
-    headers: getHeaders(agentToken),
-  })
+export async function deactivateAgent(agentId) {
+  const res = await authFetch('agent', `/api/tenant/agents/${agentId}/deactivate`, { method: 'PATCH' })
   return res.json()
 }
 
-export async function changePassword(agentToken, currentPassword, newPassword) {
-  const res = await fetch(`${BASE}/api/tenant/agents/me/change-password`, {
+export async function changePassword(currentPassword, newPassword) {
+  const res = await authFetch('agent', '/api/tenant/agents/me/change-password', {
     method: 'POST',
-    headers: getHeaders(agentToken),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   })
   if (!res.ok) throw new Error('현재 비밀번호가 올바르지 않습니다.')
@@ -260,52 +227,42 @@ export async function changePassword(agentToken, currentPassword, newPassword) {
 
 // ── Escalations (HITL) ────────────────────────────────────────────────────
 
-export async function listEscalations(agentToken) {
-  const res = await fetch(`${BASE}/api/tenant/escalations/`, { headers: getHeaders(agentToken) })
+export async function listEscalations() {
+  const res = await authFetch('agent', '/api/tenant/escalations/')
   return res.json()
 }
 
-export async function claimEscalation(agentToken, escalationId) {
-  const res = await fetch(`${BASE}/api/tenant/escalations/${escalationId}/claim`, {
-    method: 'POST',
-    headers: getHeaders(agentToken),
-  })
-  return res
+export async function claimEscalation(escalationId) {
+  return authFetch('agent', `/api/tenant/escalations/${escalationId}/claim`, { method: 'POST' })
 }
 
-export async function sendEscalationMessage(agentToken, escalationId, content) {
-  const res = await fetch(`${BASE}/api/tenant/escalations/${escalationId}/message`, {
+export async function sendEscalationMessage(escalationId, content) {
+  const res = await authFetch('agent', `/api/tenant/escalations/${escalationId}/message`, {
     method: 'POST',
-    headers: getHeaders(agentToken),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ content }),
   })
   return res.json()
 }
 
-export async function resolveEscalation(agentToken, escalationId) {
-  const res = await fetch(`${BASE}/api/tenant/escalations/${escalationId}/resolve`, {
-    method: 'POST',
-    headers: getHeaders(agentToken),
-  })
+export async function resolveEscalation(escalationId) {
+  const res = await authFetch('agent', `/api/tenant/escalations/${escalationId}/resolve`, { method: 'POST' })
   return res.json()
 }
 
-export async function sendTypingIndicator(agentToken, escalationId) {
-  await fetch(`${BASE}/api/tenant/escalations/${escalationId}/typing`, {
-    method: 'POST',
-    headers: getHeaders(agentToken),
-  })
+export async function sendTypingIndicator(escalationId) {
+  await authFetch('agent', `/api/tenant/escalations/${escalationId}/typing`, { method: 'POST' })
 }
 
-export async function getEscalationMessages(agentToken, escalationId) {
-  const res = await fetch(`${BASE}/api/tenant/escalations/${escalationId}/messages`, {
-    headers: getHeaders(agentToken),
-  })
+export async function getEscalationMessages(escalationId) {
+  const res = await authFetch('agent', `/api/tenant/escalations/${escalationId}/messages`)
   return res.json()
 }
 
-export function openEscalationStream(agentToken, onEvent) {
-  const es = new EventSource(`${BASE}/api/tenant/escalations/stream?token=${agentToken}`)
+export function openEscalationStream(onEvent) {
+  // SSE는 access를 쿼리로 전달(EventSource는 헤더 미지원). 단수명 access 만료 시
+  // 재오픈은 issue 101에서 처리. 토큰은 sessionStorage에서 라이브로 읽는다.
+  const es = new EventSource(`${BASE}/api/tenant/escalations/stream?token=${getAccess('agent')}`)
   es.onmessage = (e) => onEvent(JSON.parse(e.data))
   es.addEventListener('hitl_new', (e) => onEvent({ ...JSON.parse(e.data), type: 'hitl_new' }))
   es.addEventListener('hitl_claimed', (e) => onEvent({ ...JSON.parse(e.data), type: 'hitl_claimed' }))

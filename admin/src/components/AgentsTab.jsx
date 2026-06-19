@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { listAgents, createAgent, deactivateAgent, changePassword } from '../api'
 import { s } from '../styles'
 
-export default function AgentsTab({ agentToken }) {
+export default function AgentsTab() {
   const [agents, setAgents] = useState([])
   const [newUsername, setNewUsername] = useState('')
   const [createdCred, setCreatedCred] = useState(null)
@@ -10,7 +10,7 @@ export default function AgentsTab({ agentToken }) {
   const [pwForm, setPwForm] = useState({ current: '', next: '', error: '', success: false })
 
   const load = async () => {
-    const data = await listAgents(agentToken)
+    const data = await listAgents()
     setAgents(data)
   }
 
@@ -20,7 +20,7 @@ export default function AgentsTab({ agentToken }) {
     e.preventDefault()
     if (!newUsername.trim()) return
     setLoading(true)
-    const data = await createAgent(agentToken, newUsername.trim())
+    const data = await createAgent(newUsername.trim())
     setCreatedCred({ username: data.username, password: data.temp_password })
     setNewUsername('')
     await load()
@@ -29,14 +29,14 @@ export default function AgentsTab({ agentToken }) {
 
   const handleDeactivate = async (id) => {
     if (!confirm('비활성화하시겠습니까?')) return
-    await deactivateAgent(agentToken, id)
+    await deactivateAgent(id)
     await load()
   }
 
   const handleChangePassword = async (e) => {
     e.preventDefault()
     try {
-      await changePassword(agentToken, pwForm.current, pwForm.next)
+      await changePassword(pwForm.current, pwForm.next)
       setPwForm({ current: '', next: '', error: '', success: true })
       setTimeout(() => setPwForm(f => ({ ...f, success: false })), 2000)
     } catch (err) {

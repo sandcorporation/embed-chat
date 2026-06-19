@@ -11,14 +11,18 @@ export default function App() {
   const [operatorAuthed, setOperatorAuthed] = useState(() => !!getAccess('operator'))
   const [operatorBooting, setOperatorBooting] = useState(true)
 
-  const [agentToken, setAgentToken] = useState(() => localStorage.getItem('agent_token'))
+  // TenantAgent: operator와 동일하게 access=sessionStorage, refresh=httpOnly 쿠키.
+  // username은 비민감 표시값이라 localStorage에 두어 새로고침 후에도 표시한다.
+  const [agentAuthed, setAgentAuthed] = useState(() => !!getAccess('agent'))
+  const [agentBooting, setAgentBooting] = useState(true)
   const [agentUsername, setAgentUsername] = useState(() => localStorage.getItem('agent_username'))
 
   useEffect(() => {
     // 새로고침으로 sessionStorage access가 사라져도 refresh 쿠키로 무중단 복구
-    bootSilentRefresh('operator')
-      .then((ok) => setOperatorAuthed(ok))
-      .finally(() => setOperatorBooting(false))
+    Promise.all([
+      bootSilentRefresh('operator').then((ok) => setOperatorAuthed(ok)).finally(() => setOperatorBooting(false)),
+      bootSilentRefresh('agent').then((ok) => setAgentAuthed(ok)).finally(() => setAgentBooting(false)),
+    ])
   }, [])
 
   const handleOperatorLogin = () => setOperatorAuthed(true)
@@ -27,17 +31,16 @@ export default function App() {
     setOperatorAuthed(false)
   }
 
-  const handleTenantLogin = (token, username) => {
-    localStorage.setItem('agent_token', token)
+  const handleTenantLogin = (username) => {
     localStorage.setItem('agent_username', username)
-    setAgentToken(token)
     setAgentUsername(username)
+    setAgentAuthed(true)
   }
 
   const handleTenantLogout = () => {
-    localStorage.removeItem('agent_token')
+    clearAccess('agent')
     localStorage.removeItem('agent_username')
-    setAgentToken(null)
+    setAgentAuthed(false)
     setAgentUsername(null)
   }
 
@@ -57,9 +60,11 @@ export default function App() {
       <Route
         path="/tenant"
         element={
-          agentToken
-            ? <TenantDashboard agentToken={agentToken} username={agentUsername} onLogout={handleTenantLogout} />
-            : <TenantLogin onLogin={handleTenantLogin} />
+          agentBooting
+            ? null
+            : agentAuthed
+              ? <TenantDashboard username={agentUsername} onLogout={handleTenantLogout} />
+              : <TenantLogin onLogin={handleTenantLogin} />
         }
       />
     </Routes>

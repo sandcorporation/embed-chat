@@ -42,17 +42,17 @@ function ChatHistory({ messages }) {
   )
 }
 
-function EscalationCard({ esc, agentToken, onUpdate, incomingMessage }) {
+function EscalationCard({ esc, onUpdate, incomingMessage }) {
   const [msg, setMsg] = useState('')
   const [sending, setSending] = useState(false)
   const [messages, setMessages] = useState([])
   const typingDebounceRef = useRef(null)
 
   useEffect(() => {
-    getEscalationMessages(agentToken, esc.id).then(data => {
+    getEscalationMessages(esc.id).then(data => {
       if (Array.isArray(data)) setMessages(data)
     })
-  }, [esc.id, agentToken])
+  }, [esc.id])
 
   useEffect(() => {
     if (incomingMessage) {
@@ -61,7 +61,7 @@ function EscalationCard({ esc, agentToken, onUpdate, incomingMessage }) {
   }, [incomingMessage])
 
   const handleClaim = async () => {
-    const res = await claimEscalation(agentToken, esc.id)
+    const res = await claimEscalation(esc.id)
     if (res.status === 200 || res.ok) onUpdate()
     else if (res.status === 409) alert('이미 다른 상담원이 수락한 세션입니다.')
   }
@@ -70,7 +70,7 @@ function EscalationCard({ esc, agentToken, onUpdate, incomingMessage }) {
     setMsg(e.target.value)
     clearTimeout(typingDebounceRef.current)
     typingDebounceRef.current = setTimeout(() => {
-      sendTypingIndicator(agentToken, esc.id)
+      sendTypingIndicator(esc.id)
     }, 500)
   }
 
@@ -80,13 +80,13 @@ function EscalationCard({ esc, agentToken, onUpdate, incomingMessage }) {
     setSending(true)
     const content = msg.trim()
     setMsg('')
-    await sendEscalationMessage(agentToken, esc.id, content)
+    await sendEscalationMessage(esc.id, content)
     setMessages(prev => [...prev, { role: 'human_agent', content, created_at: new Date().toISOString() }])
     setSending(false)
   }
 
   const handleResolve = async () => {
-    await resolveEscalation(agentToken, esc.id)
+    await resolveEscalation(esc.id)
     onUpdate()
   }
 
@@ -153,14 +153,14 @@ function EscalationCard({ esc, agentToken, onUpdate, incomingMessage }) {
   )
 }
 
-export default function HitlTab({ agentToken }) {
+export default function HitlTab() {
   const [escalations, setEscalations] = useState([])
   const [loading, setLoading] = useState(true)
   const [incomingBySession, setIncomingBySession] = useState({})
   const esRef = useRef(null)
 
   const refresh = () => {
-    listEscalations(agentToken).then(data => {
+    listEscalations().then(data => {
       setEscalations(data)
       setLoading(false)
     })
@@ -169,7 +169,7 @@ export default function HitlTab({ agentToken }) {
   useEffect(() => {
     refresh()
 
-    esRef.current = openEscalationStream(agentToken, (event) => {
+    esRef.current = openEscalationStream((event) => {
       if (event.type === 'visitor_message') {
         const msg = {
           role: 'user',
@@ -183,7 +183,7 @@ export default function HitlTab({ agentToken }) {
     })
 
     return () => esRef.current?.close()
-  }, [agentToken])
+  }, [])
 
   if (loading) return <p>로딩 중...</p>
 
@@ -201,7 +201,7 @@ export default function HitlTab({ agentToken }) {
           <EscalationCard
             key={esc.id}
             esc={esc}
-            agentToken={agentToken}
+           
             onUpdate={refresh}
             incomingMessage={incomingBySession[esc.session_id] ?? null}
           />

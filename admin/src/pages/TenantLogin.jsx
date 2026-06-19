@@ -15,8 +15,8 @@ export default function TenantLogin({ onLogin }) {
       return
     }
     try {
-      const data = await tenantAgentLogin(tenantName.trim(), username.trim(), password)
-      onLogin(data.access_token, username.trim())
+      await tenantAgentLogin(tenantName.trim(), username.trim(), password) // access는 sessionStorage에 저장됨
+      onLogin(username.trim())
     } catch {
       setError('Tenant 이름, 사용자명 또는 비밀번호가 올바르지 않습니다.')
     }

@@ -49,12 +49,12 @@ function ChatHistory({ messages }) {
   )
 }
 
-function CheckpointView({ agentToken, sessionId }) {
+function CheckpointView({ sessionId }) {
   const [data, setData] = useState(undefined)
 
   useEffect(() => {
-    getSessionCheckpoint(agentToken, sessionId).then(setData)
-  }, [sessionId, agentToken])
+    getSessionCheckpoint(sessionId).then(setData)
+  }, [sessionId])
 
   if (data === undefined) return <p style={{ fontSize: 13, color: '#a0aec0' }}>불러오는 중...</p>
   if (data === null) return (
@@ -79,15 +79,15 @@ function CheckpointView({ agentToken, sessionId }) {
   )
 }
 
-export default function SessionDetail({ agentToken, sessionId, onBack }) {
+export default function SessionDetail({ sessionId, onBack }) {
   const [subTab, setSubTab] = useState('history')
   const [messages, setMessages] = useState([])
 
   useEffect(() => {
-    getSessionMessages(agentToken, sessionId).then(data => {
+    getSessionMessages(sessionId).then(data => {
       setMessages(Array.isArray(data) ? data : [])
     })
-  }, [sessionId, agentToken])
+  }, [sessionId])
 
   return (
     <div>
@@ -117,7 +117,7 @@ export default function SessionDetail({ agentToken, sessionId, onBack }) {
       <div style={{ maxHeight: 480, overflowY: 'auto' }}>
         {subTab === 'history' && <ChatHistory messages={messages} />}
         {subTab === 'checkpoint' && (
-          <CheckpointView agentToken={agentToken} sessionId={sessionId} />
+          <CheckpointView sessionId={sessionId} />
         )}
       </div>
     </div>
