@@ -29,8 +29,15 @@ async function setup() {
   })
   const { access_token: agentToken } = await agentRes.json()
 
+  // 공개 슬러그 설정 — 방문자는 slug로 챗 스트림에 연결한다(ADR-0011, embed_token 폐지)
+  const slug = `vis-e2e-${Date.now()}`
+  await api.patch('/api/tenant/slug/', {
+    headers: { Authorization: `Bearer ${agentToken}` },
+    data: { slug },
+  })
+
   await api.dispose()
-  return { tenant, agentToken }
+  return { tenant, agentToken, slug }
 }
 
 async function loginAsTenantAgent(page, tenant) {
@@ -42,16 +49,11 @@ async function loginAsTenantAgent(page, tenant) {
   await expect(page.locator('button:has-text("📄 문서")')).toBeVisible({ timeout: 10000 })
 }
 
-async function createVisitorSession(api, tenantKey, visitorId, messages = []) {
-  const tokenRes = await api.post('/api/embed/token', {
-    headers: { Authorization: `Bearer ${tenantKey}` },
-    data: { visitor_id: visitorId, visitor_context: {} },
-  })
-  const { embed_token } = await tokenRes.json()
-
-  // SSE 스트림은 무한 연결이므로 응답 헤더에서 session_id를 읽은 뒤 즉시 abort
+async function createVisitorSession(api, slug, visitorId, messages = []) {
+  // 공개 slug + visitor_id로 챗 스트림 연결 → 세션 생성(ADR-0011). SSE는 무한 연결이므로
+  // 응답 헤더에서 X-Session-Id를 읽은 뒤 즉시 abort한다.
   const controller = new AbortController()
-  const res = await fetch(`${API_URL}/api/chat/stream?token=${embed_token}`, {
+  const res = await fetch(`${API_URL}/api/chat/stream?slug=${slug}&visitor_id=${visitorId}`, {
     signal: controller.signal,
   })
   const sessionId = res.headers.get('x-session-id')
@@ -67,12 +69,13 @@ async function createVisitorSession(api, tenantKey, visitorId, messages = []) {
 }
 
 test.describe('Visitors 탭', () => {
-  let tenant, agentToken
+  let tenant, agentToken, slug
 
   test.beforeAll(async () => {
     const ctx = await setup()
     tenant = ctx.tenant
     agentToken = ctx.agentToken
+    slug = ctx.slug
   })
 
   test.beforeEach(async ({ page }) => {
@@ -89,7 +92,7 @@ test.describe('Visitors 탭', () => {
   // ── 방문자 목록 ────────────────────────────────────────────────────────
   test('Visitors 탭 클릭 시 방문자 목록이 자동 로드된다', async ({ page }) => {
     const api = await request.newContext({ baseURL: API_URL })
-    await createVisitorSession(api, tenant.tenant_key, `v-e2e-list-${Date.now()}`)
+    await createVisitorSession(api, slug, `v-e2e-list-${Date.now()}`)
     await api.dispose()
 
     await loginAsTenantAgent(page, tenant)
@@ -101,8 +104,8 @@ test.describe('Visitors 탭', () => {
   test('방문자를 검색하면 해당 visitor_id만 표시된다', async ({ page }) => {
     const ts = Date.now()
     const api = await request.newContext({ baseURL: API_URL })
-    await createVisitorSession(api, tenant.tenant_key, `v-search-apple-${ts}`)
-    await createVisitorSession(api, tenant.tenant_key, `v-search-banana-${ts}`)
+    await createVisitorSession(api, slug, `v-search-apple-${ts}`)
+    await createVisitorSession(api, slug, `v-search-banana-${ts}`)
     await api.dispose()
 
     await loginAsTenantAgent(page, tenant)
@@ -121,7 +124,7 @@ test.describe('Visitors 탭', () => {
     const ts = Date.now()
     const visitorId = `v-session-list-${ts}`
     const api = await request.newContext({ baseURL: API_URL })
-    await createVisitorSession(api, tenant.tenant_key, visitorId)
+    await createVisitorSession(api, slug, visitorId)
     await api.dispose()
 
     await loginAsTenantAgent(page, tenant)
@@ -136,7 +139,7 @@ test.describe('Visitors 탭', () => {
     const ts = Date.now()
     const visitorId = `v-msg-detail-${ts}`
     const api = await request.newContext({ baseURL: API_URL })
-    const sessionId = await createVisitorSession(api, tenant.tenant_key, visitorId, [
+    const sessionId = await createVisitorSession(api, slug, visitorId, [
       `E2E 테스트 메시지 ${ts}`,
     ])
     await api.dispose()
@@ -155,7 +158,7 @@ test.describe('Visitors 탭', () => {
     const ts = Date.now()
     const visitorId = `v-back-btn-${ts}`
     const api = await request.newContext({ baseURL: API_URL })
-    const sessionId = await createVisitorSession(api, tenant.tenant_key, visitorId)
+    const sessionId = await createVisitorSession(api, slug, visitorId)
     await api.dispose()
 
     await loginAsTenantAgent(page, tenant)
@@ -172,7 +175,7 @@ test.describe('Visitors 탭', () => {
     const ts = Date.now()
     const visitorId = `v-no-checkpoint-${ts}`
     const api = await request.newContext({ baseURL: API_URL })
-    const sessionId = await createVisitorSession(api, tenant.tenant_key, visitorId)
+    const sessionId = await createVisitorSession(api, slug, visitorId)
     await api.dispose()
 
     await loginAsTenantAgent(page, tenant)

@@ -68,9 +68,9 @@ test.describe('Tenant Agent 플로우', () => {
     const promptInput = page.locator('[data-testid="system-prompt-input"]')
     await expect(promptInput).toBeVisible()
 
-    // System Prompt 수정
+    // System Prompt 수정 ("Slug 저장" 버튼과 모호하지 않게 exact 셀렉터 사용)
     await promptInput.fill('E2E 테스트용 프롬프트입니다.')
-    await page.click('button:has-text("저장")')
+    await page.getByRole('button', { name: '저장', exact: true }).click()
 
     await expect(page.locator('text=저장됨')).toBeVisible({ timeout: 3000 })
   })

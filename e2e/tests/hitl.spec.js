@@ -44,39 +44,29 @@ async function setupHitlTest() {
     },
   })
 
-  const embedRes = await api.post('/api/embed/token', {
-    headers: { Authorization: `Bearer ${tenant.tenant_key}` },
-    data: { visitor_id: 'hitl-visitor', visitor_context: {} },
+  // 공개 슬러그 설정 — 방문자는 /chatbot/{slug}/로 위젯에 연결한다(ADR-0011, embed_token 폐지)
+  const slug = `hitl-e2e-${Date.now()}`
+  await api.patch('/api/tenant/slug/', {
+    headers: { Authorization: `Bearer ${agentToken}` },
+    data: { slug },
   })
-  const { embed_token } = await embedRes.json()
 
   await api.dispose()
 
   return {
-    tenantKey: tenant.tenant_key,
+    slug,
     tenantName: tenant.name,
     agentUsername: tenant.agent_username,
     agentPassword: tenant.agent_temp_password,
   }
 }
 
-// 방문자별 EmbedToken을 새로 발급한다 (테스트 간 visitor/세션 격리용).
-async function mintEmbedToken(tenantKey, visitorId) {
-  const api = await request.newContext({ baseURL: API_URL })
-  const res = await api.post('/api/embed/token', {
-    headers: { Authorization: `Bearer ${tenantKey}` },
-    data: { visitor_id: visitorId, visitor_context: {} },
-  })
-  const { embed_token } = await res.json()
-  await api.dispose()
-  return embed_token
-}
-
 // 위젯으로 HITL을 트리거하고 시스템 메시지가 뜰 때까지 기다린다.
 // E2E 스택의 LLM은 결정적 Fake이므로 '상담원' 메시지는 항상 escalation된다(재시도 불필요).
-async function escalateViaWidget(page, tenantKey) {
-  const token = await mintEmbedToken(tenantKey, `hitl-${Date.now()}`)
-  await page.goto(`${WIDGET_URL}/embed/?token=${token}`)
+// 방문자별 visitor_id로 세션을 격리한다. 위젯 base가 /embed/라 경로에 /chatbot/{slug}/를 포함시킨다.
+async function escalateViaWidget(page, slug) {
+  const visitorId = `hitl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  await page.goto(`${WIDGET_URL}/embed/chatbot/${slug}/?visitor_id=${visitorId}`)
   const textarea = page.locator('textarea[placeholder="메시지를 입력하세요..."]')
   await expect(textarea).toBeEnabled({ timeout: 10000 })
 
@@ -97,13 +87,13 @@ test.describe('HITL 전체 플로우', () => {
 
   test('방문자가 상담원 요청 시 HITL 시작 메시지가 위젯에 표시된다', async ({ page }) => {
     // escalateViaWidget이 [data-role="system"] 가시성을 보장하므로 별도 단언 불필요
-    await escalateViaWidget(page, ctx.tenantKey)
+    await escalateViaWidget(page, ctx.slug)
     await expect(page.locator('[data-role="system"]')).toBeVisible()
   })
 
   test('어드민 에이전트가 에스컬레이션을 확인하고 클레임할 수 있다', async ({ page }) => {
     // 이 테스트는 자체 escalation을 만들어 다른 테스트에 의존하지 않는다 (독립성)
-    await escalateViaWidget(page, ctx.tenantKey)
+    await escalateViaWidget(page, ctx.slug)
 
     await page.goto(`${ADMIN_URL}/admin-ui/tenant`)
     await page.fill('input[placeholder="Tenant 이름"]', ctx.tenantName)
