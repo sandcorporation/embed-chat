@@ -5,16 +5,15 @@
  * OpenAPI spec version: 1.0.0
  */
 import type {
-  AppsRagApiGraphNeighbors200,
   AppsRagApiGraphNeighborsParams,
-  AppsRagApiGraphSearch200,
   AppsRagApiGraphSearchParams,
-  AppsRagApiGraphStatus200,
-  AppsRagApiRebuildGraph202,
   AppsRagApiUploadDocumentBody,
   ChunkOut,
   DocumentOut,
   DocumentPatchIn,
+  GraphOut,
+  GraphStatusOut,
+  RebuildOut,
   UrlsIn
 } from '../../model';
 
@@ -101,7 +100,7 @@ if(appsRagApiUploadDocumentBody.name !== undefined) {
  * @summary Graph Neighbors
  */
 export type appsRagApiGraphNeighborsResponse200 = {
-  data: AppsRagApiGraphNeighbors200
+  data: GraphOut
   status: 200
 }
     
@@ -144,7 +143,7 @@ export const appsRagApiGraphNeighbors = async (params: AppsRagApiGraphNeighborsP
  * @summary Rebuild Graph
  */
 export type appsRagApiRebuildGraphResponse202 = {
-  data: AppsRagApiRebuildGraph202
+  data: RebuildOut
   status: 202
 }
     
@@ -180,7 +179,7 @@ export const appsRagApiRebuildGraph = async ( options?: RequestInit): Promise<ap
  * @summary Graph Search
  */
 export type appsRagApiGraphSearchResponse200 = {
-  data: AppsRagApiGraphSearch200
+  data: GraphOut
   status: 200
 }
     
@@ -223,7 +222,7 @@ export const appsRagApiGraphSearch = async (params: AppsRagApiGraphSearchParams,
  * @summary Graph Status
  */
 export type appsRagApiGraphStatusResponse200 = {
-  data: AppsRagApiGraphStatus200
+  data: GraphStatusOut
   status: 200
 }
     

@@ -1,6 +1,6 @@
 import os
 import uuid
-from typing import List
+from typing import List, Optional
 from ninja import Router, Schema, File, Form, UploadedFile
 from ninja.errors import HttpError
 from django.conf import settings
@@ -112,7 +112,33 @@ def list_documents(request):
     ]
 
 
-@rag_router.get("/graph/search", response=dict)
+class GraphNode(Schema):
+    name: str
+    entity_type: Optional[str] = None
+    description: Optional[str] = None
+    source_document_id: Optional[str] = None
+
+
+class GraphEdge(Schema):
+    source: str
+    target: str
+    description: Optional[str] = None
+
+
+class GraphOut(Schema):
+    nodes: List[GraphNode]
+    edges: List[GraphEdge]
+
+
+class GraphStatusOut(Schema):
+    freshness: str
+
+
+class RebuildOut(Schema):
+    status: str
+
+
+@rag_router.get("/graph/search", response=GraphOut)
 def graph_search(request, q: str):
     """Knowledge Graph 인스펙터 — 이름/설명 매칭 엔티티 + 각 1홉 이웃을 {nodes, edges}로 반환."""
     from apps.rag.graph_store import GraphStore
@@ -136,7 +162,7 @@ def graph_search(request, q: str):
     return {"nodes": list(nodes_by_name.values()), "edges": edges}
 
 
-@rag_router.get("/graph/neighbors", response=dict)
+@rag_router.get("/graph/neighbors", response=GraphOut)
 def graph_neighbors(request, entity: str):
     """선택 엔티티의 1홉 이웃 서브그래프 {nodes, edges} (노드 클릭 확장용)."""
     from apps.rag.graph_store import GraphStore
@@ -192,7 +218,7 @@ class ChunkOut(Schema):
     content: str
 
 
-@rag_router.get("/graph/status", response=dict)
+@rag_router.get("/graph/status", response=GraphStatusOut)
 def graph_status(request):
     """Tenant Knowledge Graph의 신선도(fresh/stale/rebuilding)를 반환한다."""
     from apps.rag.graph_store import GraphStore
@@ -201,7 +227,7 @@ def graph_status(request):
     return {"freshness": GraphStore(str(tenant.id)).get_freshness()}
 
 
-@rag_router.post("/graph/rebuild", response={202: dict})
+@rag_router.post("/graph/rebuild", response={202: RebuildOut})
 def rebuild_graph(request):
     """Tenant Knowledge Graph의 Community 재구축을 트리거한다 (어드민 수동)."""
     from apps.rag.tasks import rebuild_graph_communities

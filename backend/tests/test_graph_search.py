@@ -191,6 +191,14 @@ def test_graph_neighbors_endpoint(client, tenant_agent_token, tenant_with_key):
     names = {n["name"] for n in data["nodes"]}
     assert {"A-ENT", "B-ENT"} <= names
 
+    # 와이어 포맷 회귀(issue 107): Schema 정비 후에도 node/edge 키가 그대로여야 한다
+    a_node = next(n for n in data["nodes"] if n["name"] == "A-ENT")
+    assert set(a_node.keys()) == {"name", "entity_type", "description", "source_document_id"}
+    assert a_node["source_document_id"] == doc
+    edge = next(e for e in data["edges"] if e["source"] == "A-ENT" and e["target"] == "B-ENT")
+    assert set(edge.keys()) == {"source", "target", "description"}
+    assert edge["description"] == "rel"
+
 
 @pytest.mark.django_db
 def test_document_entity_connected_to_extracted_entities(client, tenant_agent_token, tenant_with_key):
