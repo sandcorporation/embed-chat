@@ -71,6 +71,40 @@ class TenantAgent(models.Model):
         return django_check_password(raw_password, self.password_hash)
 
 
+class RefreshToken(models.Model):
+    """어드민(Operator/TenantAgent) 로그인 세션의 stateful Refresh Token (ADR-0013).
+
+    로그인 1회 = Session Family 1개. 회전 시 같은 family_id로 새 row를 발급하고
+    옛 row를 used 처리한다. family_expires_at은 최초 로그인 +14일 절대 상한이며
+    회전이 이를 상속(연장 안 함). 원문은 저장하지 않고 token_hash만 보관한다.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    operator = models.ForeignKey(
+        Operator, on_delete=models.CASCADE, null=True, blank=True, related_name="refresh_tokens"
+    )
+    tenant_agent = models.ForeignKey(
+        TenantAgent, on_delete=models.CASCADE, null=True, blank=True, related_name="refresh_tokens"
+    )
+    family_id = models.UUIDField(db_index=True)
+    token_hash = models.CharField(max_length=64, unique=True)
+    family_expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+    revoked = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "refresh_tokens"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(operator__isnull=False, tenant_agent__isnull=True)
+                    | models.Q(operator__isnull=True, tenant_agent__isnull=False)
+                ),
+                name="refresh_exactly_one_subject",
+            ),
+        ]
+
+
 class TenantConfig(models.Model):
     WEBHOOK_SLACK = "slack"
     WEBHOOK_DISCORD = "discord"
