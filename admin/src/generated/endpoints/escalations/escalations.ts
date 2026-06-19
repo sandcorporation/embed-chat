@@ -5,13 +5,11 @@
  * OpenAPI spec version: 1.0.0
  */
 import type {
-  AppsEscalationApiClaimEscalation200,
-  AppsEscalationApiClaimEscalation404,
-  AppsEscalationApiClaimEscalation409,
+  ActionOut,
   AppsEscalationApiEscalationStreamParams,
-  AppsEscalationApiGetEscalationMessages404,
-  AppsEscalationApiSendTypingIndicator200,
-  AppsEscalationApiSendTypingIndicator404,
+  DetailOut,
+  EscalationMessageOut,
+  EscalationOut,
   MessageIn
 } from '../../model';
 
@@ -21,7 +19,7 @@ import { customInstance } from '../../../mutator';
  * @summary List Escalations
  */
 export type appsEscalationApiListEscalationsResponse200 = {
-  data: void
+  data: EscalationOut[]
   status: 200
 }
     
@@ -98,17 +96,17 @@ export const appsEscalationApiEscalationStream = async (params: AppsEscalationAp
  * @summary Claim Escalation
  */
 export type appsEscalationApiClaimEscalationResponse200 = {
-  data: AppsEscalationApiClaimEscalation200
+  data: ActionOut
   status: 200
 }
 
 export type appsEscalationApiClaimEscalationResponse404 = {
-  data: AppsEscalationApiClaimEscalation404
+  data: DetailOut
   status: 404
 }
 
 export type appsEscalationApiClaimEscalationResponse409 = {
-  data: AppsEscalationApiClaimEscalation409
+  data: DetailOut
   status: 409
 }
     
@@ -145,16 +143,23 @@ export const appsEscalationApiClaimEscalation = async (escalationId: string, opt
  * @summary Send Message
  */
 export type appsEscalationApiSendMessageResponse200 = {
-  data: void
+  data: ActionOut
   status: 200
+}
+
+export type appsEscalationApiSendMessageResponse404 = {
+  data: DetailOut
+  status: 404
 }
     
 export type appsEscalationApiSendMessageResponseSuccess = (appsEscalationApiSendMessageResponse200) & {
   headers: Headers;
 };
-;
+export type appsEscalationApiSendMessageResponseError = (appsEscalationApiSendMessageResponse404) & {
+  headers: Headers;
+};
 
-export type appsEscalationApiSendMessageResponse = (appsEscalationApiSendMessageResponseSuccess)
+export type appsEscalationApiSendMessageResponse = (appsEscalationApiSendMessageResponseSuccess | appsEscalationApiSendMessageResponseError)
 
 export const getAppsEscalationApiSendMessageUrl = (escalationId: string,) => {
 
@@ -182,12 +187,12 @@ export const appsEscalationApiSendMessage = async (escalationId: string,
  * @summary Get Escalation Messages
  */
 export type appsEscalationApiGetEscalationMessagesResponse200 = {
-  data: unknown[]
+  data: EscalationMessageOut[]
   status: 200
 }
 
 export type appsEscalationApiGetEscalationMessagesResponse404 = {
-  data: AppsEscalationApiGetEscalationMessages404
+  data: DetailOut
   status: 404
 }
     
@@ -224,16 +229,23 @@ export const appsEscalationApiGetEscalationMessages = async (escalationId: strin
  * @summary Resolve Escalation
  */
 export type appsEscalationApiResolveEscalationResponse200 = {
-  data: void
+  data: ActionOut
   status: 200
+}
+
+export type appsEscalationApiResolveEscalationResponse404 = {
+  data: DetailOut
+  status: 404
 }
     
 export type appsEscalationApiResolveEscalationResponseSuccess = (appsEscalationApiResolveEscalationResponse200) & {
   headers: Headers;
 };
-;
+export type appsEscalationApiResolveEscalationResponseError = (appsEscalationApiResolveEscalationResponse404) & {
+  headers: Headers;
+};
 
-export type appsEscalationApiResolveEscalationResponse = (appsEscalationApiResolveEscalationResponseSuccess)
+export type appsEscalationApiResolveEscalationResponse = (appsEscalationApiResolveEscalationResponseSuccess | appsEscalationApiResolveEscalationResponseError)
 
 export const getAppsEscalationApiResolveEscalationUrl = (escalationId: string,) => {
 
@@ -259,12 +271,12 @@ export const appsEscalationApiResolveEscalation = async (escalationId: string, o
  * @summary Send Typing Indicator
  */
 export type appsEscalationApiSendTypingIndicatorResponse200 = {
-  data: AppsEscalationApiSendTypingIndicator200
+  data: ActionOut
   status: 200
 }
 
 export type appsEscalationApiSendTypingIndicatorResponse404 = {
-  data: AppsEscalationApiSendTypingIndicator404
+  data: DetailOut
   status: 404
 }
     

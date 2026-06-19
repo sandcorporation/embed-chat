@@ -1,3 +1,4 @@
+from typing import List
 from django.utils import timezone
 from ninja import Router, Schema
 from django.http import StreamingHttpResponse
@@ -12,7 +13,31 @@ class MessageIn(Schema):
     content: str
 
 
-@escalation_router.get("/")
+class EscalationOut(Schema):
+    id: str
+    session_id: str
+    trigger_type: str
+    reason: str
+    status: str
+    created_at: str
+
+
+class EscalationMessageOut(Schema):
+    id: str
+    role: str
+    content: str
+    created_at: str
+
+
+class ActionOut(Schema):
+    status: str
+
+
+class DetailOut(Schema):
+    detail: str
+
+
+@escalation_router.get("/", response=List[EscalationOut])
 def list_escalations(request):
     from apps.escalation.models import Escalation
 
@@ -39,7 +64,7 @@ def list_escalations(request):
     ]
 
 
-@escalation_router.post("/{escalation_id}/claim", response={200: dict, 404: dict, 409: dict})
+@escalation_router.post("/{escalation_id}/claim", response={200: ActionOut, 404: DetailOut, 409: DetailOut})
 def claim_escalation(request, escalation_id: str):
     from apps.escalation.models import Escalation, EscalationClaim
     from django.db import IntegrityError
@@ -66,7 +91,7 @@ def claim_escalation(request, escalation_id: str):
     return {"status": "claimed"}
 
 
-@escalation_router.post("/{escalation_id}/message")
+@escalation_router.post("/{escalation_id}/message", response={200: ActionOut, 404: DetailOut})
 def send_message(request, escalation_id: str, body: MessageIn):
     from apps.escalation.models import Escalation
     from apps.chat.models import ChatMessage
@@ -92,7 +117,7 @@ def send_message(request, escalation_id: str, body: MessageIn):
     return {"status": "sent"}
 
 
-@escalation_router.get("/{escalation_id}/messages", response={200: list, 404: dict})
+@escalation_router.get("/{escalation_id}/messages", response={200: List[EscalationMessageOut], 404: DetailOut})
 def get_escalation_messages(request, escalation_id: str):
     from apps.escalation.models import Escalation
     from apps.chat.models import ChatMessage
@@ -117,7 +142,7 @@ def get_escalation_messages(request, escalation_id: str):
     ]
 
 
-@escalation_router.post("/{escalation_id}/typing", response={200: dict, 404: dict})
+@escalation_router.post("/{escalation_id}/typing", response={200: ActionOut, 404: DetailOut})
 def send_typing_indicator(request, escalation_id: str):
     from apps.escalation.models import Escalation
     from apps.chat.sse import get_redis_client
@@ -139,7 +164,7 @@ def send_typing_indicator(request, escalation_id: str):
     return 200, {"status": "ok"}
 
 
-@escalation_router.post("/{escalation_id}/resolve")
+@escalation_router.post("/{escalation_id}/resolve", response={200: ActionOut, 404: DetailOut})
 def resolve_escalation(request, escalation_id: str):
     from apps.escalation.models import Escalation
 

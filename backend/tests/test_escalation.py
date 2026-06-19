@@ -47,6 +47,10 @@ def test_list_escalations_returns_pending_and_claimed(client, tenant_with_key, t
     data = resp.json()
     ids = [e["id"] for e in data]
     assert str(esc1.id) in ids
+
+    # 와이어 포맷 회귀(issue 108): Schema 정비 후에도 EscalationOut 키가 그대로
+    row = next(e for e in data if e["id"] == str(esc1.id))
+    assert set(row.keys()) == {"id", "session_id", "trigger_type", "reason", "status", "created_at"}
     assert str(esc2.id) in ids
 
 
@@ -231,6 +235,9 @@ def test_get_escalation_messages_returns_conversation(client, tenant_with_key, t
     assert data[0]["role"] == "user"
     assert data[0]["content"] == "도움이 필요해요"
     assert data[1]["role"] == "assistant"
+
+    # 와이어 포맷 회귀(issue 108): EscalationMessageOut 키가 그대로
+    assert set(data[0].keys()) == {"id", "role", "content", "created_at"}
 
 
 @pytest.mark.django_db

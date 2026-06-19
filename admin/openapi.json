@@ -1,6 +1,19 @@
 {
   "components": {
     "schemas": {
+      "ActionOut": {
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ActionOut",
+        "type": "object"
+      },
       "AgentCreateIn": {
         "properties": {
           "username": {
@@ -137,6 +150,19 @@
         "title": "ChunkOut",
         "type": "object"
       },
+      "DetailOut": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "DetailOut",
+        "type": "object"
+      },
       "DocumentOut": {
         "properties": {
           "error_message": {
@@ -176,6 +202,72 @@
           "name"
         ],
         "title": "DocumentPatchIn",
+        "type": "object"
+      },
+      "EscalationMessageOut": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "created_at"
+        ],
+        "title": "EscalationMessageOut",
+        "type": "object"
+      },
+      "EscalationOut": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger_type": {
+            "title": "Trigger Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "trigger_type",
+          "reason",
+          "status",
+          "created_at"
+        ],
+        "title": "EscalationOut",
         "type": "object"
       },
       "GraphEdge": {
@@ -1896,6 +1988,17 @@
         "parameters": [],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EscalationOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            },
             "description": "OK"
           }
         },
@@ -1954,9 +2057,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ActionOut"
                 }
               }
             },
@@ -1966,9 +2067,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DetailOut"
                 }
               }
             },
@@ -1978,9 +2077,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DetailOut"
                 }
               }
             },
@@ -2024,7 +2121,24 @@
         },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionOut"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetailOut"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "security": [
@@ -2057,7 +2171,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {},
+                  "items": {
+                    "$ref": "#/components/schemas/EscalationMessageOut"
+                  },
                   "title": "Response",
                   "type": "array"
                 }
@@ -2069,9 +2185,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DetailOut"
                 }
               }
             },
@@ -2105,7 +2219,24 @@
         ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionOut"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetailOut"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "security": [
@@ -2138,9 +2269,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ActionOut"
                 }
               }
             },
@@ -2150,9 +2279,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DetailOut"
                 }
               }
             },
