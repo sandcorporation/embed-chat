@@ -1,11 +1,19 @@
 import React, { useState, useEffect, useRef, ChangeEvent } from 'react'
 import { listDocuments, uploadDocument, updateDocument, deleteDocument, listDocumentChunks, getGraphStatus, rebuildGraph } from '../api'
-import { s } from '../styles'
 import type { DocumentOut, ChunkOut } from '../generated/model'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { cn } from '@/lib/utils'
 
-const STATUS_COLORS: Record<string, string> = { pending: '#ed8936', processing: '#4299e1', ready: '#48bb78', failed: '#fc8181' }
+const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'success' | 'destructive'> = {
+  pending: 'secondary', processing: 'default', ready: 'success', failed: 'destructive',
+}
 const FRESHNESS_LABEL: Record<string, string> = { fresh: '최신', stale: '재구축 필요', rebuilding: '재구축 중…' }
-const FRESHNESS_COLOR: Record<string, string> = { fresh: '#48bb78', stale: '#ed8936', rebuilding: '#4299e1' }
+const FRESHNESS_VARIANT: Record<string, 'success' | 'secondary' | 'default'> = { fresh: 'success', stale: 'secondary', rebuilding: 'default' }
 
 type ChunkState = ChunkOut[] | 'loading' | undefined
 
@@ -13,11 +21,11 @@ export default function DocumentsTab() {
   const [docs, setDocs] = useState<DocumentOut[]>([])
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-  const [pendingFile, setPendingFile] = useState<File | null>(null)   // 업로드 대기 중인 File
-  const [uploadLabel, setUploadLabel] = useState('')      // 업로드 모달의 레이블 값
-  const [editingId, setEditingId] = useState<string | null>(null)        // 인라인 편집 중인 문서 id
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [uploadLabel, setUploadLabel] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
-  const [expandedChunks, setExpandedChunks] = useState<Record<string, ChunkState>>({})  // docId → chunks[] | 'loading'
+  const [expandedChunks, setExpandedChunks] = useState<Record<string, ChunkState>>({})
   const [graphFreshness, setGraphFreshness] = useState<string | null>(null)
 
   const loadGraphStatus = async () => {
@@ -33,10 +41,7 @@ export default function DocumentsTab() {
     setTimeout(loadGraphStatus, 1500)
   }
 
-  const load = async () => {
-    const data = await listDocuments()
-    setDocs(data)
-  }
+  const load = async () => setDocs(await listDocuments())
 
   useEffect(() => {
     load()
@@ -49,7 +54,7 @@ export default function DocumentsTab() {
     const file = e.target.files?.[0]
     if (!file) return
     setPendingFile(file)
-    setUploadLabel(file.name)  // 파일명을 레이블 기본값으로 미리 채움
+    setUploadLabel(file.name)
   }
 
   const cancelUpload = () => {
@@ -99,156 +104,107 @@ export default function DocumentsTab() {
   }
 
   return (
-    <div>
-      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".pdf,.txt,.png,.jpg,.jpeg,.webp"
-          onChange={handleFileSelect}
-          style={{ display: 'none' }}
-          id="file-upload"
-        />
-        <label htmlFor="file-upload" style={s.btn}>
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <input ref={fileRef} type="file" accept=".pdf,.txt,.png,.jpg,.jpeg,.webp"
+          onChange={handleFileSelect} className="hidden" id="file-upload" />
+        <label htmlFor="file-upload" className={cn(buttonVariants({ variant: 'default' }), 'cursor-pointer')}>
           {uploading ? '업로드 중...' : '📄 문서 업로드 (PDF/TXT/이미지)'}
         </label>
-        <span style={{ fontSize: 13, color: '#718096' }}>3초마다 상태 자동 갱신</span>
+        <span className="text-xs text-muted-foreground">3초마다 상태 자동 갱신</span>
         {graphFreshness && (
-          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }} data-testid="graph-freshness">
-            <span style={{ fontSize: 12, color: '#718096' }}>지식그래프</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: FRESHNESS_COLOR[graphFreshness] || '#718096' }}>
-              {FRESHNESS_LABEL[graphFreshness] || graphFreshness}
-            </span>
-            <button
-              data-testid="rebuild-graph"
-              style={{ ...s.btnSm, padding: '4px 10px' }}
-              onClick={handleRebuildGraph}
-              disabled={graphFreshness === 'rebuilding'}
-            >
-              재구축
-            </button>
+          <span className="ml-auto flex items-center gap-2" data-testid="graph-freshness">
+            <span className="text-xs text-muted-foreground">지식그래프</span>
+            <Badge variant={FRESHNESS_VARIANT[graphFreshness] || 'secondary'}>{FRESHNESS_LABEL[graphFreshness] || graphFreshness}</Badge>
+            <Button size="sm" variant="outline" data-testid="rebuild-graph" onClick={handleRebuildGraph} disabled={graphFreshness === 'rebuilding'}>재구축</Button>
           </span>
         )}
       </div>
 
       {pendingFile && (
-        <div style={{
-          marginBottom: 16, padding: 16, border: '1px solid #90cdf4',
-          borderRadius: 8, background: '#ebf8ff',
-        }} data-testid="upload-modal">
-          <label style={s.label}>Document Label (제품명·모델명으로 지정하면 검색이 정확해집니다)</label>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input
-              data-testid="upload-label-input"
-              style={{ ...s.input, flex: 1 }}
-              value={uploadLabel}
-              onChange={e => setUploadLabel(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && confirmUpload()}
-            />
-            <button
-              data-testid="upload-confirm"
-              style={s.btn}
-              onClick={confirmUpload}
-              disabled={uploading || !uploadLabel.trim()}
-            >
-              {uploading ? '업로드 중...' : '업로드'}
-            </button>
-            <button style={s.btnDanger} onClick={cancelUpload} disabled={uploading}>취소</button>
-          </div>
-          <div style={{ fontSize: 12, color: '#718096', marginTop: 6 }}>{pendingFile.name}</div>
-        </div>
+        <Card className="border-primary/30" data-testid="upload-modal">
+          <CardContent className="space-y-2 pt-5">
+            <Label>Document Label (제품명·모델명으로 지정하면 검색이 정확해집니다)</Label>
+            <div className="flex items-center gap-2">
+              <Input data-testid="upload-label-input" className="flex-1" value={uploadLabel}
+                onChange={e => setUploadLabel(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && confirmUpload()} />
+              <Button data-testid="upload-confirm" onClick={confirmUpload} disabled={uploading || !uploadLabel.trim()}>
+                {uploading ? '업로드 중...' : '업로드'}
+              </Button>
+              <Button variant="destructive" onClick={cancelUpload} disabled={uploading}>취소</Button>
+            </div>
+            <div className="text-xs text-muted-foreground">{pendingFile.name}</div>
+          </CardContent>
+        </Card>
       )}
 
-      <table style={s.table}>
-        <thead>
-          <tr>
-            <th style={s.th}>파일명</th>
-            <th style={s.th}>상태</th>
-            <th style={s.th}>작업</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>파일명</TableHead>
+            <TableHead>상태</TableHead>
+            <TableHead>작업</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {docs.map(d => {
             const chunkState = expandedChunks[d.id]
             return (
-            <React.Fragment key={d.id}>
-              <tr>
-                <td style={s.td}>
-                  {editingId === d.id ? (
-                    <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <input
-                        data-testid="edit-label-input"
-                        style={{ ...s.input, padding: '4px 8px', fontSize: 13 }}
-                        value={editLabel}
-                        onChange={e => setEditLabel(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && saveEdit(d.id)}
-                        autoFocus
-                      />
-                      <button
-                        data-testid="save-label"
-                        style={{ ...s.btnSm, padding: '4px 10px' }}
-                        onClick={() => saveEdit(d.id)}
-                      >저장</button>
-                      <button
-                        style={{ ...s.btnDanger, padding: '4px 10px' }}
-                        onClick={() => { setEditingId(null); setEditLabel('') }}
-                      >취소</button>
-                    </span>
-                  ) : (
-                    <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      {d.name}
-                      <button
-                        data-testid="edit-label"
-                        title="레이블 수정"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#4299e1', padding: 0 }}
-                        onClick={() => startEdit(d)}
-                      >✏️ 레이블 수정</button>
-                    </span>
-                  )}
-                </td>
-                <td style={s.td}>
-                  <span style={{ color: STATUS_COLORS[d.status], fontWeight: 600 }}>{d.status}</span>
-                  {d.error_message && <span style={{ marginLeft: 8, fontSize: 12, color: '#fc8181' }}>{d.error_message}</span>}
-                </td>
-                <td style={s.td}>
-                  <button
-                    style={{ ...s.btn, fontSize: 12, padding: '3px 8px', marginRight: 6 }}
-                    onClick={() => toggleChunks(d.id)}
-                    data-testid={`chunks-toggle-${d.id}`}
-                  >
-                    {chunkState !== undefined ? '청크 닫기' : '청크 보기'}
-                  </button>
-                  <button style={s.btnDanger} onClick={() => handleDelete(d.id)}>삭제</button>
-                </td>
-              </tr>
-              {chunkState !== undefined && (
-                <tr>
-                  <td colSpan={3} style={{ ...s.td, background: '#f7fafc', padding: 0 }}>
-                    <div style={{ padding: 12 }} data-testid={`chunks-panel-${d.id}`}>
-                      {chunkState === 'loading' && (
-                        <div style={{ color: '#718096', fontSize: 13 }}>청크 로딩 중...</div>
-                      )}
-                      {Array.isArray(chunkState) && chunkState.length === 0 && (
-                        <div style={{ color: '#a0aec0', fontSize: 13 }}>청크 없음</div>
-                      )}
-                      {Array.isArray(chunkState) && chunkState.map(c => (
-                        <div key={c.chunk_index} data-testid="chunk-item" style={{ marginBottom: 8, fontSize: 12, borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
-                          <span style={{ fontWeight: 700, color: '#4299e1', marginRight: 8 }}>#{c.chunk_index}</span>
-                          <span data-testid="chunk-content" style={{ color: '#4a5568' }}>{c.content.slice(0, 200)}{c.content.length > 200 ? '…' : ''}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </React.Fragment>
+              <React.Fragment key={d.id}>
+                <TableRow>
+                  <TableCell>
+                    {editingId === d.id ? (
+                      <span className="flex items-center gap-2">
+                        <Input data-testid="edit-label-input" className="h-8 text-sm" value={editLabel}
+                          onChange={e => setEditLabel(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && saveEdit(d.id)} autoFocus />
+                        <Button size="sm" data-testid="save-label" onClick={() => saveEdit(d.id)}>저장</Button>
+                        <Button size="sm" variant="destructive" onClick={() => { setEditingId(null); setEditLabel('') }}>취소</Button>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        {d.name}
+                        <button data-testid="edit-label" title="레이블 수정"
+                          className="cursor-pointer text-xs text-primary hover:underline" onClick={() => startEdit(d)}>✏️ 레이블 수정</button>
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={STATUS_VARIANT[d.status] || 'secondary'}>{d.status}</Badge>
+                    {d.error_message && <span className="ml-2 text-xs text-destructive">{d.error_message}</span>}
+                  </TableCell>
+                  <TableCell>
+                    <Button size="sm" variant="secondary" className="mr-2" onClick={() => toggleChunks(d.id)} data-testid={`chunks-toggle-${d.id}`}>
+                      {chunkState !== undefined ? '청크 닫기' : '청크 보기'}
+                    </Button>
+                    <Button size="sm" variant="destructive" onClick={() => handleDelete(d.id)}>삭제</Button>
+                  </TableCell>
+                </TableRow>
+                {chunkState !== undefined && (
+                  <TableRow>
+                    <TableCell colSpan={3} className="bg-muted/40 p-0">
+                      <div className="p-3" data-testid={`chunks-panel-${d.id}`}>
+                        {chunkState === 'loading' && <div className="text-sm text-muted-foreground">청크 로딩 중...</div>}
+                        {Array.isArray(chunkState) && chunkState.length === 0 && <div className="text-sm text-muted-foreground">청크 없음</div>}
+                        {Array.isArray(chunkState) && chunkState.map(c => (
+                          <div key={c.chunk_index} data-testid="chunk-item" className="mb-2 border-b border-border pb-2 text-xs">
+                            <span className="mr-2 font-bold text-primary">#{c.chunk_index}</span>
+                            <span data-testid="chunk-content" className="text-muted-foreground">{c.content.slice(0, 200)}{c.content.length > 200 ? '…' : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </React.Fragment>
             )
           })}
           {docs.length === 0 && (
-            <tr><td colSpan={3} style={{ ...s.td, textAlign: 'center', color: '#a0aec0' }}>문서가 없습니다</td></tr>
+            <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">문서가 없습니다</TableCell></TableRow>
           )}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   )
 }
