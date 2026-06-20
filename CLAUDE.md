@@ -1,5 +1,7 @@
 # 작업의 순서
 /grill-* /to-prd /to-issues /tdd 의 순서
+작업 종료 후 README.md 업데이트
+작업 내역별로 커밋
 
 # 테스트 작성시
 - RED/GREEN/REFACTOR 사이클을 따르세요.
