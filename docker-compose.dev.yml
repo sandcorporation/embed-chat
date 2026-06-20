@@ -29,6 +29,7 @@ services:
       - ./backend:/app
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
+      OLLAMA_BASE_URL: http://ollama:11434
 
   worker-chat:
     command: celery -A config.celery worker -Q chat --concurrency=2 --prefetch-multiplier=1 --loglevel=debug
@@ -81,7 +82,7 @@ services:
     ports:
       - "11434:11434"
     healthcheck:
-      test: ["CMD", "ollama", "list"]
+      test: [ "CMD", "ollama", "list" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -93,7 +94,7 @@ services:
       - ollama_data:/root/.ollama
     environment:
       OLLAMA_HOST: http://ollama:11434
-    command: ["pull", "bge-m3"]
+    command: [ "pull", "bge-m3" ]
     depends_on:
       ollama:
         condition: service_healthy
