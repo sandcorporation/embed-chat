@@ -1,45 +1,33 @@
 import { useState, useEffect, useRef, ChangeEvent } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { listEscalations, claimEscalation, sendEscalationMessage, resolveEscalation, openEscalationStream, sendTypingIndicator, getEscalationMessages } from '../api'
 import type { StreamHandle } from '../api'
-import { s } from '../styles'
 import type { EscalationOut } from '../generated/model'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
+import { cn } from '@/lib/utils'
 
 const STATUS_LABEL: Record<string, string> = { pending: '대기 중', claimed: '진행 중', resolved: '완료' }
-const STATUS_COLOR: Record<string, string> = { pending: '#e53e3e', claimed: '#d69e2e', resolved: '#38a169' }
-
+const STATUS_VARIANT: Record<string, 'destructive' | 'default' | 'success'> = { pending: 'destructive', claimed: 'default', resolved: 'success' }
 const ROLE_LABEL: Record<string, string> = { user: 'Visitor', assistant: 'AI', human_agent: '상담원' }
-const ROLE_ALIGN: Record<string, string> = { user: 'flex-start', assistant: 'flex-end', human_agent: 'flex-end' }
-const ROLE_BG: Record<string, string> = { user: '#edf2f7', assistant: '#ebf8ff', human_agent: '#f0fff4' }
+const ROLE_BUBBLE: Record<string, string> = { user: 'self-start bg-muted', assistant: 'self-end bg-sky-100 dark:bg-sky-900/40', human_agent: 'self-end bg-emerald-100 dark:bg-emerald-900/40' }
 
-// API 메시지(EscalationMessageOut)와 로컬 추가 메시지(id 없음)를 함께 담는다.
 type ChatMsg = { id?: string; role: string; content: string; created_at?: string }
 
 function ChatHistory({ messages }: { messages: ChatMsg[] }) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  if (!messages.length) return (
-    <p style={{ fontSize: 12, color: '#a0aec0', textAlign: 'center', padding: '8px 0' }}>대화 내역 없음</p>
-  )
+  if (!messages.length) return <p className="py-2 text-center text-xs text-muted-foreground">대화 내역 없음</p>
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {messages.map((m) => (
-        <div key={m.id || `${m.role}-${m.created_at}`} style={{ display: 'flex', flexDirection: 'column', alignItems: ROLE_ALIGN[m.role] || 'flex-start' }}>
-          <span style={{ fontSize: 10, color: '#718096', marginBottom: 2 }}>{ROLE_LABEL[m.role] || m.role}</span>
-          <div style={{
-            background: ROLE_BG[m.role] || '#edf2f7',
-            borderRadius: 8,
-            padding: '6px 10px',
-            maxWidth: '80%',
-            fontSize: 13,
-            lineHeight: 1.5,
-          }}>
-            {m.content}
-          </div>
+    <div className="flex flex-col gap-1.5">
+      {messages.map(m => (
+        <div key={m.id || `${m.role}-${m.created_at}`} className={cn('flex flex-col', m.role === 'user' ? 'items-start' : 'items-end')}>
+          <span className="mb-0.5 text-[10px] text-muted-foreground">{ROLE_LABEL[m.role] || m.role}</span>
+          <div className={cn('max-w-[80%] rounded-lg px-2.5 py-1.5 text-sm leading-relaxed', ROLE_BUBBLE[m.role] || 'self-start bg-muted')}>{m.content}</div>
         </div>
       ))}
       <div ref={bottomRef} />
@@ -54,15 +42,11 @@ function EscalationCard({ esc, onUpdate, incomingMessage }: { esc: EscalationOut
   const typingDebounceRef = useRef<number | undefined>(undefined)
 
   useEffect(() => {
-    getEscalationMessages(esc.id).then(data => {
-      if (Array.isArray(data)) setMessages(data)
-    })
+    getEscalationMessages(esc.id).then(data => { if (Array.isArray(data)) setMessages(data) })
   }, [esc.id])
 
   useEffect(() => {
-    if (incomingMessage) {
-      setMessages(prev => [...prev, incomingMessage])
-    }
+    if (incomingMessage) setMessages(prev => [...prev, incomingMessage])
   }, [incomingMessage])
 
   const handleClaim = async () => {
@@ -74,9 +58,7 @@ function EscalationCard({ esc, onUpdate, incomingMessage }: { esc: EscalationOut
   const handleMsgChange = (e: ChangeEvent<HTMLInputElement>) => {
     setMsg(e.target.value)
     clearTimeout(typingDebounceRef.current)
-    typingDebounceRef.current = window.setTimeout(() => {
-      sendTypingIndicator(esc.id)
-    }, 500)
+    typingDebounceRef.current = window.setTimeout(() => sendTypingIndicator(esc.id), 500)
   }
 
   const handleSend = async () => {
@@ -90,125 +72,93 @@ function EscalationCard({ esc, onUpdate, incomingMessage }: { esc: EscalationOut
     setSending(false)
   }
 
-  const handleResolve = async () => {
-    await resolveEscalation(esc.id)
-    onUpdate()
-  }
+  const handleResolve = async () => { await resolveEscalation(esc.id); onUpdate() }
 
   const isPending = esc.status === 'pending'
   const isClaimed = esc.status === 'claimed'
 
   return (
-    <div style={{
-      border: `2px solid ${isPending ? '#e53e3e' : '#e2e8f0'}`,
-      borderRadius: 8,
-      padding: 16,
-      marginBottom: 12,
-      background: isPending ? '#fff5f5' : '#fff',
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontWeight: 600, fontSize: 13 }}>세션 {esc.session_id.slice(0, 8)}…</span>
-        <span style={{ fontSize: 12, color: STATUS_COLOR[esc.status], fontWeight: 600 }}>
-          {STATUS_LABEL[esc.status]}
-        </span>
-      </div>
-      {esc.reason && <p style={{ fontSize: 12, color: '#718096', marginBottom: 8 }}>{esc.reason}</p>}
-
-      <div style={{
-        background: '#f7fafc',
-        borderRadius: 6,
-        padding: 10,
-        maxHeight: 240,
-        overflowY: 'auto',
-        marginBottom: 10,
-      }}>
-        <ChatHistory messages={messages} />
-      </div>
-
-      {isPending && (
-        <button style={{ ...s.btn, fontSize: 13, padding: '6px 14px' }} onClick={handleClaim}>
-          수락하기
-        </button>
-      )}
-
-      {isClaimed && (
-        <div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <input
-              style={{ ...s.input, flex: 1 }}
-              value={msg}
-              onChange={handleMsgChange}
-              placeholder="방문자에게 메시지 전송..."
-              onKeyDown={e => e.key === 'Enter' && handleSend()}
-              disabled={sending}
-            />
-            <button style={s.btn} onClick={handleSend} disabled={sending || !msg.trim()}>
-              전송
-            </button>
-          </div>
-          <button
-            style={{ ...s.btnSm, background: '#fff', border: '1px solid #e2e8f0', color: '#718096' }}
-            onClick={handleResolve}
-          >
-            AI에게 넘기기
-          </button>
+    <Card className={cn('mb-3', isPending && 'border-destructive/60 bg-destructive/5')}>
+      <CardContent className="space-y-2 pt-5">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold">세션 {esc.session_id.slice(0, 8)}…</span>
+          <Badge variant={STATUS_VARIANT[esc.status] || 'secondary'}>{STATUS_LABEL[esc.status]}</Badge>
         </div>
-      )}
-    </div>
+        {esc.reason && <p className="text-xs text-muted-foreground">{esc.reason}</p>}
+
+        <div className="max-h-60 overflow-y-auto rounded-md bg-muted/40 p-2.5">
+          <ChatHistory messages={messages} />
+        </div>
+
+        {isPending && <Button size="sm" onClick={handleClaim}>수락하기</Button>}
+
+        {isClaimed && (
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <Input className="flex-1" value={msg} onChange={handleMsgChange}
+                placeholder="방문자에게 메시지 전송..." onKeyDown={e => e.key === 'Enter' && handleSend()} disabled={sending} />
+              <Button onClick={handleSend} disabled={sending || !msg.trim()}>전송</Button>
+            </div>
+            <Button size="sm" variant="outline" onClick={handleResolve}>AI에게 넘기기</Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
+// /tenant/hitl(목록) · /tenant/hitl/:escalationId(특정 상담 딥링크). SSE·claim/resolve는 보존(ADR-0014).
 export default function HitlTab() {
+  const { escalationId } = useParams<{ escalationId?: string }>()
+  const navigate = useNavigate()
   const [escalations, setEscalations] = useState<EscalationOut[]>([])
   const [loading, setLoading] = useState(true)
   const [incomingBySession, setIncomingBySession] = useState<Record<string, ChatMsg>>({})
   const esRef = useRef<StreamHandle | null>(null)
 
   const refresh = () => {
-    listEscalations().then(data => {
-      setEscalations(data)
-      setLoading(false)
-    })
+    listEscalations().then(data => { setEscalations(data); setLoading(false) })
   }
 
   useEffect(() => {
     refresh()
-
     esRef.current = openEscalationStream((event) => {
       if (event.type === 'visitor_message') {
-        const msg: ChatMsg = {
-          role: 'user',
-          content: event.content,
-          created_at: new Date().toISOString(),
-        }
+        const msg: ChatMsg = { role: 'user', content: event.content, created_at: new Date().toISOString() }
         setIncomingBySession(prev => ({ ...prev, [event.session_id]: msg }))
       } else {
         refresh()
       }
     })
-
     return () => esRef.current?.close()
   }, [])
 
-  if (loading) return <p>로딩 중...</p>
+  if (loading) return <p className="text-sm text-muted-foreground">로딩 중...</p>
+
+  const visible = escalationId ? escalations.filter(e => e.id === escalationId) : escalations
 
   return (
-    <div style={{ maxWidth: 700 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>HITL 상담 세션</h3>
-        <button style={s.btnSm} onClick={refresh}>새로고침</button>
+    <div className="max-w-3xl">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-sm font-semibold">HITL 상담 세션</h3>
+        <div className="flex gap-2">
+          {escalationId && <Button size="sm" variant="ghost" onClick={() => navigate('/tenant/hitl')}>← 전체 보기</Button>}
+          <Button size="sm" variant="outline" onClick={refresh}>새로고침</Button>
+        </div>
       </div>
 
-      {escalations.length === 0 ? (
-        <p style={{ color: '#718096', fontSize: 14 }}>활성 세션이 없습니다.</p>
+      {visible.length === 0 ? (
+        <p className="text-sm text-muted-foreground">활성 세션이 없습니다.</p>
       ) : (
-        escalations.map(esc => (
-          <EscalationCard
-            key={esc.id}
-            esc={esc}
-            onUpdate={refresh}
-            incomingMessage={incomingBySession[esc.session_id] ?? null}
-          />
+        visible.map(esc => (
+          <div key={esc.id}>
+            {!escalationId && (
+              <div className="mb-1 flex justify-end">
+                <Button size="sm" variant="ghost" onClick={() => navigate(`/tenant/hitl/${esc.id}`)}>🔗 단독 보기</Button>
+              </div>
+            )}
+            <EscalationCard esc={esc} onUpdate={refresh} incomingMessage={incomingBySession[esc.session_id] ?? null} />
+          </div>
         ))
       )}
     </div>

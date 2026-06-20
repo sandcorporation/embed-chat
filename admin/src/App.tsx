@@ -107,6 +107,7 @@ export default function App() {
         <Route path="config" element={<ConfigTab />} />
         <Route path="agents" element={<AgentsTab />} />
         <Route path="hitl" element={<HitlTab />} />
+        <Route path="hitl/:escalationId" element={<HitlTab />} />
       </Route>
     </Routes>
   )
