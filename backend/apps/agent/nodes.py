@@ -136,13 +136,24 @@ def _assemble_lc_messages(state: dict) -> list:
     return lc_messages
 
 
+def _will_source_fallback(state: dict, result) -> bool:
+    """이 call_llm 결과 뒤에 원문 폴백(source_search→재호출)이 예정돼 있는가.
+
+    graph._route_after_llm의 폴백 조건과 일치해야 한다 — 비-종단 패스에선 스트리밍을 억제해
+    재호출로 인한 중복 출력을 막는다(issue 119 폴백 회귀).
+    """
+    return not result.context_sufficient and not state.get("source_text_tried", False)
+
+
 def call_llm_structured(state: dict) -> dict:
     lc_messages = _assemble_lc_messages(state)
 
     result = llm_boundary.complete_structured(get_chat_provider(), lc_messages, HITLResponse)
 
     # HITL 여부와 무관하게, AI가 만든 응답(전환 멘트 포함)이 있으면 사용자에게 스트리밍한다.
-    if result.response:
+    # 단, 원문 폴백(issue 119)이 예정된 비-종단 패스에선 스트리밍하지 않는다 — 재호출로 두 번
+    # publish되어 AI 메시지가 중복 출력되는 것을 막는다.
+    if result.response and not _will_source_fallback(state, result):
         publish_token(state["session_id"], result.response)
         publish_done(state["session_id"])
 
@@ -159,7 +170,8 @@ def call_llm_plain(state: dict) -> dict:
     lc_messages = _assemble_lc_messages(state)
     result = llm_boundary.complete_structured(get_chat_provider(), lc_messages, PlainResponse)
 
-    if result.response:
+    # 폴백 예정 패스에선 스트리밍 억제(중복 출력 방지) — call_llm_structured와 동일.
+    if result.response and not _will_source_fallback(state, result):
         publish_token(state["session_id"], result.response)
         publish_done(state["session_id"])
 

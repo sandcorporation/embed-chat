@@ -72,6 +72,56 @@ def test_local_search_falls_back_to_source_text(tenant_with_key, fake_chat_llm):
 
 
 @pytest.mark.django_db
+def test_fallback_streams_answer_once(tenant_with_key, fake_chat_llm, monkeypatch):
+    """폴백으로 call_llm이 2회 실행돼도 응답은 1번만 스트리밍된다(중복 AI 메시지 방지).
+
+    1패스가 비어있지 않은 '모름' 응답을 내는 실세계 케이스를 재현한다(기존 폴백 테스트는
+    1패스 응답을 ''로 둬 이 버그를 못 잡았다).
+    """
+    from apps.agent import nodes
+    from apps.agent.graph import run_chat_agent, _create_checkpointer
+    from apps.agent.nodes import HITLResponse
+    from apps.chat.models import ChatSession
+    from apps.rag.graph_store import GraphStore
+    from apps.rag.ingesters import get_embeddings
+
+    tenant, _ = tenant_with_key
+    gs = GraphStore(str(tenant.id))
+    fact = "이 모니터는 1920 x 1080 FHD 해상도를 지원합니다."
+    gs.ensure_vector_index(dimensions=1024)
+    emb = get_embeddings([fact], provider=gs._embedding_provider())[0]
+    gs.upsert_text_unit("u-res", fact, emb, source_document_id="d1", chunk_index=0)
+
+    def fake(messages):
+        system = messages[0].content
+        if "1920" in system:  # 2패스: 원문 보강됨 → 답
+            return HITLResponse(response="지원 해상도는 1920x1080(FHD)입니다.",
+                                needs_hitl=False, hitl_reason="", context_sufficient=True)
+        # 1패스: 근거 없음 → 비어있지 않은 '모름' 응답 + context_sufficient=False
+        return HITLResponse(response="죄송합니다, 정보를 찾지 못했습니다.",
+                            needs_hitl=False, hitl_reason="", context_sufficient=False)
+    fake_chat_llm.override = fake
+
+    dones = {"n": 0}
+    monkeypatch.setattr(nodes, "publish_done", lambda *a, **k: dones.__setitem__("n", dones["n"] + 1))
+    monkeypatch.setattr(nodes, "publish_token", lambda *a, **k: None)
+
+    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-dup")
+    answer = run_chat_agent(session, "지원하는 모니터의 해상도")
+
+    saver, conn = _create_checkpointer()
+    try:
+        cv = saver.get({"configurable": {"thread_id": str(session.id)}})["channel_values"]
+    finally:
+        conn.close()
+    assistants = [m for m in (cv.get("messages") or []) if m.get("role") == "assistant"]
+
+    assert "1920" in answer
+    assert dones["n"] == 1, f"publish_done가 {dones['n']}회 호출됨(중복 스트리밍)"
+    assert len(assistants) == 1, f"checkpoint messages에 assistant {len(assistants)}개(중복)"
+
+
+@pytest.mark.django_db
 def test_no_source_fallback_when_graph_answers(tenant_with_key, fake_chat_llm):
     """그래프로 답한 happy path(context_sufficient=True)에선 원문 폴백을 타지 않는다(토큰 가드).
 
