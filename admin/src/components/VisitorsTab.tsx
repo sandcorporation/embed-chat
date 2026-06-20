@@ -1,19 +1,12 @@
-import { useState, useEffect, CSSProperties, ReactNode } from 'react'
+import { useState, useEffect, ReactNode } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { listVisitors, listVisitorSessions, listMemories, updateMemory, deleteMemory } from '../api'
-import SessionDetail from './SessionDetail'
-import { s } from '../styles'
 import type { VisitorOut, VisitorSessionOut, MemoryOut } from '../generated/model'
-
-const HITL_BADGE: CSSProperties = {
-  display: 'inline-block',
-  fontSize: 10,
-  fontWeight: 700,
-  padding: '2px 6px',
-  borderRadius: 4,
-  background: '#9f7aea22',
-  color: '#6b46c1',
-  marginLeft: 6,
-}
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { cn } from '@/lib/utils'
 
 function VisitorList({ selectedId, onSelect }: { selectedId: string | null; onSelect: (id: string) => void }) {
   const [search, setSearch] = useState('')
@@ -27,37 +20,22 @@ function VisitorList({ selectedId, onSelect }: { selectedId: string | null; onSe
   useEffect(() => { load('') }, [])
 
   return (
-    <div style={{ width: 220, flexShrink: 0, borderRight: '1px solid #e2e8f0', paddingRight: 16 }}>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-        <input
-          style={{ ...s.input, flex: 1, fontSize: 12 }}
-          placeholder="visitor_id 검색"
-          value={search}
+    <div className="w-56 flex-shrink-0 border-r border-border pr-4">
+      <div className="mb-3 flex gap-1.5">
+        <Input className="h-8 flex-1 text-xs" placeholder="visitor_id 검색" value={search}
           onChange={e => setSearch(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && load(e.currentTarget.value)}
-        />
-        <button style={{ ...s.btnSm, flexShrink: 0 }} onClick={() => load(search)}>검색</button>
+          onKeyDown={e => e.key === 'Enter' && load(e.currentTarget.value)} />
+        <Button size="sm" variant="outline" onClick={() => load(search)}>검색</Button>
       </div>
-      {visitors.length === 0 && (
-        <p style={{ fontSize: 12, color: '#a0aec0' }}>방문자 없음</p>
-      )}
+      {visitors.length === 0 && <p className="text-xs text-muted-foreground">방문자 없음</p>}
       {visitors.map(v => (
-        <div
-          key={v.visitor_id}
-          onClick={() => onSelect(v.visitor_id)}
-          style={{
-            padding: '8px 10px',
-            borderRadius: 6,
-            marginBottom: 4,
-            cursor: 'pointer',
-            fontSize: 13,
-            background: selectedId === v.visitor_id ? '#ebf8ff' : 'transparent',
-            border: selectedId === v.visitor_id ? '1px solid #bee3f8' : '1px solid transparent',
-            wordBreak: 'break-all',
-          }}
-        >
+        <button key={v.visitor_id} onClick={() => onSelect(v.visitor_id)}
+          className={cn(
+            'mb-1 block w-full break-all rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent',
+            selectedId === v.visitor_id && 'bg-accent font-medium',
+          )}>
           {v.visitor_id}
-        </div>
+        </button>
       ))}
     </div>
   )
@@ -67,37 +45,22 @@ function SessionList({ visitorId, onSelectSession }: { visitorId: string; onSele
   const [sessions, setSessions] = useState<VisitorSessionOut[]>([])
 
   useEffect(() => {
-    listVisitorSessions(visitorId).then(data => {
-      setSessions(Array.isArray(data) ? data : [])
-    })
+    listVisitorSessions(visitorId).then(data => setSessions(Array.isArray(data) ? data : []))
   }, [visitorId])
 
-  if (sessions.length === 0) {
-    return <p style={{ fontSize: 12, color: '#a0aec0' }}>세션 없음</p>
-  }
+  if (sessions.length === 0) return <p className="text-xs text-muted-foreground">세션 없음</p>
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div className="flex flex-col gap-1.5">
       {sessions.map(sess => (
-        <div
-          key={sess.session_id}
-          onClick={() => onSelectSession(sess.session_id)}
-          style={{
-            padding: '10px 12px',
-            border: '1px solid #e2e8f0',
-            borderRadius: 8,
-            cursor: 'pointer',
-            background: '#f7fafc',
-          }}
-        >
-          <div style={{ fontSize: 13, fontWeight: 600 }}>
+        <button key={sess.session_id} onClick={() => onSelectSession(sess.session_id)}
+          className="rounded-md border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-accent">
+          <div className="flex items-center gap-2 text-sm font-semibold">
             {sess.session_id.slice(0, 8)}…
-            {sess.is_hitl && <span style={HITL_BADGE}>HITL</span>}
+            {sess.is_hitl && <Badge variant="secondary" className="bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">HITL</Badge>}
           </div>
-          <div style={{ fontSize: 11, color: '#718096', marginTop: 2 }}>
-            {new Date(sess.created_at).toLocaleString()}
-          </div>
-        </div>
+          <div className="mt-0.5 text-xs text-muted-foreground">{new Date(sess.created_at).toLocaleString()}</div>
+        </button>
       ))}
     </div>
   )
@@ -108,9 +71,7 @@ function MemoryEditor({ visitorId }: { visitorId: string }) {
   const [editing, setEditing] = useState<MemoryOut | null>(null)
 
   useEffect(() => {
-    listMemories(visitorId).then(data => {
-      setMemories(Array.isArray(data) ? data : [])
-    })
+    listMemories(visitorId).then(data => setMemories(Array.isArray(data) ? data : []))
   }, [visitorId])
 
   const handleDelete = async (memId: string) => {
@@ -124,102 +85,75 @@ function MemoryEditor({ visitorId }: { visitorId: string }) {
     setEditing(null)
   }
 
-  if (memories.length === 0) {
-    return <p style={{ fontSize: 12, color: '#a0aec0' }}>Memory 없음</p>
-  }
+  if (memories.length === 0) return <p className="text-xs text-muted-foreground">Memory 없음</p>
 
   return (
-    <table style={s.table}>
-      <thead>
-        <tr>
-          <th style={s.th}>Key</th>
-          <th style={s.th}>Value</th>
-          <th style={s.th}>작업</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table>
+      <TableHeader>
+        <TableRow><TableHead>Key</TableHead><TableHead>Value</TableHead><TableHead>작업</TableHead></TableRow>
+      </TableHeader>
+      <TableBody>
         {memories.map(m => (
-          <tr key={m.id}>
-            <td style={s.td}>
-              {editing?.id === m.id
-                ? <input style={s.input} value={editing.key} onChange={e => setEditing(x => x ? { ...x, key: e.target.value } : x)} />
-                : m.key}
-            </td>
-            <td style={s.td}>
-              {editing?.id === m.id
-                ? <input style={s.input} value={editing.value} onChange={e => setEditing(x => x ? { ...x, value: e.target.value } : x)} />
-                : m.value}
-            </td>
-            <td style={s.td}>
-              {editing?.id === m.id
-                ? <>
-                    <button style={s.btnSm} onClick={() => handleUpdate(editing!)}>저장</button>
-                    <button style={{ ...s.btnSm, marginLeft: 4 }} onClick={() => setEditing(null)}>취소</button>
-                  </>
-                : <>
-                    <button style={s.btnSm} onClick={() => setEditing({ ...m })}>수정</button>
-                    <button style={{ ...s.btnDanger, marginLeft: 4 }} onClick={() => handleDelete(m.id)}>삭제</button>
-                  </>}
-            </td>
-          </tr>
+          <TableRow key={m.id}>
+            <TableCell>{editing?.id === m.id
+              ? <Input className="h-8" value={editing.key} onChange={e => setEditing(x => x ? { ...x, key: e.target.value } : x)} />
+              : m.key}</TableCell>
+            <TableCell>{editing?.id === m.id
+              ? <Input className="h-8" value={editing.value} onChange={e => setEditing(x => x ? { ...x, value: e.target.value } : x)} />
+              : m.value}</TableCell>
+            <TableCell>
+              {editing?.id === m.id ? (
+                <>
+                  <Button size="sm" onClick={() => handleUpdate(editing!)}>저장</Button>
+                  <Button size="sm" variant="ghost" className="ml-1" onClick={() => setEditing(null)}>취소</Button>
+                </>
+              ) : (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => setEditing({ ...m })}>수정</Button>
+                  <Button size="sm" variant="destructive" className="ml-1" onClick={() => handleDelete(m.id)}>삭제</Button>
+                </>
+              )}
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
-  )
-}
-
-export default function VisitorsTab() {
-  const [selectedVisitor, setSelectedVisitor] = useState<string | null>(null)
-  const [selectedSession, setSelectedSession] = useState<string | null>(null)
-
-  const handleSelectVisitor = (visitorId: string) => {
-    setSelectedVisitor(visitorId)
-    setSelectedSession(null)
-  }
-
-  return (
-    <div style={{ display: 'flex', gap: 24, minHeight: 500 }}>
-      <VisitorList
-        selectedId={selectedVisitor}
-        onSelect={handleSelectVisitor}
-      />
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {!selectedVisitor ? (
-          <p style={{ color: '#a0aec0', fontSize: 14, paddingTop: 40, textAlign: 'center' }}>
-            왼쪽에서 방문자를 선택하세요
-          </p>
-        ) : selectedSession ? (
-          <SessionDetail
-            sessionId={selectedSession}
-            onBack={() => setSelectedSession(null)}
-          />
-        ) : (
-          <div>
-            <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>
-              {selectedVisitor}
-            </h4>
-            <Section title="세션 목록">
-              <SessionList
-                visitorId={selectedVisitor}
-                onSelectSession={setSelectedSession}
-              />
-            </Section>
-            <Section title="Memory">
-              <MemoryEditor visitorId={selectedVisitor} />
-            </Section>
-          </div>
-        )}
-      </div>
-    </div>
+      </TableBody>
+    </Table>
   )
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div style={{ marginBottom: 24 }}>
-      <h5 style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 600, color: '#4a5568' }}>{title}</h5>
+    <div className="mb-6">
+      <h5 className="mb-2 text-sm font-semibold text-foreground">{title}</h5>
       {children}
+    </div>
+  )
+}
+
+// 자원 라우트(ADR-0017): /tenant/visitors(:visitorId?) — visitor 선택이 URL을 바꾼다.
+// 세션 선택은 /tenant/sessions/:sessionId로 이동(SessionDetailPage).
+export default function VisitorsTab() {
+  const { visitorId } = useParams<{ visitorId?: string }>()
+  const navigate = useNavigate()
+
+  return (
+    <div className="flex min-h-[500px] gap-6">
+      <VisitorList selectedId={visitorId ?? null} onSelect={id => navigate(`/tenant/visitors/${id}`)} />
+      <div className="min-w-0 flex-1">
+        {!visitorId ? (
+          <p className="pt-10 text-center text-sm text-muted-foreground">왼쪽에서 방문자를 선택하세요</p>
+        ) : (
+          <div>
+            <h4 className="mb-3 break-all text-sm font-semibold">{visitorId}</h4>
+            <Section title="세션 목록">
+              <SessionList visitorId={visitorId} onSelectSession={sid => navigate(`/tenant/sessions/${sid}`)} />
+            </Section>
+            <Section title="Memory">
+              <MemoryEditor visitorId={visitorId} />
+            </Section>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

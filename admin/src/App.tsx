@@ -8,6 +8,7 @@ import DashboardLayout, { NavItem } from './components/DashboardLayout'
 import DocumentsTab from './components/DocumentsTab'
 import KnowledgeGraphTab from './components/KnowledgeGraphTab'
 import VisitorsTab from './components/VisitorsTab'
+import SessionDetailPage from './components/SessionDetailPage'
 import ConfigTab from './components/ConfigTab'
 import AgentsTab from './components/AgentsTab'
 import HitlTab from './components/HitlTab'
@@ -101,6 +102,8 @@ export default function App() {
         <Route path="documents" element={<DocumentsTab />} />
         <Route path="graph" element={<KnowledgeGraphTab />} />
         <Route path="visitors" element={<VisitorsTab />} />
+        <Route path="visitors/:visitorId" element={<VisitorsTab />} />
+        <Route path="sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="config" element={<ConfigTab />} />
         <Route path="agents" element={<AgentsTab />} />
         <Route path="hitl" element={<HitlTab />} />

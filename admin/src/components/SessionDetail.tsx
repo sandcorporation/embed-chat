@@ -1,48 +1,31 @@
 import { useState, useEffect, useRef } from 'react'
 import { getSessionMessages, getSessionCheckpoint } from '../api'
-import { s } from '../styles'
 import type { SessionMessageOut } from '../generated/model'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 const ROLE_LABEL: Record<string, string> = { user: 'Visitor', assistant: 'AI', human_agent: '상담원' }
-const ROLE_ALIGN: Record<string, string> = { user: 'flex-end', assistant: 'flex-start', human_agent: 'flex-start' }
-const ROLE_BG: Record<string, string> = { user: '#4299e1', assistant: '#edf2f7', human_agent: '#9f7aea' }
-const ROLE_COLOR: Record<string, string> = { user: '#fff', assistant: '#2d3748', human_agent: '#fff' }
+const ROLE_BUBBLE: Record<string, string> = {
+  user: 'self-end bg-primary text-primary-foreground',
+  assistant: 'self-start bg-muted text-foreground',
+  human_agent: 'self-start bg-violet-500 text-white',
+}
 
 function ChatHistory({ messages }: { messages: SessionMessageOut[] }) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  if (!messages.length) {
-    return <p style={{ fontSize: 12, color: '#a0aec0', textAlign: 'center', padding: '20px 0' }}>대화 내역 없음</p>
-  }
+  if (!messages.length) return <p className="py-5 text-center text-xs text-muted-foreground">대화 내역 없음</p>
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="flex flex-col gap-2">
       {messages.map((m, i) => (
-        <div key={m.id || i} style={{ display: 'flex', flexDirection: 'column', alignItems: ROLE_ALIGN[m.role] || 'flex-start' }}>
-          <span style={{ fontSize: 10, color: '#718096', marginBottom: 2 }}>
-            {ROLE_LABEL[m.role] || m.role}
-          </span>
-          <div style={{
-            background: ROLE_BG[m.role] || '#edf2f7',
-            color: ROLE_COLOR[m.role] || '#2d3748',
-            borderRadius: 8,
-            padding: '8px 12px',
-            maxWidth: '75%',
-            fontSize: 13,
-            lineHeight: 1.5,
-            whiteSpace: 'pre-wrap',
-          }}>
+        <div key={m.id || i} className={cn('flex flex-col', m.role === 'user' ? 'items-end' : 'items-start')}>
+          <span className="mb-0.5 text-[10px] text-muted-foreground">{ROLE_LABEL[m.role] || m.role}</span>
+          <div className={cn('max-w-[75%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm leading-relaxed', ROLE_BUBBLE[m.role] || 'self-start bg-muted')}>
             {m.content}
           </div>
-          {m.created_at && (
-            <span style={{ fontSize: 10, color: '#a0aec0', marginTop: 2 }}>
-              {new Date(m.created_at).toLocaleString()}
-            </span>
-          )}
+          {m.created_at && <span className="mt-0.5 text-[10px] text-muted-foreground">{new Date(m.created_at).toLocaleString()}</span>}
         </div>
       ))}
       <div ref={bottomRef} />
@@ -52,29 +35,13 @@ function ChatHistory({ messages }: { messages: SessionMessageOut[] }) {
 
 function CheckpointView({ sessionId }: { sessionId: string }) {
   const [data, setData] = useState<unknown>(undefined)
+  useEffect(() => { getSessionCheckpoint(sessionId).then(setData) }, [sessionId])
 
-  useEffect(() => {
-    getSessionCheckpoint(sessionId).then(setData)
-  }, [sessionId])
-
-  if (data === undefined) return <p style={{ fontSize: 13, color: '#a0aec0' }}>불러오는 중...</p>
-  if (data === null) return (
-    <p style={{ fontSize: 13, color: '#718096' }}>이 세션은 AI 호출 내역이 없습니다.</p>
-  )
+  if (data === undefined) return <p className="text-sm text-muted-foreground">불러오는 중...</p>
+  if (data === null) return <p className="text-sm text-muted-foreground">이 세션은 AI 호출 내역이 없습니다.</p>
 
   return (
-    <pre style={{
-      background: '#f7fafc',
-      border: '1px solid #e2e8f0',
-      borderRadius: 6,
-      padding: 12,
-      fontSize: 11,
-      lineHeight: 1.6,
-      overflowY: 'auto',
-      maxHeight: 400,
-      whiteSpace: 'pre-wrap',
-      wordBreak: 'break-all',
-    }}>
+    <pre className="max-h-[400px] overflow-y-auto whitespace-pre-wrap break-all rounded-md border border-border bg-muted/40 p-3 text-[11px] leading-relaxed">
       {JSON.stringify(data, null, 2)}
     </pre>
   )
@@ -85,41 +52,25 @@ export default function SessionDetail({ sessionId, onBack }: { sessionId: string
   const [messages, setMessages] = useState<SessionMessageOut[]>([])
 
   useEffect(() => {
-    getSessionMessages(sessionId).then(data => {
-      setMessages(Array.isArray(data) ? data : [])
-    })
+    getSessionMessages(sessionId).then(data => setMessages(Array.isArray(data) ? data : []))
   }, [sessionId])
 
   return (
     <div>
-      <button style={{ ...s.btnSm, marginBottom: 16 }} onClick={onBack}>← 뒤로</button>
+      <Button size="sm" variant="outline" className="mb-4" onClick={onBack}>← 뒤로</Button>
+      <div className="mb-3 text-xs text-muted-foreground">세션 <strong>{sessionId.slice(0, 8)}…</strong></div>
 
-      <div style={{ fontSize: 12, color: '#718096', marginBottom: 12 }}>
-        세션 <strong>{sessionId.slice(0, 8)}…</strong>
-      </div>
-
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
-        {['history', 'checkpoint'].map(t => (
-          <button
-            key={t}
-            style={{
-              ...s.btnSm,
-              background: subTab === t ? '#4299e1' : '#f7fafc',
-              color: subTab === t ? '#fff' : '#4a5568',
-              border: subTab === t ? 'none' : '1px solid #e2e8f0',
-            }}
-            onClick={() => setSubTab(t)}
-          >
-            {({ history: '대화 내역', checkpoint: 'Checkpoint' } as Record<string, string>)[t]}
-          </button>
+      <div className="mb-4 flex gap-2 border-b border-border pb-2">
+        {(['history', 'checkpoint'] as const).map(t => (
+          <Button key={t} size="sm" variant={subTab === t ? 'default' : 'outline'} onClick={() => setSubTab(t)}>
+            {{ history: '대화 내역', checkpoint: 'Checkpoint' }[t]}
+          </Button>
         ))}
       </div>
 
-      <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+      <div className="max-h-[480px] overflow-y-auto">
         {subTab === 'history' && <ChatHistory messages={messages} />}
-        {subTab === 'checkpoint' && (
-          <CheckpointView sessionId={sessionId} />
-        )}
+        {subTab === 'checkpoint' && <CheckpointView sessionId={sessionId} />}
       </div>
     </div>
   )
