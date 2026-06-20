@@ -108,19 +108,6 @@ def test_local_search_returns_entities_and_relations_not_chunks(tenant_with_key)
     assert "powered by" in blob, f"관계가 없음: {out['rag_chunks']}"
 
 
-@pytest.mark.django_db
-def test_route_search_classifies_global_query(tenant_with_key):
-    """'전체/공통' 신호가 있는 질의는 search_scope=global로 분류된다."""
-    from apps.agent.nodes import route_search_node
-
-    tenant, _ = tenant_with_key
-    out = route_search_node({"model_id": "fake", "user_message": "문서들에서 공통으로 권장하는 설정은?"})
-    assert out["search_scope"] == "global"
-
-    out2 = route_search_node({"model_id": "fake", "user_message": "이 제품의 전원 사양은?"})
-    assert out2["search_scope"] == "local"
-
-
 # ── Issue 70: Knowledge Graph 인스펙터 백엔드 (search/neighbors) ──────────────
 
 @pytest.mark.django_db

@@ -55,15 +55,8 @@ class _FakeChatLLM:
         self.extraction = None  # optional GraphExtraction override (GraphRAG 추출용)
         self.last_provider = None  # 마지막 호출에 전달된 LLMProvider(라우팅 검증용)
 
-    GLOBAL_KEYWORDS = ("공통", "전체", "요약", "전반", "모든 문서")
-
     def complete_structured(self, provider, messages, schema):
         self.last_provider = provider
-        # 검색 범위 분류: 글로벌 키워드가 있으면 global, 아니면 local
-        if schema.__name__ == "SearchRoute":
-            text = _latest_human_message(messages)
-            scope = "global" if any(k in text for k in self.GLOBAL_KEYWORDS) else "local"
-            return schema(search_scope=scope)
         # GraphRAG Entity/관계 추출 스키마는 결정적 그래프를 반환
         if schema.__name__ == "GraphExtraction":
             if self.extraction is not None:

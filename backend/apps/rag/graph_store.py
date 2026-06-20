@@ -165,34 +165,6 @@ class GraphStore:
             # 그래프가 비어 있으면(메타 없음) 재구축할 것이 없으므로 fresh로 본다
             return rec["f"] if rec and rec["f"] else "fresh"
 
-    # ── Community ────────────────────────────────────────────────────────────
-    def clear_communities(self) -> None:
-        with _get_driver().session() as session:
-            session.run(
-                "MATCH (c:Community {tenant_id: $tenant_id}) DETACH DELETE c",
-                tenant_id=self.tenant_id,
-            )
-
-    def upsert_community(self, community_id: str, summary: str, members: list) -> None:
-        with _get_driver().session() as session:
-            session.run(
-                "MERGE (c:Community {tenant_id: $tenant_id, community_id: $cid}) "
-                "SET c.summary = $summary, c.members = $members",
-                tenant_id=self.tenant_id,
-                cid=community_id,
-                summary=summary,
-                members=members,
-            )
-
-    def query_community_summaries(self) -> list:
-        with _get_driver().session() as session:
-            result = session.run(
-                "MATCH (c:Community {tenant_id: $tenant_id}) "
-                "RETURN c.summary AS summary, coalesce(c.members, []) AS members",
-                tenant_id=self.tenant_id,
-            )
-            return [dict(record) for record in result]
-
     def reseed_document_label(self, document_id: str, new_label: str) -> None:
         """문서의 대표(레이블) Mention을 새 레이블로 시드한다. 그래프는 stale로 표시."""
         self.upsert_mention(

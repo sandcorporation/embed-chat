@@ -3,9 +3,7 @@ import operator
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from apps.agent.nodes import (
-    route_search_node,
     local_search_node,
-    global_search_node,
     source_search_node,
     call_llm_structured,
     call_llm_plain,
@@ -24,7 +22,6 @@ class ChatState(TypedDict):
     messages: Annotated[List[dict], operator.add]
     rag_chunks: List[str]
     visitor_memories: List[str]
-    search_scope: str
     assistant_response: str
     needs_hitl: bool
     hitl_reason: str
@@ -44,10 +41,6 @@ def _route_after_llm_plain(state: ChatState) -> str:
     if not state.get("context_sufficient", True) and not state.get("source_text_tried", False):
         return "source_search"
     return "save_messages"
-
-
-def _route_scope(state: ChatState) -> str:
-    return "global_search" if state.get("search_scope") == "global" else "local_search"
 
 
 def _build_conninfo() -> str:
@@ -83,17 +76,12 @@ def build_graph(checkpointer=None, hitl_enabled=True):
     """
     graph = StateGraph(ChatState)
 
-    graph.add_node("route_search", route_search_node)
     graph.add_node("local_search", local_search_node)
-    graph.add_node("global_search", global_search_node)
     graph.add_node("source_search", source_search_node)
     graph.add_node("save_messages", save_messages_node)
 
-    graph.add_edge(START, "route_search")
-    graph.add_conditional_edges("route_search", _route_scope, {
-        "local_search": "local_search",
-        "global_search": "global_search",
-    })
+    # Global Search/router 제거(ADR-0016) — 항상 Local Search로 직결.
+    graph.add_edge(START, "local_search")
 
     if hitl_enabled:
         graph.add_node("call_llm", call_llm_structured)
@@ -113,7 +101,6 @@ def build_graph(checkpointer=None, hitl_enabled=True):
         })
 
     graph.add_edge("local_search", "call_llm")
-    graph.add_edge("global_search", "call_llm")
     graph.add_edge("source_search", "call_llm")  # 원문 보강 후 LLM 재호출
     graph.add_edge("save_messages", END)
 
@@ -140,7 +127,6 @@ def run_chat_agent(session, user_message: str) -> str:
         "messages": [],  # Checkpoint이 이전 메시지 복원
         "rag_chunks": [],
         "visitor_memories": memories,
-        "search_scope": "local",
         "assistant_response": "",
         "needs_hitl": False,
         "hitl_reason": "",

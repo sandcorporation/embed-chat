@@ -11,9 +11,9 @@ Embed Chat는 타사 웹사이트에 iframe으로 삽입하는 챗봇을 제공�
 | 컴포넌트 | 역할 |
 |----------|------|
 | **Django API** (`/api/`) | 인증, 채팅(SSE), RAG/지식그래프, Visitor Memory, HITL, Provider 설정 |
-| **Celery Worker** (배치) | 문서 인제스션(그래프 구축), 커뮤니티 재구축, 재임베딩, 메모리 추출 |
+| **Celery Worker** (배치) | 문서 인제스션(그래프 구축), 엔티티 해소(SAME_AS) 재구축, 재임베딩, 메모리 추출 |
 | **Celery worker-chat** (chat 전용 큐) | Visitor chat 1턴 실행 — gevent web 워커에서 분리·격리(배치가 chat을 굶기지 않게) |
-| **Neo4j** (Community) | **Knowledge Graph**(Entity Mention·관계·Community) + **per-Tenant 가변차원 벡터 인덱스**(Text Unit/Mention 임베딩) |
+| **Neo4j** (Community) | **Knowledge Graph**(Entity Mention·관계) + **per-Tenant 가변차원 벡터 인덱스**(Text Unit/Mention 임베딩) |
 | **PostgreSQL** | Django 모델(Tenant·Document·ChatMessage 등) + **LangGraph Checkpoint**(대화 state) |
 | **Ollama** | dev 기본 임베딩 `bge-m3`(다국어, 1024차원). prod에선 Tenant Embedding Provider가 대체 |
 | **PaddleOCR 서비스** | 이미지/스캔 PDF에서 텍스트 추출(OCR, 한·영 혼용) |
@@ -38,8 +38,7 @@ Tenant마다 하나의 지식그래프가 Neo4j에 저장됩니다. 모든 노�
 - **Entity (동치 클러스터)** — 같은 실세계 대상을 가리키는 Mention들이 **`SAME_AS` 비파괴 동치 엣지**로 묶인 정체. 동치는 이름 유사도가 아니라 **맥락(name+description 임베딩) 정합**으로 판별합니다 — 표기변이(`FCB1010`=`FCB-1010`)는 묶고, 동음이의는 분리. 노드를 물리적으로 합치지 않아 잘못 묶이면 엣지만 끊어 되돌립니다.
 - **관계(RELATED)** — Mention 간 엣지(`description` 보유). 추출된 (subject, relation, object) 트리플에서 생성됩니다.
 - **Document(레이블) Mention** — 업로드 소스를 대표하는 Mention. 그 문서에서 추출된 모든 Mention과 `mentions` 관계로 연결되어, **본문에 제품명이 없어도** 문서를 통해 내부 엔티티에 도달할 수 있습니다.
-- **Text Unit** — 문서를 일정 크기로 나눈 텍스트 조각 노드. 임베딩을 가지며 Local Search의 근거 문맥(citation)으로 쓰입니다. citation은 추출 원문에 충실하며 LLM 정제물을 담지 않습니다.
-- **Community** — 밀접하게 연결된 Mention 묶음(연결 요소, `SAME_AS` 포함). 각 Community에는 LLM이 생성한 요약이 붙어 Global Search에 사용됩니다.
+- **Text Unit** — 문서를 일정 크기로 나눈 텍스트 조각 노드. 임베딩을 가지며 Local Search의 원문 폴백 근거(citation)로 쓰입니다. citation은 추출 원문에 충실하며 LLM 정제물을 담지 않습니다.
 
 ### 2.2 인제스션 파이프라인 (업로드 → 그래프)
 
@@ -54,20 +53,19 @@ Tenant마다 하나의 지식그래프가 Neo4j에 저장됩니다. 모든 노�
 1. **텍스트 추출**: PDF는 PyMuPDF로 추출하되 **단어 수 부족 또는 깨진 추출(Garbled Extraction, mojibake) 감지 시 PaddleOCR로 재추출**([ADR-0009](./docs/adr/0009-garbled-extraction-ocr-not-llm-cleanup.md) — LLM 정제가 아니라 OCR로 픽셀 재인식). 이미지는 OCR, TXT는 그대로, **Excel은 시트별 헤더-키 행별 텍스트로 평탄화**, **웹은 URL을 fetch해 메인 콘텐츠 추출**(보일러플레이트 제거).
 2. **Entity/관계 추출**: 추출 텍스트를 **추출 LLM**(Tenant Provider 또는 플랫폼 기본)에 구조화 출력으로 보내 `(entities, relations)`를 받습니다. 추출은 **해당 문서 내부만** 봅니다. 문서 레이블 Mention을 시드하고, 추출된 각 Mention을 `mentions` 관계로 연결합니다(이름 병합 없이 — 동치는 재구축 단계에서 `SAME_AS`로).
 3. **임베딩**: Mention(`name+description`)과 Text Unit을 **Tenant Embedding Provider**(미설정 시 dev=ollama `bge-m3`)로 배치 임베딩해 **per-Tenant 벡터 인덱스**에 저장합니다. 인덱스 차원은 Tenant의 임베딩 모델에 맞춰지고, Tenant마다 라벨·인덱스가 격리됩니다([ADR-0012](./docs/adr/0012-per-tenant-llm-embedding-providers.md)).
-4. **신선도 표시**: 그래프가 바뀌었으므로 Community 요약은 `stale`로 표시됩니다. Community 탐지·요약과 **Entity Resolution(SAME_AS)**은 전역 연산이라 업로드마다 돌리지 않고 **배치/트리거**로 재구축합니다([ADR-0008](./docs/adr/0008-incremental-ingest-batched-community-rebuild.md)).
+4. **신선도 표시**: 그래프가 바뀌었으므로 `stale`로 표시됩니다. **Entity Resolution(SAME_AS)**은 전역 연산이라 업로드마다 돌리지 않고 **배치/트리거**로 재구축합니다([ADR-0008](./docs/adr/0008-incremental-ingest-batched-community-rebuild.md), [ADR-0016](./docs/adr/0016-remove-global-search-keep-entity-resolution.md)).
 
-### 2.3 검색: route → Local / Global
+### 2.3 검색: Local + 원문(TextUnit) 폴백
 
-채팅 그래프(LangGraph)는 질의를 분류해 검색 방식을 라우팅합니다:
+채팅 그래프(LangGraph)는 항상 **Local Search**로 가고, 그래프-only로 답을 못 내면 원문으로 보강합니다([ADR-0016](./docs/adr/0016-remove-global-search-keep-entity-resolution.md) — Global Search 제거):
 
 ```
-route_search ──(search_scope)──▶ local_search ─┐
-                              └▶ global_search ─┴▶ call_llm
+local_search ─▶ call_llm ──(context_sufficient=False)──▶ source_search ─▶ call_llm(재호출)
 ```
 
-- **Local Search** — 특정 Entity·근거 문맥 질의("이 제품의 전원 사양은?"). Text Unit 벡터 검색 + Entity 이웃 탐색으로 근거를 모읍니다.
-- **Global Search** — 전체/요약형 질의("매뉴얼들이 공통 권장하는 설정은?"). Community 요약들을 map-reduce해 답을 구성합니다(Local보다 비쌈).
-- 라우팅은 별도 LLM 호출 없이 구조화 출력의 `search_scope` 필드로 결정합니다.
+- **Local Search** — Entity 중심 근거. 질의로 resolved Entity를 찾고 그 이웃 관계를 구조화 근거로 모읍니다([ADR-0010](./docs/adr/0010-entity-resolution-mention-entity-context-equivalence.md)).
+- **원문 폴백(source_search)** — LLM이 "제공된 근거로 답할 수 없다"(`context_sufficient=False`)고 표시하면, 질의 임베딩으로 최근접 **Text Unit 원문**을 `vector_search`해 근거에 보강하고 한 번 더 호출합니다(top_k 캡). 추출이 버린 스펙·수치·표를 원문으로 회복합니다([ADR-0016](./docs/adr/0016-remove-global-search-keep-entity-resolution.md)). 그래프로 답한 경우엔 호출되지 않아 토큰을 통제합니다.
+- **Global Search는 제거됨** — 커뮤니티 요약이 이름-only로 공허하고 지원 봇 질의는 대부분 특정형이라, local+원문 폴백으로 대체했습니다(ADR-0016).
 
 ### 2.4 엔티티 의미 검색 (다국어 하이브리드)
 
@@ -84,9 +82,8 @@ route_search ──(search_scope)──▶ local_search ─┐
 
 ### 2.6 그래프 신선도와 재구축
 
-- **Graph Freshness**: `fresh`(요약 최신) / `stale`(문서 추가·삭제로 재구축 필요) / `rebuilding`.
-- 문서 추가/삭제 시 `stale`. 어드민의 **"재구축" 버튼** 또는 자동 트리거로 Community를 재탐지·재요약하고, 임베딩이 없는 기존 Entity도 이때 백필합니다.
-- `stale` 상태에서도 직전 Community 요약으로 Global Search는 계속 동작합니다.
+- **Graph Freshness**: `fresh`(엔티티 해소 최신) / `stale`(문서 추가·삭제로 재구축 필요) / `rebuilding`.
+- 문서 추가/삭제 시 `stale`. 어드민의 **"재구축" 버튼** 또는 자동 트리거로 **Entity Resolution(SAME_AS)**을 재수행하고, 임베딩이 없는 기존 Entity도 이때 백필합니다.
 - 문서 삭제 시 노드/관계의 출처 집합에서 그 문서를 제거하고, **출처가 빈 것만** prune합니다(여러 문서가 공유하는 Entity는 보존).
 
 ---
@@ -96,8 +93,10 @@ route_search ──(search_scope)──▶ local_search ─┐
 채팅은 LangGraph로 구현됩니다:
 
 ```
-START → route_search → (local_search | global_search) → call_llm → (needs_hitl?) → create_escalation → END
-                                                                  └───────────────→ save_messages   → END
+START → local_search → call_llm ─(context_sufficient=False)─→ source_search → call_llm
+                           │
+                           ├─(needs_hitl?)─→ create_escalation → END
+                           └──────────────→ save_messages     → END
 ```
 
 채팅 그래프는 **Tenant의 `hitl_enabled` 토글에 따라 다르게 컴파일**됩니다. HITL-OFF면 `call_llm`이 `needs_hitl` 필드 없는 response-only 스키마를 쓰고 `save_messages`로 직행해, escalation 분기 자체가 없습니다(지키지 못할 전환 멘트 누수를 구조적으로 차단).
@@ -239,7 +238,7 @@ docker compose exec api python manage.py createsuperuser
 | `POST /api/tenant/documents/{id}/refetch` | TenantAgent JWT | 웹 Document 재-fetch |
 | `GET /api/tenant/documents/graph/search?q=` | TenantAgent JWT | 엔티티 하이브리드 검색 → 서브그래프 |
 | `GET /api/tenant/documents/graph/status` | TenantAgent JWT | Graph Freshness |
-| `POST /api/tenant/documents/graph/rebuild` | TenantAgent JWT | Community 재구축 트리거 |
+| `POST /api/tenant/documents/graph/rebuild` | TenantAgent JWT | 엔티티 해소(SAME_AS) 재구축 트리거 |
 
 ---
 
@@ -263,3 +262,7 @@ docker compose exec api python manage.py createsuperuser
 - **`0010` Entity 정체성은 이름이 아니라 맥락 — Mention/Entity 분리 + 비파괴 SAME_AS 동치**
 - **`0011` 공개 Tenant Slug URL이 EmbedToken을 대체** + 계층형 Visitor 신원(opt-in HMAC)
 - **`0012` Tenant 부담 멀티 Provider(LLM·Embedding) + per-Tenant 가변차원 인덱스 + 재임베딩 재구축**
+- **`0013` 어드민 인증 access/refresh 토큰**
+- **`0014` 어드민 HTTP 클라이언트 OpenAPI(orval) 코드젠 + 전체 TS 전환**
+- **`0015` oracle 무중단(rolling) 배포 — docker-rollout + expand/contract + GHCR(arm64)** (제안)
+- **`0016` Global Search 제거(Community 요약 폐기) — Local + 원문 폴백으로 대체, 엔티티 해소는 잔존**

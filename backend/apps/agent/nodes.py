@@ -38,25 +38,6 @@ class PlainResponse(BaseModel):
     context_sufficient: bool = Field(default=True, description=_CONTEXT_SUFFICIENT_DESC)
 
 
-class SearchRoute(BaseModel):
-    search_scope: str = "local"  # "local" | "global"
-
-
-def route_search_node(state: dict) -> dict:
-    """질의를 local/global로 분류한다 (구조화 출력 한 번)."""
-    prompt = (
-        "Classify the scope of the user's question. Respond with search_scope = "
-        "'global' if it asks for a summary across many documents or common themes; "
-        "'local' if it is about a specific entity or fact.\n\n"
-        f"Question: {state['user_message']}"
-    )
-    result = llm_boundary.complete_structured(
-        get_chat_provider(), [HumanMessage(content=prompt)], SearchRoute
-    )
-    scope = result.search_scope if result.search_scope in ("local", "global") else "local"
-    return {"search_scope": scope}
-
-
 def local_search_node(state: dict) -> dict:
     """엔티티 중심 근거 — 질의로 resolved Entity를 찾고 그 이웃 관계를 모은다.
 
@@ -86,14 +67,6 @@ def local_search_node(state: dict) -> dict:
             chunks.append(f"{edge['source']} —{edge.get('description') or ''}→ {edge['target']}")
 
     return {"rag_chunks": chunks}
-
-
-def global_search_node(state: dict) -> dict:
-    """전체/요약형 근거 — Tenant의 Community 요약을 모은다."""
-    from apps.rag.graph_store import GraphStore
-
-    communities = GraphStore(state["tenant_id"]).query_community_summaries()
-    return {"rag_chunks": [c["summary"] for c in communities if c.get("summary")]}
 
 
 SOURCE_TOP_K = 4  # 폴백 1회당 끌어올 원문 청크 수(토큰 통제)
