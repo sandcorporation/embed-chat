@@ -5,7 +5,9 @@ import type { TenantOut } from '../generated/model'
 
 type CreatedKey = { name: string; key: string; agentUsername: string; agentPassword: string }
 
-export default function OperatorDashboard({ onLogout, onLogoutAll }: { onLogout: () => void; onLogoutAll: () => void }) {
+// Operator 대시보드의 콘텐츠(테넌트 생성 + 목록). 셸(헤더/로그아웃)은 DashboardLayout이 제공.
+// 스타일은 슬라이스 128에서 shadcn으로 리스타일(지금은 기존 인라인 유지 — 과도기).
+export default function OperatorTenants() {
   const [tenants, setTenants] = useState<TenantOut[]>([])
   const [newName, setNewName] = useState('')
   const [createdKey, setCreatedKey] = useState<CreatedKey | null>(null)
@@ -41,15 +43,7 @@ export default function OperatorDashboard({ onLogout, onLogoutAll }: { onLogout:
   }
 
   return (
-    <div style={s.page}>
-      <div style={s.header}>
-        <h1 style={s.pageTitle}>Operator 대시보드</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button style={s.btnSm} onClick={onLogout}>로그아웃</button>
-          <button style={s.btnSm} onClick={onLogoutAll}>모든 기기에서 로그아웃</button>
-        </div>
-      </div>
-
+    <div>
       {createdKey && (
         <div style={s.alert}>
           <strong>{createdKey.name}</strong> 생성 완료. (1회만 표시됩니다)

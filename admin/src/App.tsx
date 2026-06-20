@@ -1,11 +1,31 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
+import { FileText, Network, Users, Settings, UserCog, Headphones, Building2 } from 'lucide-react'
 import OperatorLogin from './pages/OperatorLogin'
-import OperatorDashboard from './pages/OperatorDashboard'
+import OperatorTenants from './pages/OperatorTenants'
 import TenantLogin from './pages/TenantLogin'
-import TenantDashboard from './pages/TenantDashboard'
+import DashboardLayout, { NavItem } from './components/DashboardLayout'
+import DocumentsTab from './components/DocumentsTab'
+import KnowledgeGraphTab from './components/KnowledgeGraphTab'
+import VisitorsTab from './components/VisitorsTab'
+import ConfigTab from './components/ConfigTab'
+import AgentsTab from './components/AgentsTab'
+import HitlTab from './components/HitlTab'
 import { getAccess, bootSilentRefresh } from './auth'
 import { operatorLogout, operatorLogoutAll, agentLogout, agentLogoutAll } from './api'
+
+const ICON = 'h-4 w-4'
+const operatorNav: NavItem[] = [
+  { to: '/operator/tenants', label: 'Tenants', icon: <Building2 className={ICON} /> },
+]
+const tenantNav: NavItem[] = [
+  { to: '/tenant/documents', label: '문서', icon: <FileText className={ICON} /> },
+  { to: '/tenant/graph', label: '지식그래프', icon: <Network className={ICON} /> },
+  { to: '/tenant/visitors', label: 'Visitors', icon: <Users className={ICON} /> },
+  { to: '/tenant/config', label: '설정', icon: <Settings className={ICON} /> },
+  { to: '/tenant/agents', label: '팀원', icon: <UserCog className={ICON} /> },
+  { to: '/tenant/hitl', label: 'HITL 상담', icon: <Headphones className={ICON} /> },
+]
 
 export default function App() {
   // Operator: access는 sessionStorage, refresh는 httpOnly 쿠키(ADR-0013).
@@ -13,7 +33,6 @@ export default function App() {
   const [operatorBooting, setOperatorBooting] = useState(true)
 
   // TenantAgent: operator와 동일하게 access=sessionStorage, refresh=httpOnly 쿠키.
-  // username은 비민감 표시값이라 localStorage에 두어 새로고침 후에도 표시한다.
   const [agentAuthed, setAgentAuthed] = useState(() => !!getAccess('agent'))
   const [agentBooting, setAgentBooting] = useState(true)
   const [agentUsername, setAgentUsername] = useState(() => localStorage.getItem('agent_username'))
@@ -28,7 +47,7 @@ export default function App() {
 
   const handleOperatorLogin = () => setOperatorAuthed(true)
   const handleOperatorLogout = async () => {
-    await operatorLogout()  // 이 기기 세션 서버 폐기 + access 제거
+    await operatorLogout()
     setOperatorAuthed(false)
   }
   const handleOperatorLogoutAll = async () => {
@@ -41,7 +60,6 @@ export default function App() {
     setAgentUsername(username)
     setAgentAuthed(true)
   }
-
   const endAgentSession = () => {
     localStorage.removeItem('agent_username')
     setAgentAuthed(false)
@@ -56,29 +74,37 @@ export default function App() {
     endAgentSession()
   }
 
+  // 인증 게이트: booting이면 null, 미인증이면 로그인(셸 없음), 인증되면 셸(Outlet으로 섹션 렌더).
+  const operatorEl = operatorBooting
+    ? null
+    : operatorAuthed
+      ? <DashboardLayout brand="Operator" navItems={operatorNav} onLogout={handleOperatorLogout} onLogoutAll={handleOperatorLogoutAll} />
+      : <OperatorLogin onLogin={handleOperatorLogin} />
+
+  const tenantEl = agentBooting
+    ? null
+    : agentAuthed
+      ? <DashboardLayout brand="Tenant" navItems={tenantNav} user={agentUsername} onLogout={handleTenantLogout} onLogoutAll={handleTenantLogoutAll} />
+      : <TenantLogin onLogin={handleTenantLogin} />
+
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/operator" replace />} />
-      <Route
-        path="/operator"
-        element={
-          operatorBooting
-            ? null
-            : operatorAuthed
-              ? <OperatorDashboard onLogout={handleOperatorLogout} onLogoutAll={handleOperatorLogoutAll} />
-              : <OperatorLogin onLogin={handleOperatorLogin} />
-        }
-      />
-      <Route
-        path="/tenant"
-        element={
-          agentBooting
-            ? null
-            : agentAuthed
-              ? <TenantDashboard username={agentUsername} onLogout={handleTenantLogout} onLogoutAll={handleTenantLogoutAll} />
-              : <TenantLogin onLogin={handleTenantLogin} />
-        }
-      />
+
+      <Route path="/operator" element={operatorEl}>
+        <Route index element={<Navigate to="tenants" replace />} />
+        <Route path="tenants" element={<OperatorTenants />} />
+      </Route>
+
+      <Route path="/tenant" element={tenantEl}>
+        <Route index element={<Navigate to="documents" replace />} />
+        <Route path="documents" element={<DocumentsTab />} />
+        <Route path="graph" element={<KnowledgeGraphTab />} />
+        <Route path="visitors" element={<VisitorsTab />} />
+        <Route path="config" element={<ConfigTab />} />
+        <Route path="agents" element={<AgentsTab />} />
+        <Route path="hitl" element={<HitlTab />} />
+      </Route>
     </Routes>
   )
 }
