@@ -1,5 +1,5 @@
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from apps.agent import llm as llm_boundary
 from apps.agent.providers import get_chat_provider
@@ -17,15 +17,25 @@ _ANTI_DISCLOSURE = (
 )
 
 
+# Self-RAG의 ISSUP(답이 근거에 뒷받침되는가)를 boolean 한 칸으로 축약한 신호. 제공된
+# 근거(Knowledge Base)에 답이 없으면 False → 원문(TextUnit) 폴백을 트리거한다(issue 119).
+_CONTEXT_SUFFICIENT_DESC = (
+    "제공된 Knowledge Base 근거만으로 사용자 질문에 사실로 답할 수 있으면 true, "
+    "근거에 답이 없어 추측 없이 답할 수 없으면 false."
+)
+
+
 class HITLResponse(BaseModel):
     response: str
     needs_hitl: bool
     hitl_reason: str = ""
+    context_sufficient: bool = Field(default=True, description=_CONTEXT_SUFFICIENT_DESC)
 
 
 class PlainResponse(BaseModel):
     """HITL-OFF Tenant용 구조화 출력 — needs_hitl 필드가 없어 escalation을 표현할 수 없다."""
     response: str
+    context_sufficient: bool = Field(default=True, description=_CONTEXT_SUFFICIENT_DESC)
 
 
 class SearchRoute(BaseModel):
@@ -86,6 +96,36 @@ def global_search_node(state: dict) -> dict:
     return {"rag_chunks": [c["summary"] for c in communities if c.get("summary")]}
 
 
+SOURCE_TOP_K = 4  # 폴백 1회당 끌어올 원문 청크 수(토큰 통제)
+
+
+def source_search_node(state: dict) -> dict:
+    """원문(TextUnit) 폴백 — 그래프-only가 답을 못 냈을 때(context_sufficient=False) 호출된다.
+
+    추출이 버린 스펙·수치·표는 그래프엔 없고 원문에만 산다(ADR-0010 보강). 질의 임베딩으로
+    최근접 TextUnit 원문을 vector_search해 기존 rag_chunks에 보강한다(중복 회피, top_k 캡).
+    augmentation은 best-effort라 실패 시 빈 결과로 진행한다.
+    """
+    from apps.rag.graph_store import GraphStore
+    from apps.rag.ingesters import get_embeddings
+
+    gs = GraphStore(state["tenant_id"])
+    existing = state.get("rag_chunks") or []
+    try:
+        emb = get_embeddings([state["user_message"]], provider=gs._embedding_provider())[0]
+        hits = gs.vector_search(emb, top_k=SOURCE_TOP_K)
+    except Exception:
+        hits = []
+    seen = set(existing)
+    added = []
+    for h in hits:
+        content = h.get("content")
+        if content and content not in seen:
+            seen.add(content)
+            added.append(content)
+    return {"rag_chunks": existing + added, "source_text_tried": True}
+
+
 def _assemble_lc_messages(state: dict) -> list:
     """system 프롬프트 + Visitor Context/Memory + RAG + 대화 history로 LLM 입력을 조립한다.
 
@@ -137,6 +177,7 @@ def call_llm_structured(state: dict) -> dict:
         "assistant_response": result.response,
         "needs_hitl": result.needs_hitl,
         "hitl_reason": result.hitl_reason,
+        "context_sufficient": result.context_sufficient,
     }
 
 
@@ -149,7 +190,10 @@ def call_llm_plain(state: dict) -> dict:
         publish_token(state["session_id"], result.response)
         publish_done(state["session_id"])
 
-    return {"assistant_response": result.response, "needs_hitl": False, "hitl_reason": ""}
+    return {
+        "assistant_response": result.response, "needs_hitl": False, "hitl_reason": "",
+        "context_sufficient": result.context_sufficient,
+    }
 
 
 def create_escalation_node(state: dict) -> dict:

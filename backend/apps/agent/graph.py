@@ -6,6 +6,7 @@ from apps.agent.nodes import (
     route_search_node,
     local_search_node,
     global_search_node,
+    source_search_node,
     call_llm_structured,
     call_llm_plain,
     create_escalation_node,
@@ -27,10 +28,22 @@ class ChatState(TypedDict):
     assistant_response: str
     needs_hitl: bool
     hitl_reason: str
+    context_sufficient: bool
+    source_text_tried: bool
 
 
-def _route_hitl(state: ChatState) -> str:
+def _route_after_llm(state: ChatState) -> str:
+    """그래프-only가 답을 못 냈고(폴백 미사용) 원문을 아직 안 썼으면 원문 폴백으로, 아니면 기존 라우팅."""
+    if not state.get("context_sufficient", True) and not state.get("source_text_tried", False):
+        return "source_search"
     return "create_escalation" if state.get("needs_hitl") else "save_messages"
+
+
+def _route_after_llm_plain(state: ChatState) -> str:
+    """HITL-OFF 경로: 폴백 분기 + save_messages 직행(escalation 없음)."""
+    if not state.get("context_sufficient", True) and not state.get("source_text_tried", False):
+        return "source_search"
+    return "save_messages"
 
 
 def _route_scope(state: ChatState) -> str:
@@ -73,6 +86,7 @@ def build_graph(checkpointer=None, hitl_enabled=True):
     graph.add_node("route_search", route_search_node)
     graph.add_node("local_search", local_search_node)
     graph.add_node("global_search", global_search_node)
+    graph.add_node("source_search", source_search_node)
     graph.add_node("save_messages", save_messages_node)
 
     graph.add_edge(START, "route_search")
@@ -84,17 +98,23 @@ def build_graph(checkpointer=None, hitl_enabled=True):
     if hitl_enabled:
         graph.add_node("call_llm", call_llm_structured)
         graph.add_node("create_escalation", create_escalation_node)
-        graph.add_conditional_edges("call_llm", _route_hitl, {
+        # 그래프-only가 답을 못 내면 원문 폴백(1회) → 재호출, 아니면 hitl/save로 분기.
+        graph.add_conditional_edges("call_llm", _route_after_llm, {
+            "source_search": "source_search",
             "create_escalation": "create_escalation",
             "save_messages": "save_messages",
         })
         graph.add_edge("create_escalation", END)
     else:
         graph.add_node("call_llm", call_llm_plain)
-        graph.add_edge("call_llm", "save_messages")
+        graph.add_conditional_edges("call_llm", _route_after_llm_plain, {
+            "source_search": "source_search",
+            "save_messages": "save_messages",
+        })
 
     graph.add_edge("local_search", "call_llm")
     graph.add_edge("global_search", "call_llm")
+    graph.add_edge("source_search", "call_llm")  # 원문 보강 후 LLM 재호출
     graph.add_edge("save_messages", END)
 
     return graph.compile(checkpointer=checkpointer)
@@ -124,6 +144,8 @@ def run_chat_agent(session, user_message: str) -> str:
         "assistant_response": "",
         "needs_hitl": False,
         "hitl_reason": "",
+        "context_sufficient": True,
+        "source_text_tried": False,
     }
 
     saver, conn = _create_checkpointer()
