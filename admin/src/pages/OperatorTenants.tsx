@@ -1,22 +1,22 @@
 import { useState, useEffect, FormEvent } from 'react'
 import { listTenants, createTenant, suspendTenant, deleteTenant } from '../api'
-import { s } from '../styles'
 import type { TenantOut } from '../generated/model'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 
 type CreatedKey = { name: string; key: string; agentUsername: string; agentPassword: string }
 
-// Operator 대시보드의 콘텐츠(테넌트 생성 + 목록). 셸(헤더/로그아웃)은 DashboardLayout이 제공.
-// 스타일은 슬라이스 128에서 shadcn으로 리스타일(지금은 기존 인라인 유지 — 과도기).
+// Operator 대시보드 콘텐츠(테넌트 생성 + 목록). 셸(헤더/로그아웃)은 DashboardLayout이 제공.
 export default function OperatorTenants() {
   const [tenants, setTenants] = useState<TenantOut[]>([])
   const [newName, setNewName] = useState('')
   const [createdKey, setCreatedKey] = useState<CreatedKey | null>(null)
   const [loading, setLoading] = useState(false)
 
-  const load = async () => {
-    const data = await listTenants()
-    setTenants(data)
-  }
+  const load = async () => setTenants(await listTenants())
 
   useEffect(() => { load() }, [])
 
@@ -31,11 +31,7 @@ export default function OperatorTenants() {
     setLoading(false)
   }
 
-  const handleSuspend = async (id: string) => {
-    await suspendTenant(id)
-    await load()
-  }
-
+  const handleSuspend = async (id: string) => { await suspendTenant(id); await load() }
   const handleDelete = async (id: string) => {
     if (!confirm('삭제하시겠습니까?')) return
     await deleteTenant(id)
@@ -43,61 +39,50 @@ export default function OperatorTenants() {
   }
 
   return (
-    <div>
+    <div className="max-w-4xl space-y-6">
       {createdKey && (
-        <div style={s.alert}>
-          <strong>{createdKey.name}</strong> 생성 완료. (1회만 표시됩니다)
-          <br />
-          TENANT_KEY: <code style={s.code}>{createdKey.key}</code>
-          <br />
-          초기 상담원 계정 — 사용자명: <code style={s.code}>{createdKey.agentUsername}</code>{' '}
-          임시 비밀번호: <code style={s.code}>{createdKey.agentPassword}</code>
-          <button style={{ marginLeft: 12 }} onClick={() => setCreatedKey(null)}>✕</button>
-        </div>
+        <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950/30">
+          <CardContent className="space-y-1 pt-5 text-sm">
+            <p><strong>{createdKey.name}</strong> 생성 완료. (1회만 표시됩니다)</p>
+            <p>TENANT_KEY: <code className="rounded bg-muted px-1 py-0.5 text-xs">{createdKey.key}</code></p>
+            <p>초기 상담원 — 사용자명: <code className="rounded bg-muted px-1 py-0.5 text-xs">{createdKey.agentUsername}</code>{' '}
+              임시 비밀번호: <code className="rounded bg-muted px-1 py-0.5 text-xs">{createdKey.agentPassword}</code></p>
+            <Button size="sm" variant="ghost" className="mt-1" onClick={() => setCreatedKey(null)}>✕ 닫기</Button>
+          </CardContent>
+        </Card>
       )}
 
-      <div style={s.section}>
-        <h2 style={s.sectionTitle}>새 Tenant 추가</h2>
-        <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8 }}>
-          <input
-            style={{ ...s.input, flex: 1 }}
-            placeholder="고객사 이름"
-            value={newName}
-            onChange={e => setNewName(e.target.value)}
-          />
-          <button style={s.btn} type="submit" disabled={loading}>추가</button>
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold">새 Tenant 추가</h2>
+        <form onSubmit={handleCreate} className="flex gap-2">
+          <Input className="flex-1" placeholder="고객사 이름" value={newName} onChange={e => setNewName(e.target.value)} />
+          <Button type="submit" disabled={loading}>추가</Button>
         </form>
       </div>
 
-      <div style={s.section}>
-        <h2 style={s.sectionTitle}>Tenant 목록</h2>
-        <table style={s.table}>
-          <thead>
-            <tr>
-              <th style={s.th}>이름</th>
-              <th style={s.th}>상태</th>
-              <th style={s.th}>생성일</th>
-              <th style={s.th}>작업</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold">Tenant 목록</h2>
+        <Table>
+          <TableHeader>
+            <TableRow><TableHead>이름</TableHead><TableHead>상태</TableHead><TableHead>생성일</TableHead><TableHead>작업</TableHead></TableRow>
+          </TableHeader>
+          <TableBody>
             {tenants.map(t => (
-              <tr key={t.id}>
-                <td style={s.td}>{t.name}</td>
-                <td style={s.td}>
-                  <span style={s.badge(t.is_active)}>{t.is_active ? '활성' : '정지'}</span>
-                </td>
-                <td style={s.td}>{t.created_at ? new Date(t.created_at).toLocaleDateString('ko') : '-'}</td>
-                <td style={s.td}>
-                  {t.is_active && (
-                    <button style={s.btnDanger} onClick={() => handleSuspend(t.id)}>정지</button>
-                  )}
-                  <button style={{ ...s.btnDanger, marginLeft: 4 }} onClick={() => handleDelete(t.id)}>삭제</button>
-                </td>
-              </tr>
+              <TableRow key={t.id}>
+                <TableCell>{t.name}</TableCell>
+                <TableCell><Badge variant={t.is_active ? 'success' : 'destructive'}>{t.is_active ? '활성' : '정지'}</Badge></TableCell>
+                <TableCell>{t.created_at ? new Date(t.created_at).toLocaleDateString('ko') : '-'}</TableCell>
+                <TableCell>
+                  {t.is_active && <Button size="sm" variant="destructive" onClick={() => handleSuspend(t.id)}>정지</Button>}
+                  <Button size="sm" variant="destructive" className="ml-1" onClick={() => handleDelete(t.id)}>삭제</Button>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+            {tenants.length === 0 && (
+              <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">테넌트가 없습니다</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
       </div>
     </div>
   )
