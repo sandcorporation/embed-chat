@@ -19,7 +19,7 @@ Embed Chat는 타사 웹사이트에 iframe으로 삽입하는 챗봇을 제공�
 | **PaddleOCR 서비스** | 이미지/스캔 PDF에서 텍스트 추출(OCR, 한·영 혼용) |
 | **Redis** | SSE pub/sub + Celery 브로커 + 레이트리밋·세션 락 |
 | **Widget** (`/chatbot/{slug}/`) | Visitor용 채팅 위젯 (React) — 토큰 없이 slug로 접근 |
-| **Admin UI** (`/admin-ui/`) | Operator·Tenant 관리 화면 (React) — 문서·**지식그래프 인스펙터**·Visitors·설정(Provider 포함)·팀원·HITL 탭 |
+| **Admin UI** (`/admin-ui/`) | Operator·Tenant 관리 화면 (React + Tailwind/shadcn) — **좌측 사이드바 내비 + 자원별 URL 라우트**(ADR-0017). 문서·**지식그래프 인스펙터**·Visitors·설정(Provider 포함)·팀원·HITL 섹션 |
 | **Nginx** | 리버스 프록시, 정적 파일 서빙 |
 
 > **저장소 역할 분담**: PostgreSQL은 관계형 데이터 + LangGraph 대화 체크포인트, **Neo4j는 RAG 지식그래프와 모든 RAG 임베딩**을 담당합니다. (과거 pgvector 기반 벡터 RAG는 GraphRAG로 대체됨 — [ADR-0007](./docs/adr/0007-graphrag-neo4j-replaces-2step-vector-rag.md).)
@@ -266,3 +266,4 @@ docker compose exec api python manage.py createsuperuser
 - **`0014` 어드민 HTTP 클라이언트 OpenAPI(orval) 코드젠 + 전체 TS 전환**
 - **`0015` oracle 무중단(rolling) 배포 — docker-rollout + expand/contract + GHCR(arm64)** (제안)
 - **`0016` Global Search 제거(Community 요약 폐기) — Local + 원문 폴백으로 대체, 엔티티 해소는 잔존**
+- **`0017` 어드민 리디자인 — React 유지(Next.js 기각) + Tailwind/shadcn + 중첩 URL 라우트 + 사이드바 셸**

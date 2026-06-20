@@ -39,7 +39,7 @@ async function loginAsTenantAgent(page, tenantData) {
   await page.fill('input[placeholder="사용자명"]', tenantData.agentUsername)
   await page.fill('input[placeholder="비밀번호"]', tenantData.agentPassword)
   await page.click('button[type="submit"]')
-  await expect(page.locator('button:has-text("📄 문서")')).toBeVisible({ timeout: 5000 })
+  await expect(page.locator('a:has-text("문서")')).toBeVisible({ timeout: 5000 })
 }
 
 test.describe('Tenant Agent 플로우', () => {
@@ -64,7 +64,7 @@ test.describe('Tenant Agent 플로우', () => {
     await loginAsTenantAgent(page, tenantData)
 
     // 설정 탭 클릭
-    await page.click('button:has-text("설정")')
+    await page.click('a:has-text("설정")')
     const promptInput = page.locator('[data-testid="system-prompt-input"]')
     await expect(promptInput).toBeVisible()
 
@@ -79,7 +79,7 @@ test.describe('Tenant Agent 플로우', () => {
     await page.goto(`${ADMIN_URL}/admin-ui/tenant`)
     await loginAsTenantAgent(page, tenantData)
 
-    await page.click('button:has-text("팀원")')
+    await page.click('a:has-text("팀원")')
     const newUsername = `agent_${Date.now()}`
     await page.fill('input[placeholder*="사용자명"]', newUsername)
     await page.click('button:has-text("추가")')

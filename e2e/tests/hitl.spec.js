@@ -100,9 +100,9 @@ test.describe('HITL 전체 플로우', () => {
     await page.fill('input[placeholder="사용자명"]', ctx.agentUsername)
     await page.fill('input[placeholder="비밀번호"]', ctx.agentPassword)
     await page.click('button[type="submit"]')
-    await expect(page.locator('button:has-text("📄 문서")')).toBeVisible({ timeout: 10000 })
+    await expect(page.locator('a:has-text("문서")')).toBeVisible({ timeout: 10000 })
 
-    await page.click('button:has-text("HITL")')
+    await page.click('a:has-text("HITL")')
 
     // 여러 escalation이 있을 수 있으므로 first()로 하나를 claim한다
     const claimBtn = page.locator('button:has-text("수락하기")').first()

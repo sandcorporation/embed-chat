@@ -27,7 +27,7 @@ async function loginAsTenantAgent(page, tenant) {
   await page.fill('input[placeholder="사용자명"]', tenant.agent_username)
   await page.fill('input[placeholder="비밀번호"]', tenant.agent_temp_password)
   await page.click('button[type="submit"]')
-  await expect(page.locator('button:has-text("📄 문서")')).toBeVisible({ timeout: 10000 })
+  await expect(page.locator('a:has-text("문서")')).toBeVisible({ timeout: 10000 })
 }
 
 test.describe('Document Chunk Inspector', () => {

@@ -46,7 +46,7 @@ async function loginAsTenantAgent(page, tenant) {
   await page.fill('input[placeholder="사용자명"]', tenant.agent_username)
   await page.fill('input[placeholder="비밀번호"]', tenant.agent_temp_password)
   await page.click('button[type="submit"]')
-  await expect(page.locator('button:has-text("📄 문서")')).toBeVisible({ timeout: 10000 })
+  await expect(page.locator('a:has-text("문서")')).toBeVisible({ timeout: 10000 })
 }
 
 async function createVisitorSession(api, slug, visitorId, messages = []) {
@@ -86,7 +86,7 @@ test.describe('Visitors 탭', () => {
   // ── Tracer Bullet ───────────────────────────────────────────────────────
   test('Visitors 탭이 탭 목록에 표시된다', async ({ page }) => {
     await loginAsTenantAgent(page, tenant)
-    await expect(page.locator('button:has-text("Visitors")')).toBeVisible()
+    await expect(page.locator('a:has-text("Visitors")')).toBeVisible()
   })
 
   // ── 방문자 목록 ────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ test.describe('Visitors 탭', () => {
     await api.dispose()
 
     await loginAsTenantAgent(page, tenant)
-    await page.click('button:has-text("Visitors")')
+    await page.click('a:has-text("Visitors")')
     // visitor_id 검색 입력 placeholder가 표시되면 VisitorsTab이 렌더됨
     await expect(page.locator('input[placeholder*="visitor_id 검색"]')).toBeVisible({ timeout: 3000 })
   })
@@ -109,7 +109,7 @@ test.describe('Visitors 탭', () => {
     await api.dispose()
 
     await loginAsTenantAgent(page, tenant)
-    await page.click('button:has-text("Visitors")')
+    await page.click('a:has-text("Visitors")')
     // 초기 로드 완료 대기 (banana도 보여야 함)
     await expect(page.locator(`text=v-search-banana-${ts}`)).toBeVisible({ timeout: 5000 })
     await page.fill('input[placeholder*="visitor_id 검색"]', 'apple')
@@ -128,7 +128,7 @@ test.describe('Visitors 탭', () => {
     await api.dispose()
 
     await loginAsTenantAgent(page, tenant)
-    await page.click('button:has-text("Visitors")')
+    await page.click('a:has-text("Visitors")')
     await page.locator(`text=${visitorId}`).first().click()
 
     await expect(page.locator('text=세션 목록')).toBeVisible({ timeout: 3000 })
@@ -145,7 +145,7 @@ test.describe('Visitors 탭', () => {
     await api.dispose()
 
     await loginAsTenantAgent(page, tenant)
-    await page.click('button:has-text("Visitors")')
+    await page.click('a:has-text("Visitors")')
     await page.locator(`text=${visitorId}`).first().click()
     // 세션 카드 클릭
     await page.locator(`text=${sessionId.slice(0, 8)}`).first().click()
@@ -162,7 +162,7 @@ test.describe('Visitors 탭', () => {
     await api.dispose()
 
     await loginAsTenantAgent(page, tenant)
-    await page.click('button:has-text("Visitors")')
+    await page.click('a:has-text("Visitors")')
     await page.locator(`text=${visitorId}`).first().click()
     await page.locator(`text=${sessionId.slice(0, 8)}`).first().click()
     await page.click('button:has-text("← 뒤로")')
@@ -179,7 +179,7 @@ test.describe('Visitors 탭', () => {
     await api.dispose()
 
     await loginAsTenantAgent(page, tenant)
-    await page.click('button:has-text("Visitors")')
+    await page.click('a:has-text("Visitors")')
     await page.locator(`text=${visitorId}`).first().click()
     await page.locator(`text=${sessionId.slice(0, 8)}`).first().click()
     await page.click('button:has-text("Checkpoint")')
