@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi, describe, it, expect, beforeEach } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import ConfigTab from './ConfigTab'
 import * as api from '../api'
 
@@ -20,6 +21,16 @@ function mockConfig(overrides = {}) {
   vi.mocked(api.updateTenantConfig).mockResolvedValue({} as any)
 }
 
+// ConfigTab은 ?section= 세부 탭을 useSearchParams로 읽으므로 라우터 래핑이 필요하다.
+// 각 테스트는 대상 필드가 있는 세부 탭에서 렌더한다(general | ai | handoff | security).
+function renderConfig(section = 'general') {
+  return render(
+    <MemoryRouter initialEntries={[`/tenant/config?section=${section}`]}>
+      <ConfigTab />
+    </MemoryRouter>,
+  )
+}
+
 async function save() {
   await userEvent.click(screen.getByRole('button', { name: '저장' }))
 }
@@ -29,48 +40,80 @@ beforeEach(() => {
   mockConfig()
 })
 
+describe('ConfigTab — 세부 탭', () => {
+  it('기본 탭은 일반이고, AI 모델 탭으로 전환하면 LLM Provider 타입이 보인다', async () => {
+    renderConfig('general')
+    await screen.findByLabelText('브랜드 텍스트')
+    expect(screen.queryByLabelText('LLM Provider 타입')).toBeNull()  // 다른 탭이라 미노출
+    await userEvent.click(screen.getByRole('tab', { name: 'AI 모델' }))
+    expect(await screen.findByLabelText('LLM Provider 타입')).toBeInTheDocument()
+    expect(screen.queryByLabelText('브랜드 텍스트')).toBeNull()
+  })
+
+  it('?section=ai 딥링크로 진입하면 AI 모델 탭이 렌더된다', async () => {
+    renderConfig('ai')
+    expect(await screen.findByLabelText('LLM Provider 타입')).toBeInTheDocument()
+  })
+
+  it('탭을 오가도 입력이 보존되어 한 번에 atomic 저장된다', async () => {
+    renderConfig('general')
+    await userEvent.type(await screen.findByLabelText('브랜드 텍스트'), 'ATOM샵')
+    await userEvent.click(screen.getByRole('tab', { name: '상담 전환' }))
+    await userEvent.click(await screen.findByLabelText('HITL 사용'))  // 끄기
+    await save()
+    await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ brand_name: 'ATOM샵', hitl_enabled: false }),
+    ))
+  })
+})
+
+describe('ConfigTab — 친절 설명', () => {
+  it('AI 탭에 API Key·Embedding 평이한 설명이 보인다', async () => {
+    renderConfig('ai')
+    await screen.findByLabelText('LLM Provider 타입')
+    expect(screen.getByText(/AI 서비스에서 발급받은 비밀 키/)).toBeInTheDocument()
+    expect(screen.getByText(/검색하도록.*바꾸는 엔진/)).toBeInTheDocument()
+  })
+})
+
 describe('ConfigTab — HITL 토글', () => {
   it('hitl_enabled 토글을 끄고 저장하면 hitl_enabled=false를 보낸다', async () => {
-    render(<ConfigTab />)
+    renderConfig('handoff')
     const toggle = await screen.findByLabelText('HITL 사용')
-    expect(toggle).toBeChecked() // 기본 켜짐
-
+    expect(toggle).toBeChecked()
     await userEvent.click(toggle)
     await save()
-
-    await waitFor(() => {
-      expect(api.updateTenantConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ hitl_enabled: false }),
-      )
-    })
+    await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ hitl_enabled: false }),
+    ))
   })
 })
 
 describe('ConfigTab — 브랜드/신원검증', () => {
   it('brand_name 입력을 저장 payload에 담는다', async () => {
-    render(<ConfigTab />)
+    renderConfig('general')
     await userEvent.type(await screen.findByLabelText('브랜드 텍스트'), 'ABC샵')
     await save()
     await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ brand_name: 'ABC샵' }),
+      expect.objectContaining({ brand_name: 'ABC샵' }),
     ))
   })
 
   it('신원검증 토글을 켜고 저장하면 require_identity_verification=true', async () => {
-    render(<ConfigTab />)
+    renderConfig('security')
     const toggle = await screen.findByLabelText('visitor_id 신원검증 요구')
     expect(toggle).not.toBeChecked()
     await userEvent.click(toggle)
     await save()
     await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ require_identity_verification: true }),
+      expect.objectContaining({ require_identity_verification: true }),
     ))
   })
 })
 
 describe('ConfigTab — LLM Provider', () => {
   it('LLM provider 설정을 저장 payload에 담는다', async () => {
-    render(<ConfigTab />)
+    renderConfig('ai')
     await userEvent.selectOptions(await screen.findByLabelText('LLM Provider 타입'), 'custom')
     await userEvent.type(screen.getByLabelText('LLM Base URL'), 'https://x/v1')
     await userEvent.type(screen.getByLabelText('LLM API Key'), 'sk-llm')
@@ -83,7 +126,7 @@ describe('ConfigTab — LLM Provider', () => {
 
 describe('ConfigTab — AI 모델', () => {
   it('단일 "AI 모델" 선택을 model_id로 저장한다', async () => {
-    render(<ConfigTab />)
+    renderConfig('ai')
     await userEvent.selectOptions(await screen.findByLabelText('AI 모델'), 'openai/gpt-4o')
     await save()
     await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
@@ -94,13 +137,13 @@ describe('ConfigTab — AI 모델', () => {
 
 describe('ConfigTab — 고급 설정(자료 정리 모델)', () => {
   it('기본적으로 자료 정리 모델은 접혀 있다(비개발자 단순 뷰)', async () => {
-    render(<ConfigTab />)
+    renderConfig('ai')
     await screen.findByLabelText('AI 모델')
     expect(screen.queryByLabelText('자료 정리 모델')).toBeNull()
   })
 
   it('고급 설정을 펼쳐 자료 정리 모델을 지정하면 extraction_model로 저장한다', async () => {
-    render(<ConfigTab />)
+    renderConfig('ai')
     await screen.findByLabelText('AI 모델')
     await userEvent.click(screen.getByRole('button', { name: /고급 설정/ }))
     await userEvent.type(screen.getByLabelText('자료 정리 모델 직접 입력'), 'extract-model')
@@ -113,7 +156,7 @@ describe('ConfigTab — 고급 설정(자료 정리 모델)', () => {
 
 describe('ConfigTab — Embedding Provider', () => {
   it('embedding provider 설정(차원 포함)을 저장 payload에 담는다', async () => {
-    render(<ConfigTab />)
+    renderConfig('ai')
     await userEvent.selectOptions(await screen.findByLabelText('Embedding Provider 타입'), 'custom')
     await userEvent.type(screen.getByLabelText('Embedding Base URL'), 'https://api.openai.com/v1')
     await userEvent.type(screen.getByLabelText('Embedding API Key'), 'sk-emb')
@@ -131,8 +174,8 @@ describe('ConfigTab — Embedding Provider', () => {
 
 describe('ConfigTab — Base URL은 custom일 때만 노출', () => {
   it('기본/openai 타입에선 Base URL 입력이 숨겨진다', async () => {
-    render(<ConfigTab />)
-    await screen.findByLabelText('LLM Provider 타입')  // 기본 type=''
+    renderConfig('ai')
+    await screen.findByLabelText('LLM Provider 타입')
     expect(screen.queryByLabelText('LLM Base URL')).toBeNull()
     expect(screen.queryByLabelText('Embedding Base URL')).toBeNull()
     await userEvent.selectOptions(screen.getByLabelText('LLM Provider 타입'), 'openai')
@@ -140,7 +183,7 @@ describe('ConfigTab — Base URL은 custom일 때만 노출', () => {
   })
 
   it('custom 타입을 고르면 Base URL 입력이 나타난다', async () => {
-    render(<ConfigTab />)
+    renderConfig('ai')
     await userEvent.selectOptions(await screen.findByLabelText('LLM Provider 타입'), 'custom')
     expect(screen.getByLabelText('LLM Base URL')).toBeInTheDocument()
     await userEvent.selectOptions(screen.getByLabelText('Embedding Provider 타입'), 'custom')
@@ -149,7 +192,7 @@ describe('ConfigTab — Base URL은 custom일 때만 노출', () => {
 
   it('custom→openai로 바꾸면 base_url을 비워 저장한다(표준 주소 사용)', async () => {
     mockConfig({ embed_provider_type: 'custom', embed_base_url: 'https://old-custom/v1' })
-    render(<ConfigTab />)
+    renderConfig('ai')
     await userEvent.selectOptions(await screen.findByLabelText('Embedding Provider 타입'), 'openai')
     await save()
     await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
@@ -161,7 +204,7 @@ describe('ConfigTab — Base URL은 custom일 때만 노출', () => {
 describe('ConfigTab — 플랫폼 기본 Provider 게이팅', () => {
   it('platform_default_providers_enabled=false면 "기본" Provider 옵션을 숨긴다', async () => {
     mockConfig({ platform_default_providers_enabled: false })
-    render(<ConfigTab />)
+    renderConfig('ai')
     await screen.findByLabelText('LLM Provider 타입')
     expect(screen.queryByRole('option', { name: /기본 \(OpenRouter\)/ })).toBeNull()
     expect(screen.queryByRole('option', { name: /기본.*ollama/ })).toBeNull()
@@ -169,7 +212,7 @@ describe('ConfigTab — 플랫폼 기본 Provider 게이팅', () => {
 
   it('platform_default_providers_enabled=true면 "기본" 옵션을 보여준다', async () => {
     mockConfig({ platform_default_providers_enabled: true })
-    render(<ConfigTab />)
+    renderConfig('ai')
     await screen.findByLabelText('LLM Provider 타입')
     expect(screen.queryByRole('option', { name: /기본 \(OpenRouter\)/ })).not.toBeNull()
   })
@@ -178,7 +221,7 @@ describe('ConfigTab — 플랫폼 기본 Provider 게이팅', () => {
 describe('ConfigTab — 모델 불러오기', () => {
   it('LLM 모델 불러오기가 model_id 옵션을 채운다', async () => {
     vi.mocked(api.fetchProviderModels).mockResolvedValue(['gpt-4o', 'gpt-4o-mini'])
-    render(<ConfigTab />)
+    renderConfig('ai')
     await screen.findByLabelText('LLM Provider 타입')
     await userEvent.click(screen.getByRole('button', { name: 'LLM 모델 불러오기' }))
     await waitFor(() => expect(screen.getAllByRole('option', { name: 'gpt-4o-mini' }).length).toBeGreaterThan(0))
@@ -187,7 +230,7 @@ describe('ConfigTab — 모델 불러오기', () => {
 
   it('Embedding 모델 불러오기가 embed_model 옵션을 채운다', async () => {
     vi.mocked(api.fetchProviderModels).mockResolvedValue(['text-embedding-3-small'])
-    render(<ConfigTab />)
+    renderConfig('ai')
     await screen.findByLabelText('Embedding Provider 타입')
     await userEvent.click(screen.getByRole('button', { name: 'Embedding 모델 불러오기' }))
     await waitFor(() => expect(screen.getByRole('option', { name: 'text-embedding-3-small' })).toBeInTheDocument())
@@ -196,7 +239,7 @@ describe('ConfigTab — 모델 불러오기', () => {
 
   it('LLM 조회 실패 시 LLM 섹션에 에러를 표시한다(임베딩 에러와 별개)', async () => {
     vi.mocked(api.fetchProviderModels).mockRejectedValue(new Error('연결 실패'))
-    render(<ConfigTab />)
+    renderConfig('ai')
     await screen.findByLabelText('LLM Provider 타입')
     await userEvent.click(screen.getByRole('button', { name: 'LLM 모델 불러오기' }))
     await waitFor(() => expect(screen.getByText(/LLM 모델 조회 실패/)).toBeInTheDocument())
@@ -205,7 +248,7 @@ describe('ConfigTab — 모델 불러오기', () => {
 
   it('Embedding 조회 실패 시 Embedding 섹션에 에러를 표시한다(LLM 에러와 별개)', async () => {
     vi.mocked(api.fetchProviderModels).mockRejectedValue(new Error('연결 실패'))
-    render(<ConfigTab />)
+    renderConfig('ai')
     await screen.findByLabelText('Embedding Provider 타입')
     await userEvent.click(screen.getByRole('button', { name: 'Embedding 모델 불러오기' }))
     await waitFor(() => expect(screen.getByText(/Embedding 모델 조회 실패/)).toBeInTheDocument())
@@ -216,7 +259,7 @@ describe('ConfigTab — 모델 불러오기', () => {
 describe('ConfigTab — Tenant Slug', () => {
   it('slug 입력 후 Slug 저장을 누르면 updateTenantSlug를 호출한다', async () => {
     vi.mocked(api.updateTenantSlug).mockResolvedValue({ slug: 'abc-shop' } as any)
-    render(<ConfigTab />)
+    renderConfig('security')
     await userEvent.type(await screen.findByLabelText('Tenant Slug'), 'abc-shop')
     await userEvent.click(screen.getByRole('button', { name: /Slug 저장/ }))
     await waitFor(() => expect(api.updateTenantSlug).toHaveBeenCalledWith('abc-shop'))
