@@ -103,6 +103,22 @@ def extraction_provider(config) -> LLMProvider:
     return _provider_from_config(config, model)
 
 
+def ocr_provider(config) -> LLMProvider:
+    """OCR(Vision)용 LLM provider. LLM Provider와 독립 설정이며 LLM-shaped(anthropic 포함).
+
+    `ocr_provider_type`이 설정된 경우에만 호출된다(get_ocr_backend이 미설정 시 Paddle/에러로 분기).
+    그래서 여기선 플랫폼 기본 폴백 분기가 없다 — 항상 테넌트가 고른 provider를 해석한다.
+    """
+    from apps.tenants.crypto import decrypt_secret
+
+    return LLMProvider(
+        type=config.ocr_provider_type,
+        model=config.ocr_model,
+        base_url=config.ocr_base_url,
+        api_key=decrypt_secret(config.ocr_api_key) if config.ocr_api_key else "",
+    )
+
+
 def embedding_provider(config) -> EmbeddingProvider:
     """LLM Provider와 독립된 Embedding Provider. 미설정 시 dev는 ollama 폴백,
     prod(PLATFORM_DEFAULT_PROVIDERS_ENABLED=False)는 Tenant 설정을 강제한다."""

@@ -65,7 +65,106 @@ def test_pdf_ocr_fallback_respects_page_cap(settings):
 
 
 def test_get_ocr_backend_defaults_to_paddle_in_dev():
-    """157 시점: 팩토리는 dev/test에서 Paddle 백엔드를 돌려준다(vision 분기는 158)."""
+    """팩토리는 OCR 미설정 시 dev/test에서 Paddle 백엔드를 돌려준다."""
     from apps.rag.ocr import get_ocr_backend, PaddleOCR
 
     assert isinstance(get_ocr_backend(None), PaddleOCR)
+
+
+# ── issue 158: Vision OCR 경계 + VisionOCR + ocr_provider 리졸버 ──────────────
+import pytest
+
+
+@pytest.mark.django_db
+def test_ocr_provider_resolves_configured_vision_provider(tenant_with_key):
+    """OCR Provider 설정 시 ocr_provider가 LLMProvider로 해석한다(anthropic 포함, 키 복호화)."""
+    from apps.agent.providers import ocr_provider
+    from apps.tenants.crypto import encrypt_secret
+    from apps.tenants.models import TenantConfig
+
+    tenant, _ = tenant_with_key
+    config = TenantConfig.objects.get(tenant=tenant)
+    config.ocr_provider_type = "anthropic"
+    config.ocr_model = "claude-vision-x"
+    config.ocr_api_key = encrypt_secret("sk-ocr-123")
+    config.save()
+
+    p = ocr_provider(config)
+    assert p.type == "anthropic"
+    assert p.model == "claude-vision-x"
+    assert p.api_key == "sk-ocr-123"
+
+
+@pytest.mark.django_db
+def test_get_ocr_backend_uses_vision_when_configured(tenant_with_key):
+    """OCR Provider가 설정된 테넌트는 VisionOCR 백엔드를 받는다."""
+    from apps.rag.ocr import get_ocr_backend, VisionOCR
+    from apps.tenants.models import TenantConfig
+
+    tenant, _ = tenant_with_key
+    config = TenantConfig.objects.get(tenant=tenant)
+    config.ocr_provider_type = "openai"
+    config.ocr_model = "gpt-4o"
+    config.save()
+
+    assert isinstance(get_ocr_backend(config), VisionOCR)
+
+
+def test_vision_ocr_transcribes_via_boundary(monkeypatch):
+    """VisionOCR.transcribe는 transcribe_image 경계를 provider+이미지+마임으로 호출한다."""
+    from apps.rag.ocr import VisionOCR
+    from apps.agent.providers import LLMProvider
+
+    captured = {}
+    def fake_transcribe_image(provider, image_bytes, mime_type="image/png"):
+        captured.update(provider=provider, image=image_bytes, mime=mime_type)
+        return "VISION TRANSCRIBED"
+    monkeypatch.setattr("apps.agent.llm.transcribe_image", fake_transcribe_image)
+
+    prov = LLMProvider(type="openai", model="gpt-4o", api_key="k")
+    out = VisionOCR(prov).transcribe(b"IMGBYTES", "image/jpeg")
+
+    assert out == "VISION TRANSCRIBED"
+    assert captured["provider"] is prov
+    assert captured["image"] == b"IMGBYTES"
+    assert captured["mime"] == "image/jpeg"
+
+
+def test_transcribe_image_builds_vision_message_with_guardrail(monkeypatch):
+    """transcribe_image는 가드레일 프롬프트 + base64 이미지 블록을 만들어 클라이언트에 보낸다."""
+    import base64
+    from types import SimpleNamespace
+    from apps.agent import llm as llm_mod
+    from apps.agent.providers import LLMProvider
+
+    captured = {}
+    class _Client:
+        def bind(self, **kwargs):
+            captured["bound"] = kwargs
+            return self
+        def invoke(self, messages):
+            captured["messages"] = messages
+            return SimpleNamespace(content="OUT")
+    monkeypatch.setattr(llm_mod, "build_llm_client", lambda provider: _Client())
+
+    out = llm_mod.transcribe_image(LLMProvider(type="openai", model="gpt-4o"), b"PNGDATA", "image/png")
+
+    assert out == "OUT"
+    flat = str(captured["messages"])
+    assert base64.b64encode(b"PNGDATA").decode() in flat   # base64 이미지 블록
+    assert "전사" in flat                                   # 전사 가드레일 프롬프트
+    assert captured.get("bound", {}).get("temperature") == 0  # 결정성(temp 0)
+
+
+@pytest.mark.django_db
+def test_get_ocr_backend_errors_in_prod_without_ocr_provider(tenant_with_key, settings):
+    """prod(플랫폼 기본 비활성)에서 OCR 미설정이면 명확한 에러(Paddle 폴백 없음)."""
+    from apps.rag.ocr import get_ocr_backend
+    from apps.tenants.models import TenantConfig
+
+    settings.PLATFORM_DEFAULT_PROVIDERS_ENABLED = False
+    tenant, _ = tenant_with_key
+    config = TenantConfig.objects.get(tenant=tenant)  # ocr 미설정
+
+    with pytest.raises(ValueError):
+        get_ocr_backend(config)

@@ -33,9 +33,30 @@ class PaddleOCR:
         return resp.json().get("text", "")
 
 
-def get_ocr_backend(config=None) -> OCRBackend:
-    """tenant config로 OCR 백엔드를 고른다.
+class VisionOCR:
+    """per-Tenant vision 모델 어댑터. transcribe_image 경계로 이미지를 전사한다(prod 경로)."""
 
-    157: 항상 Paddle(dev/test). 158에서 OCR Provider 설정 시 VisionOCR로 분기한다.
+    def __init__(self, provider):
+        self.provider = provider
+
+    def transcribe(self, image_bytes: bytes, mime_type: str = "image/png") -> str:
+        from apps.agent import llm
+
+        return llm.transcribe_image(self.provider, image_bytes, mime_type)
+
+
+def get_ocr_backend(config=None) -> OCRBackend:
+    """tenant config로 OCR 백엔드를 고른다(embedding_provider와 동일한 폴백 패턴).
+
+    OCR Provider 설정됨 → VisionOCR / dev·test 미설정 → Paddle 폴백 / prod 미설정 → ValueError.
     """
-    return PaddleOCR()
+    if config is not None and getattr(config, "ocr_provider_type", ""):
+        from apps.agent.providers import ocr_provider
+
+        return VisionOCR(ocr_provider(config))
+
+    from django.conf import settings
+
+    if getattr(settings, "PLATFORM_DEFAULT_PROVIDERS_ENABLED", False):
+        return PaddleOCR()
+    raise ValueError("OCR Provider가 설정되지 않았습니다 (프로덕션은 Tenant 설정 필수)")

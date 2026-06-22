@@ -49,3 +49,30 @@ def complete_structured(provider, messages, schema: type[T]) -> T:
 def complete_text(provider, messages) -> str:
     """LLM 응답 본문(문자열)을 반환한다."""
     return cast(str, build_llm_client(provider).invoke(messages).content)
+
+
+# OCR 전사 가드레일(ADR-0009): vision 모델은 생성형이라 환각할 수 있으므로, '보이는 텍스트만
+# 그대로 전사'로 강하게 제약하고 temperature 0으로 결정성을 높인다. citation 원문성을 지킨다.
+_OCR_TRANSCRIBE_PROMPT = (
+    "이미지에 보이는 텍스트를 그대로 전사하세요. "
+    "추론·번역·요약·교정·설명을 하지 말고, 보이는 문자만 출력하세요. "
+    "표는 읽는 순서대로 텍스트로 옮기세요. 판독 불가하면 아무것도 출력하지 마세요."
+)
+
+
+def transcribe_image(provider, image_bytes: bytes, mime_type: str = "image/png") -> str:
+    """vision 모델로 이미지의 텍스트를 그대로 전사한다(OCR 경계).
+
+    provider-agnostic 이미지 content block을 써서 openai/anthropic/custom이 한 코드로 동작한다.
+    비결정 외부 경계이므로 테스트는 이 함수를 Fake로 교체한다(complete_text와 분리해 격리).
+    """
+    import base64
+    from langchain_core.messages import HumanMessage
+
+    b64 = base64.b64encode(image_bytes).decode()
+    message = HumanMessage(content=[
+        {"type": "text", "text": _OCR_TRANSCRIBE_PROMPT},
+        {"type": "image", "source_type": "base64", "data": b64, "mime_type": mime_type},
+    ])
+    result = build_llm_client(provider).bind(temperature=0).invoke([message])
+    return cast(str, result.content)

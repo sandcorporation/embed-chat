@@ -137,6 +137,12 @@ class TenantConfig(models.Model):
     embed_api_key = models.TextField(blank=True, default="")
     embed_model = models.CharField(max_length=255, blank=True, default="")
     embed_dim = models.IntegerField(default=1024)
+    # OCR(Vision) Provider — LLM-shaped(anthropic 포함)이나 LLM Provider와 독립 설정. type이
+    # 비면 dev/test는 Paddle 폴백, prod는 OCR 미설정 에러(PRD-vision-ocr). api_key 암호화 저장.
+    ocr_provider_type = models.CharField(max_length=20, blank=True, default="")
+    ocr_base_url = models.CharField(max_length=500, blank=True, default="")
+    ocr_api_key = models.TextField(blank=True, default="")
+    ocr_model = models.CharField(max_length=255, blank=True, default="")
     system_prompt = models.TextField(
         default="You are a helpful assistant. Answer questions clearly and concisely."
     )
