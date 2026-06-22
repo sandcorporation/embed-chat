@@ -104,9 +104,6 @@ services:
       OPEN_ROUTER_DEFAULT_MODEL: qwen2.5:3b
       OLLAMA_BASE_URL: http://ollama-test:11434
       PADDLE_OCR_URL: http://paddle-ocr-test:8080
-      NEO4J_URI: bolt://neo4j-test:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: neo4j-test-password
     depends_on:
       db-test:
         condition: service_healthy
@@ -138,9 +135,6 @@ services:
       OPEN_ROUTER_DEFAULT_MODEL: fake-llm
       OLLAMA_BASE_URL: http://ollama-test:11434
       PADDLE_OCR_URL: http://paddle-ocr-test:8080
-      NEO4J_URI: bolt://neo4j-test:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: neo4j-test-password
       E2E_OPERATOR_USERNAME: admin
       E2E_OPERATOR_PASSWORD: admin123
     volumes:
@@ -211,9 +205,6 @@ services:
       OPEN_ROUTER_DEFAULT_MODEL: fake-llm
       OLLAMA_BASE_URL: http://ollama-test:11434
       PADDLE_OCR_URL: http://paddle-ocr-test:8080
-      NEO4J_URI: bolt://neo4j-test:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: neo4j-test-password
     volumes:
       - media-e2e:/app/media
     depends_on:
@@ -235,9 +226,6 @@ services:
       DB_PASSWORD: postgres
       REDIS_URL: redis://redis-test:6379/0
       SECRET_KEY: e2e-secret-key-not-for-production
-      NEO4J_URI: bolt://neo4j-test:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: neo4j-test-password
     depends_on:
       api-e2e:
         condition: service_healthy

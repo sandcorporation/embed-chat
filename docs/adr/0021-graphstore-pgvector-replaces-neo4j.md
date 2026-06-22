@@ -26,9 +26,9 @@ Postgres에 통합돼 있으면 이전이 단순해진다.
 - **OCI 관리형 이식 가드**: `halfvec`(0.7+)·`iterative scan`(0.8+)에 정합성을 의존하지 않게 설계 —
   미지원 버전이면 full `vector` HNSW + `tenant_id` 파티셔닝(파티션별 HNSW)으로 폴백(GraphStore 내부에
   훅만 열어둠, 인터페이스 불변). 이전 전 OCI 콘솔에서 pgvector `extversion`·PG 메이저 버전 확인 필수.
-- **컷오버(빅뱅, 플래그 게이팅)**: `GRAPH_BACKEND`(neo4j|pg)로 개발 중 게이팅(기본 neo4j 유지) 후, 전
-  메서드를 pg에서 검증하면 기본을 pg로 전환. 그래프 쓰기는 비동기 배치(인제스션·재구축)라 사용자 요청
-  경로가 아니므로, 데이터 이전(임베딩 보존, `migrate_graph_to_pg`) 후 짧은 인제스션 동결로 발산을 피한다.
+- **빅뱅 전환(단일 구현)**: 개발 중엔 `GRAPH_BACKEND` 플래그로 게이팅하며 전 메서드를 pg에서 검증한 뒤,
+  prod 미배포라 이전할 데이터가 없으므로 Neo4j 백엔드·플래그를 통째로 제거했다. GraphStore는 pg 단일
+  구현이며 신규 배포는 처음부터 pg로 인제스션한다(데이터 이전 단계 불필요).
 
 ## Considered Options
 - **Oracle Autonomous DB(네이티브 VECTOR + SQL/PGQ)**: 기각. 저장을 박스 밖 관리형으로 빼는 이점은 있으나,
@@ -44,9 +44,6 @@ Postgres에 통합돼 있으면 이전이 단순해진다.
 - prod에서 Neo4j(JVM) 컨테이너가 사라진다(메모리·CPU 경합 순감). 그래프/벡터는 이미 떠 있는 Postgres에 흡수.
 - 기존 GraphStore 행동 테스트가 pg 백엔드에서 그대로 통과(355 passed) — 충실한 drop-in 검증.
 - 테스트는 실 Postgres+pgvector(db-test=`pgvector/pg16`)로, neo4j-test 제거. 테스트 인프라 가벼워짐.
-- **남은 정리(후속)**: 일회성 데이터 이전을 위해 `neo4j` 파이썬 드라이버 + `_Neo4jGraphStore`(export 전용) +
-  `migrate_graph_to_pg` 명령을 **보존**한다(prod 이전 시 NEO4J_URI로 옛 Neo4j를 가리켜 실행). prod 이전이
-  확인되면 후속에서 이 마이그레이션 툴링·드라이버를 삭제한다.
-- **운영 컷오버 순서**: ① pg-기본 코드 배포(neo4j 서비스 제거, 드라이버 보존) → ② 옛 Neo4j 가동 중
-  `migrate_graph_to_pg` 실행(NEO4J_URI=옛 주소) → ③ pg 데이터 검증 → ④ 옛 Neo4j 컨테이너 철거 → ⑤ 후속:
-  마이그레이션 툴링·드라이버 제거.
+- **Neo4j 완전 제거**: prod가 아직 배포된 적 없어 이전할 그래프 데이터가 없으므로, `neo4j` 파이썬 드라이버·
+  `_Neo4jGraphStore`·데이터 이전 명령(`migrate_graph_to_pg`)·`GRAPH_BACKEND` 플래그·`NEO4J_*` 설정을 모두
+  삭제했다. GraphStore는 단일 pg 구현이다(백엔드 선택 분기 없음). 신규 배포는 처음부터 pg로 인제스션한다.

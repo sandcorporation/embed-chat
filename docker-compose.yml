@@ -23,8 +23,7 @@ services:
       timeout: 3s
       retries: 5
 
-  # Neo4j는 제거됨(ADR-0021) — GraphRAG는 Postgres+pgvector로 흡수. 일회성 데이터 이전 시에는
-  # NEO4J_URI 환경변수로 옛 Neo4j를 가리켜 migrate_graph_to_pg를 돌린다(드라이버는 보존).
+  # Neo4j는 제거됨(ADR-0021) — GraphRAG는 Postgres+pgvector(GraphStore)로 흡수.
 
   api:
     build: ./backend

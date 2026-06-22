@@ -8,9 +8,8 @@ import pytest
 
 
 @pytest.fixture
-def pg_backend(settings):
-    """GraphStore를 pg 백엔드로 강제한다(이 슬라이스 개발 게이팅)."""
-    settings.GRAPH_BACKEND = "pg"
+def pg_backend():
+    """GraphStore는 항상 Postgres+pgvector다(Neo4j 제거, ADR-0021). 테스트 가독성용 노옵 마커."""
 
 
 def _tenant(dim=4):
@@ -296,55 +295,3 @@ def test_reembed_dim_change_preserves_structure(pg_backend):
     assert gs4.vector_search([1.0, 0.0, 0.0, 0.0], top_k=1)[0]["content"] == "원문"
 
 
-# ── issue 166: 데이터 이전(Neo4j→pg) import 측 ───────────────────────────────
-
-@pytest.mark.django_db
-def test_migration_import_preserves_graph_and_embeddings(pg_backend):
-    """write_export_to_pg가 노드·엣지·임베딩·freshness를 충실히 pg에 기록한다(재계산 없음)."""
-    from apps.rag.graph_migrate import write_export_to_pg
-    from apps.rag.graph_store import GraphStore
-    t = _tenant(dim=3)
-    export = {
-        "text_units": [
-            {"unit_id": "u1", "content": "원문", "source_document_id": "d1",
-             "chunk_index": 0, "embedding": [1.0, 0.0, 0.0]},
-        ],
-        "mentions": [
-            {"mention_id": "m1", "name": "Alpha", "entity_type": "x", "description": "",
-             "source_document_id": "d1", "embedding": [1.0, 0.0, 0.0]},
-            {"mention_id": "m2", "name": "Beta", "entity_type": "x", "description": "",
-             "source_document_id": "d1", "embedding": None},  # 임베딩 없는 Mention도 보존
-        ],
-        "relations": [{"source_id": "m1", "target_id": "m2", "description": "rel", "source_document_id": "d1"}],
-        "same_as": [("m1", "m2")],
-        "freshness": "fresh",
-    }
-    write_export_to_pg(str(t.id), export)
-
-    gs = GraphStore(str(t.id))
-    assert gs.vector_search([1.0, 0.0, 0.0], top_k=1)[0]["content"] == "원문"   # 임베딩 보존
-    assert {m["name"] for m in gs.query_mentions()} == {"Alpha", "Beta"}
-    assert gs.query_mention_relations() == [{"source": "m1", "target": "m2"}]
-    assert gs.query_mention_same_as() == [("m1", "m2")]
-    assert gs.get_freshness() == "fresh"
-    assert [e["mention_id"] for e in gs.mention_embeddings()] == ["m1"]  # m1만 임베딩
-
-
-@pytest.mark.django_db
-def test_migration_import_idempotent(pg_backend):
-    """재실행해도 중복·오류 없이 같은 상태(멱등)."""
-    from apps.rag.graph_migrate import write_export_to_pg
-    from apps.rag.graph_store import GraphStore
-    t = _tenant(dim=2)
-    export = {
-        "text_units": [{"unit_id": "u1", "content": "x", "source_document_id": "d",
-                        "chunk_index": 0, "embedding": [1.0, 0.0]}],
-        "mentions": [{"mention_id": "m1", "name": "A", "entity_type": "", "description": "",
-                      "source_document_id": "d", "embedding": [1.0, 0.0]}],
-        "relations": [], "same_as": [], "freshness": "fresh",
-    }
-    write_export_to_pg(str(t.id), export)
-    write_export_to_pg(str(t.id), export)  # 재실행
-    gs = GraphStore(str(t.id))
-    assert len(gs.query_mentions()) == 1
-    assert len(gs.all_text_units()) == 1
