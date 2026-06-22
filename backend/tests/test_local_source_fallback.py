@@ -57,10 +57,11 @@ def test_local_search_falls_back_to_source_text(tenant_with_key, fake_chat_llm):
     emb = get_embeddings([fact], provider=gs._embedding_provider())[0]
     gs.upsert_text_unit("u-res", fact, emb, source_document_id="d1", chunk_index=0)
 
-    # Fake: 근거(system content)에 '1920'이 있으면 답 가능(True), 없으면 불가(False) → 폴백 유발.
+    # Fake: 근거(조립된 메시지)에 '1920'이 있으면 답 가능(True), 없으면 불가(False) → 폴백 유발.
+    # RAG는 캐시 친화 재배치로 뒤쪽 사용자 턴에 실리므로 전체 메시지를 훑는다(#133).
     def fake(messages):
-        system = messages[0].content
-        if "1920" in system:
+        joined = " ".join(getattr(m, "content", "") for m in messages)
+        if "1920" in joined:
             return HITLResponse(response="지원 해상도는 1920x1080(FHD)입니다.",
                                 needs_hitl=False, hitl_reason="", context_sufficient=True)
         return HITLResponse(response="", needs_hitl=False, hitl_reason="", context_sufficient=False)
@@ -93,8 +94,8 @@ def test_fallback_streams_answer_once(tenant_with_key, fake_chat_llm, monkeypatc
     gs.upsert_text_unit("u-res", fact, emb, source_document_id="d1", chunk_index=0)
 
     def fake(messages):
-        system = messages[0].content
-        if "1920" in system:  # 2패스: 원문 보강됨 → 답
+        joined = " ".join(getattr(m, "content", "") for m in messages)
+        if "1920" in joined:  # 2패스: 원문 보강됨 → 답
             return HITLResponse(response="지원 해상도는 1920x1080(FHD)입니다.",
                                 needs_hitl=False, hitl_reason="", context_sufficient=True)
         # 1패스: 근거 없음 → 비어있지 않은 '모름' 응답 + context_sufficient=False
