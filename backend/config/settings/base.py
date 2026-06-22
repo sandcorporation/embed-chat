@@ -56,6 +56,25 @@ DATABASES = {
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# 이벤트 파이프라인(relay·consumer/bridge) 흐름을 docker logs에서 보려면 INFO를 stdout으로
+# 내보내야 한다(Django 기본은 WARNING+만). 관리 명령(relay/consume_events)이 별도 프로세스로
+# 도므로 stream 핸들러로 표준출력에 찍는다.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "events": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "events"},
+    },
+    # propagate=True여도 apps.events에 핸들러가 있어 lastResort가 비활성 → 이중 출력 없음.
+    # root엔 핸들러가 없어 prod는 한 줄만, 테스트는 pytest caplog(root)가 캡처한다.
+    "loggers": {
+        "apps.events": {"handlers": ["console"], "level": "INFO", "propagate": True},
+    },
+}
+
 AUTH_USER_MODEL = "tenants.Operator"
 
 LANGUAGE_CODE = "en-us"

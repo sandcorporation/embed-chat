@@ -50,6 +50,23 @@ def test_duplicate_delivery_handled_once():
 
 
 @pytest.mark.django_db
+def test_consumer_logs_each_handled_event(caplog):
+    """소비자가 처리한 이벤트를 INFO로 남긴다 — bridge 컨테이너의 docker logs로 흐름을 본다."""
+    import logging
+    from apps.events.consumer import EventConsumer
+    bus, topic, group = _bus(), _topic(), "webhook"
+    bus.ensure_group(topic, group)
+    ev_id = _publish(bus, topic, type="SessionEscalated", aggregate_id="sess-42")
+
+    ec = EventConsumer(bus, topic, group, "c", lambda env: None)
+    with caplog.at_level(logging.INFO, logger="apps.events.consumer"):
+        ec.process_once(block_ms=200)
+
+    handled = [r.getMessage() for r in caplog.records if "handled" in r.getMessage()]
+    assert any("SessionEscalated" in m and group in m and ev_id in m for m in handled)
+
+
+@pytest.mark.django_db
 def test_poison_message_dead_lettered_after_max_attempts():
     from apps.events.consumer import EventConsumer
     bus, topic, group = _bus(), _topic(), "g"

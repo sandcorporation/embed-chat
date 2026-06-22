@@ -50,6 +50,25 @@ python manage.py events_dlq replay
 
 재처리는 멱등(`processed_events`)이라 이미 성공한 소비자는 다시 효과를 내지 않습니다(예: webhook 이중발송 없음).
 
+## 관측(이벤트 로깅)
+
+relay·소비자는 흐른 이벤트를 **INFO**로 남깁니다 — `docker logs <컨테이너>`로 무엇이 오갔는지 봅니다.
+`apps.events` 로거가 stdout으로 INFO를 내보내도록 `settings`에 `LOGGING`이 설정돼 있습니다(Django
+기본은 WARNING+만).
+
+```
+# relay (발행)
+[relay] published topic=app.events key=<sid> type=SessionEscalated event_id=…
+# 소비자 (처리/멱등 스킵)
+[event] group=presence-bridge type=VisitorConnected event_id=… aggregate=<sid> -> handled
+[event] group=webhook type=SessionEscalated event_id=… aggregate=<sid> -> skipped(duplicate)
+```
+
+```bash
+docker logs -f embed-chat-worker-console-bridge-1   # 콘솔 델타 흐름
+docker logs -f embed-chat-relay-1                    # outbox 발행 흐름
+```
+
 ## 운영 점검
 
 ```bash

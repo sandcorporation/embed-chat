@@ -4,6 +4,11 @@
 쓸어담는다(catch-up sweep — NOTIFY 유실 안전망). 단일 인스턴스라 outbox id 순서가 보존된다.
 발행 성공한 행만 prune하고 event_store(감사)는 건드리지 않는다.
 """
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 def drain_once(bus, batch=200) -> int:
     """미발행 outbox 행을 id 순서로 발행하고 prune한다. 발행 실패 시 그 행부터 남긴다(재발행)."""
     from apps.events.models import Outbox
@@ -12,6 +17,10 @@ def drain_once(bus, batch=200) -> int:
     published = 0
     for row in rows:
         bus.publish(row.topic, row.key, row.envelope)  # 실패하면 예외 전파 → 이 행은 prune 안 됨
+        logger.info(
+            "[relay] published topic=%s key=%s type=%s event_id=%s",
+            row.topic, row.key, (row.envelope or {}).get("type"), (row.envelope or {}).get("event_id"),
+        )
         row.delete()
         published += 1
     return published

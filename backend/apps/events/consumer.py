@@ -45,8 +45,14 @@ class EventConsumer:
         from apps.events.models import ProcessedEvent
 
         event_id = msg.payload.get("event_id")
+        event_type = msg.payload.get("type")
+        aggregate = msg.payload.get("aggregate_id")
         # 멱등: 이미 처리한 이벤트면 핸들러 호출 없이 ack만.
         if event_id and ProcessedEvent.objects.filter(consumer_group=self.group, event_id=event_id).exists():
+            logger.info(
+                "[event] group=%s type=%s event_id=%s aggregate=%s -> skipped(duplicate)",
+                self.group, event_type, event_id, aggregate,
+            )
             self.bus.ack(self.topic, self.group, msg.msg_id)
             return
 
@@ -57,6 +63,10 @@ class EventConsumer:
                 if event_id:
                     ProcessedEvent.objects.get_or_create(consumer_group=self.group, event_id=event_id)
                 self.bus.ack(self.topic, self.group, msg.msg_id)
+                logger.info(
+                    "[event] group=%s type=%s event_id=%s aggregate=%s -> handled",
+                    self.group, event_type, event_id, aggregate,
+                )
                 return
             except Exception as exc:  # noqa: BLE001 — 핸들러 실패는 재시도/DLQ 대상
                 last_exc = exc
