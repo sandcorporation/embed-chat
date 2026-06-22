@@ -255,6 +255,21 @@ describe('ConfigTab — 플랫폼 기본 Provider 게이팅', () => {
     await screen.findByLabelText('LLM Provider 타입')
     expect(screen.queryByRole('option', { name: /기본 \(OpenRouter\)/ })).not.toBeNull()
   })
+
+  it('LLM Provider 안내 문구도 게이팅된다 — prod면 OpenRouter 폴백 문구 대신 "설정 필수"를 보인다', async () => {
+    mockConfig({ platform_default_providers_enabled: false })
+    renderConfig('ai')
+    await screen.findByLabelText('LLM Provider 타입')
+    expect(screen.queryByText(/플랫폼 기본\(OpenRouter\)을 씁니다/)).toBeNull()
+    expect(screen.getByText(/프로덕션에선 LLM Provider 설정이 필수/)).toBeInTheDocument()
+  })
+
+  it('dev(platform_default_providers_enabled=true)면 OpenRouter 폴백 문구를 보인다', async () => {
+    mockConfig({ platform_default_providers_enabled: true })
+    renderConfig('ai')
+    await screen.findByLabelText('LLM Provider 타입')
+    expect(screen.getByText(/플랫폼 기본\(OpenRouter\)을 씁니다/)).toBeInTheDocument()
+  })
 })
 
 describe('ConfigTab — 모델 불러오기', () => {

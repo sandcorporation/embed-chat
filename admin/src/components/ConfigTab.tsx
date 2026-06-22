@@ -171,7 +171,7 @@ export default function ConfigTab() {
           <div className="space-y-4">
             <div>
               <h3 className="text-sm font-semibold">LLM Provider (비용 부담)</h3>
-              <p className="text-xs text-muted-foreground">손님과 대화하고 자료를 정리하는 핵심 AI예요. 미설정 시 플랫폼 기본(OpenRouter)을 씁니다.</p>
+              <p className="text-xs text-muted-foreground">손님과 대화하고 자료를 정리하는 핵심 AI예요. {config.platform_default_providers_enabled ? '미설정 시 플랫폼 기본(OpenRouter)을 씁니다.' : '프로덕션에선 LLM Provider 설정이 필수입니다.'}</p>
             </div>
             <div className="space-y-2">
               <Label>LLM Provider 타입</Label>
