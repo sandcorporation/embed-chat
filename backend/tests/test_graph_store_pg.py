@@ -106,3 +106,82 @@ def test_ensure_vector_index_idempotent(pg_backend):
     gs.ensure_vector_index(dimensions=3)  # 두 번째 호출도 안전
     gs.upsert_text_unit("u", "문서", [1.0, 0.0, 0.0])
     assert gs.vector_search([1.0, 0.0, 0.0], top_k=1)[0]["content"] == "문서"
+
+
+# ── issue 163: Mention 저장 + SAME_AS + search_entities ──────────────────────
+
+@pytest.mark.django_db
+def test_search_entities_lexical(pg_backend):
+    """flag=pg: 어휘(부분일치)로 Mention을 찾는다(이름·설명)."""
+    from apps.rag.graph_store import GraphStore
+    gs = GraphStore(str(_tenant(dim=3).id))
+    gs.upsert_mention("m1", "OSD Menu", "feature", "화면 메뉴", source_document_id="d1")
+    gs.upsert_mention("m2", "Footswitch", "feature", "발 스위치")
+
+    found = gs.search_entities("menu")
+    names = [m["name"] for m in found]
+    assert "OSD Menu" in names and "Footswitch" not in names
+
+
+@pytest.mark.django_db
+def test_search_entities_dedups_via_same_as(pg_backend):
+    """SAME_AS로 묶인 Mention은 하나의 Entity로 dedup된다(표기변이)."""
+    from apps.rag.graph_store import GraphStore
+    gs = GraphStore(str(_tenant(dim=3).id))
+    gs.upsert_mention("m1", "FCB1010", "product", "MIDI 컨트롤러")
+    gs.upsert_mention("m2", "FCB-1010", "product", "MIDI 컨트롤러")
+    gs.upsert_mention_same_as("m1", "m2")
+
+    found = gs.search_entities("fcb")
+    assert len(found) == 1  # 두 표기가 한 Entity로
+
+
+@pytest.mark.django_db
+def test_homonym_mentions_stay_separate(pg_backend):
+    """SAME_AS가 없으면 같은 표기라도 분리 유지된다(동음이의)."""
+    from apps.rag.graph_store import GraphStore
+    gs = GraphStore(str(_tenant(dim=3).id))
+    gs.upsert_mention("m1", "Bank", "concept", "메모리 뱅크", source_document_id="d1")
+    gs.upsert_mention("m2", "Bank", "concept", "은행", source_document_id="d2")
+
+    found = gs.search_entities("bank")
+    assert len(found) == 2  # 동치 아님 → 분리
+
+
+@pytest.mark.django_db
+def test_mention_embedding_backfill(pg_backend):
+    """임베딩 없는 Mention 백필: without_embedding → set → embeddings(list[float] 반환)."""
+    from apps.rag.graph_store import GraphStore
+    gs = GraphStore(str(_tenant(dim=3).id))
+    gs.upsert_mention("m1", "Entity", "x", "설명")  # 임베딩 없음
+
+    missing = gs.mentions_without_embedding()
+    assert [m["mention_id"] for m in missing] == ["m1"]
+
+    gs.set_mention_embedding("m1", [0.1, 0.2, 0.3])
+    embs = gs.mention_embeddings()
+    assert len(embs) == 1
+    assert embs[0]["mention_id"] == "m1"
+    assert embs[0]["embedding"] == pytest.approx([0.1, 0.2, 0.3])  # list[float]
+
+
+@pytest.mark.django_db
+def test_same_as_normalized_and_queryable(pg_backend):
+    """SAME_AS는 무방향(정규화 저장)이고 query로 쌍을 돌려준다."""
+    from apps.rag.graph_store import GraphStore
+    gs = GraphStore(str(_tenant(dim=3).id))
+    gs.upsert_mention("z", "Z", "x", "")
+    gs.upsert_mention("a", "A", "x", "")
+    gs.upsert_mention_same_as("z", "a")  # 역순으로 줘도 정규화
+    assert gs.query_mention_same_as() == [("a", "z")]
+
+
+@pytest.mark.django_db
+def test_search_entities_tenant_scoped(pg_backend):
+    """search_entities는 테넌트 스코프(다른 테넌트 Mention 미반환)."""
+    from apps.rag.graph_store import GraphStore
+    ta, tb = _tenant(dim=3), _tenant(dim=3)
+    GraphStore(str(ta.id)).upsert_mention("m", "Widget", "x", "A의 것")
+    GraphStore(str(tb.id)).upsert_mention("m", "Widget", "x", "B의 것")
+    found = GraphStore(str(ta.id)).search_entities("widget")
+    assert [m["description"] for m in found] == ["A의 것"]

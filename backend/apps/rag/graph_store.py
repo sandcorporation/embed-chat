@@ -416,6 +416,15 @@ def _vec_literal(embedding) -> str:
     return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
 
 
+def _parse_vec(value) -> list:
+    """pgvector 컬럼 반환값('[a,b,c]' 문자열)을 list[float]로 파싱한다(어댑터 미등록 raw 커서)."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [float(x) for x in value]
+    return [float(x) for x in str(value).strip("[]").split(",") if x.strip()]
+
+
 class _PgGraphStore:
     def __init__(self, tenant_id: str):
         if not tenant_id:
@@ -544,6 +553,171 @@ class _PgGraphStore:
             cur.execute("SELECT freshness FROM kg_graph_meta WHERE tenant_id=%s", [self.tenant_id])
             row = cur.fetchone()
         return row[0] if row and row[0] else "fresh"
+
+    # ── Entity Mention ───────────────────────────────────────────────────────
+    def _m_table(self) -> str:
+        return f"kg_mention_d{self._dim()}"
+
+    def _ensure_m(self, dim: int) -> None:
+        from django.db import connection
+        t = f"kg_mention_d{dim}"
+        with connection.cursor() as cur:
+            cur.execute(
+                f"CREATE TABLE IF NOT EXISTS {t} ("
+                "tenant_id text NOT NULL, mention_id text NOT NULL, name text, "
+                "entity_type text DEFAULT '', description text DEFAULT '', "
+                "source_document_id text DEFAULT '', "
+                f"embedding vector({dim}), PRIMARY KEY (tenant_id, mention_id))"
+            )
+            cur.execute(f"CREATE INDEX IF NOT EXISTS {t}_tenant ON {t} (tenant_id)")
+            cur.execute(f"CREATE INDEX IF NOT EXISTS {t}_doc ON {t} (tenant_id, source_document_id)")
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS {t}_hnsw ON {t} "
+                "USING hnsw (embedding vector_cosine_ops)"
+            )
+
+    def ensure_mention_vector_index(self, dimensions: int = 1024) -> None:
+        self._ensure_m(dimensions)
+
+    def upsert_mention(self, mention_id, name, entity_type="", description="",
+                       source_document_id="", embedding=None) -> None:
+        from django.db import connection
+        self._ensure_m(self._dim())
+        t = self._m_table()
+        emb = _vec_literal(embedding) if embedding is not None else None
+        with connection.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO {t} (tenant_id, mention_id, name, entity_type, description, "
+                "source_document_id, embedding) VALUES (%s, %s, %s, %s, %s, %s, %s::vector) "
+                "ON CONFLICT (tenant_id, mention_id) DO UPDATE SET "
+                "name=EXCLUDED.name, entity_type=EXCLUDED.entity_type, description=EXCLUDED.description, "
+                "source_document_id=EXCLUDED.source_document_id, "
+                # 임베딩은 None이면 기존값 보존(현 Neo4j CASE WHEN과 동일)
+                f"embedding=COALESCE(EXCLUDED.embedding, {t}.embedding)",
+                [self.tenant_id, mention_id, name, entity_type, description, source_document_id, emb],
+            )
+
+    def query_mentions(self) -> list:
+        from django.db import connection
+        t = self._m_table()
+        try:
+            with connection.cursor() as cur:
+                cur.execute(
+                    f"SELECT mention_id, name, entity_type, description, source_document_id "
+                    f"FROM {t} WHERE tenant_id=%s", [self.tenant_id],
+                )
+                cols = ("mention_id", "name", "entity_type", "description", "source_document_id")
+                return [dict(zip(cols, r)) for r in cur.fetchall()]
+        except Exception:
+            return []
+
+    def mention_embeddings(self) -> list:
+        from django.db import connection
+        t = self._m_table()
+        try:
+            with connection.cursor() as cur:
+                cur.execute(
+                    f"SELECT mention_id, embedding FROM {t} "
+                    "WHERE tenant_id=%s AND embedding IS NOT NULL", [self.tenant_id],
+                )
+                return [{"mention_id": r[0], "embedding": _parse_vec(r[1])} for r in cur.fetchall()]
+        except Exception:
+            return []
+
+    def mentions_without_embedding(self) -> list:
+        from django.db import connection
+        t = self._m_table()
+        try:
+            with connection.cursor() as cur:
+                cur.execute(
+                    f"SELECT mention_id, name, coalesce(description,'') FROM {t} "
+                    "WHERE tenant_id=%s AND embedding IS NULL", [self.tenant_id],
+                )
+                return [{"mention_id": r[0], "name": r[1], "description": r[2]} for r in cur.fetchall()]
+        except Exception:
+            return []
+
+    def set_mention_embedding(self, mention_id: str, embedding: list) -> None:
+        from django.db import connection
+        self._ensure_m(self._dim())
+        t = self._m_table()
+        with connection.cursor() as cur:
+            cur.execute(
+                f"UPDATE {t} SET embedding=%s::vector WHERE tenant_id=%s AND mention_id=%s",
+                [_vec_literal(embedding), self.tenant_id, mention_id],
+            )
+
+    def upsert_mention_same_as(self, id_a: str, id_b: str) -> None:
+        from django.db import connection
+        a, b = sorted([id_a, id_b])  # 무방향 → 정규화(a<b)
+        with connection.cursor() as cur:
+            cur.execute(
+                "INSERT INTO kg_same_as (tenant_id, a, b) VALUES (%s, %s, %s) "
+                "ON CONFLICT (tenant_id, a, b) DO NOTHING",
+                [self.tenant_id, a, b],
+            )
+
+    def query_mention_same_as(self) -> list:
+        from django.db import connection
+        with connection.cursor() as cur:
+            cur.execute("SELECT a, b FROM kg_same_as WHERE tenant_id=%s", [self.tenant_id])
+            return [(r[0], r[1]) for r in cur.fetchall()]
+
+    def search_entities(self, term: str, top_k: int = 10) -> list:
+        """어휘(부분일치) ∪ 의미(벡터) Mention 검색 → SAME_AS 클러스터로 dedup (현 Neo4j와 동일)."""
+        from django.db import connection
+        t = self._m_table()
+        cols = ("mention_id", "name", "entity_type", "description", "source_document_id")
+        by_mid = {}
+        try:
+            with connection.cursor() as cur:
+                cur.execute(
+                    f"SELECT mention_id, name, entity_type, description, source_document_id FROM {t} "
+                    "WHERE tenant_id=%s AND (position(lower(%s) in lower(name))>0 "
+                    "OR position(lower(%s) in lower(coalesce(description,'')))>0)",
+                    [self.tenant_id, term, term],
+                )
+                for r in cur.fetchall():
+                    by_mid[r[0]] = dict(zip(cols, r))
+        except Exception:
+            pass
+        # 의미(벡터) 보강 — 인덱스/임베딩이 없으면 어휘만으로 무중단
+        try:
+            from apps.rag.ingesters import get_embeddings
+            q = _vec_literal(get_embeddings([term], provider=self._embedding_provider())[0])
+            with connection.cursor() as cur:
+                cur.execute(
+                    f"SELECT mention_id, name, entity_type, description, source_document_id FROM {t} "
+                    "WHERE tenant_id=%s AND embedding IS NOT NULL "
+                    "ORDER BY embedding <=> %s::vector LIMIT %s",
+                    [self.tenant_id, q, top_k],
+                )
+                for r in cur.fetchall():
+                    by_mid.setdefault(r[0], dict(zip(cols, r)))
+        except Exception:
+            pass
+
+        # SAME_AS 클러스터로 dedup — 동치 Mention들이 하나의 resolved Entity가 된다.
+        parent = {}
+
+        def _find(x):
+            parent.setdefault(x, x)
+            root = x
+            while parent[root] != root:
+                root = parent[root]
+            while parent[x] != root:
+                parent[x], x = root, parent[x]
+            return root
+
+        for a, b in self.query_mention_same_as():
+            parent.setdefault(a, a)
+            parent.setdefault(b, b)
+            parent[_find(a)] = _find(b)
+
+        by_cluster = {}
+        for mid, data in by_mid.items():
+            by_cluster.setdefault(_find(mid), data)
+        return list(by_cluster.values())
 
 
 class GraphStore:
