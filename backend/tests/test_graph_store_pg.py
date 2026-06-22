@@ -185,3 +185,47 @@ def test_search_entities_tenant_scoped(pg_backend):
     GraphStore(str(tb.id)).upsert_mention("m", "Widget", "x", "B의 것")
     found = GraphStore(str(ta.id)).search_entities("widget")
     assert [m["description"] for m in found] == ["A의 것"]
+
+
+# ── issue 164: RELATED 관계 + neighbors ──────────────────────────────────────
+
+@pytest.mark.django_db
+def test_relations_and_neighbors(pg_backend):
+    """flag=pg: RELATED 1-hop 이웃과 엣지를 {nodes, edges}로 반환한다."""
+    from apps.rag.graph_store import GraphStore
+    gs = GraphStore(str(_tenant(dim=3).id))
+    for mid, nm in [("a", "Amp"), ("b", "Footswitch"), ("c", "Pedal")]:
+        gs.upsert_mention(mid, nm, "feature", "")
+    gs.upsert_mention_relation("a", "b", "controls", "d1")
+    gs.upsert_mention_relation("a", "c", "paired with", "d1")
+
+    sub = gs.neighbors("Amp")
+    node_names = {n["name"] for n in sub["nodes"]}
+    assert node_names == {"Amp", "Footswitch", "Pedal"}  # seed + 1-hop
+    edge_pairs = {(e["source"], e["target"]) for e in sub["edges"]}
+    assert edge_pairs == {("Amp", "Footswitch"), ("Amp", "Pedal")}
+
+
+@pytest.mark.django_db
+def test_query_mention_relations(pg_backend):
+    """RELATED 관계를 mention_id 기준 {source, target}로 반환한다."""
+    from apps.rag.graph_store import GraphStore
+    gs = GraphStore(str(_tenant(dim=3).id))
+    gs.upsert_mention("a", "A", "x", "")
+    gs.upsert_mention("b", "B", "x", "")
+    gs.upsert_mention_relation("a", "b", "rel")
+    assert gs.query_mention_relations() == [{"source": "a", "target": "b"}]
+
+
+@pytest.mark.django_db
+def test_neighbors_tenant_scoped(pg_backend):
+    """neighbors는 테넌트 스코프 — 다른 테넌트의 관계가 새지 않는다."""
+    from apps.rag.graph_store import GraphStore
+    ta, tb = _tenant(dim=3), _tenant(dim=3)
+    ga, gb = GraphStore(str(ta.id)), GraphStore(str(tb.id))
+    ga.upsert_mention("a", "Shared", "x", ""); ga.upsert_mention("a2", "OnlyA", "x", "")
+    ga.upsert_mention_relation("a", "a2", "rel")
+    gb.upsert_mention("b", "Shared", "x", "")  # 같은 이름, 다른 테넌트, 관계 없음
+
+    assert {n["name"] for n in gb.neighbors("Shared")["nodes"]} == {"Shared"}  # 이웃 없음
+    assert gb.neighbors("Shared")["edges"] == []

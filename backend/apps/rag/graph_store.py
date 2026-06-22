@@ -719,6 +719,56 @@ class _PgGraphStore:
             by_cluster.setdefault(_find(mid), data)
         return list(by_cluster.values())
 
+    # ── RELATED 관계 + 1-hop 이웃 ────────────────────────────────────────────
+    def upsert_mention_relation(self, source_id, target_id, description="", source_document_id="") -> None:
+        from django.db import connection
+        with connection.cursor() as cur:
+            cur.execute(
+                "INSERT INTO kg_relation (tenant_id, source_id, target_id, description, source_document_id) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "ON CONFLICT (tenant_id, source_id, target_id) DO UPDATE SET "
+                "description=EXCLUDED.description, source_document_id=EXCLUDED.source_document_id",
+                [self.tenant_id, source_id, target_id, description, source_document_id],
+            )
+
+    def query_mention_relations(self) -> list:
+        from django.db import connection
+        with connection.cursor() as cur:
+            cur.execute(
+                "SELECT source_id, target_id FROM kg_relation WHERE tenant_id=%s", [self.tenant_id]
+            )
+            return [{"source": r[0], "target": r[1]} for r in cur.fetchall()]
+
+    def neighbors(self, name: str) -> dict:
+        """이름의 Mention + 1-hop RELATED 이웃·엣지를 {nodes, edges}로 (tenant 스코프, 이름 기준)."""
+        from django.db import connection
+        m = self._m_table()
+        try:
+            with connection.cursor() as cur:
+                cur.execute(
+                    f"WITH seed AS (SELECT mention_id FROM {m} WHERE tenant_id=%s AND name=%s) "
+                    f"SELECT DISTINCT mm.name, mm.entity_type, mm.description, mm.source_document_id "
+                    f"FROM {m} mm WHERE mm.tenant_id=%s AND (mm.mention_id IN (SELECT mention_id FROM seed) "
+                    "OR mm.mention_id IN ("
+                    "  SELECT target_id FROM kg_relation WHERE tenant_id=%s AND source_id IN (SELECT mention_id FROM seed) "
+                    "  UNION SELECT source_id FROM kg_relation WHERE tenant_id=%s AND target_id IN (SELECT mention_id FROM seed)))",
+                    [self.tenant_id, name, self.tenant_id, self.tenant_id, self.tenant_id],
+                )
+                ncols = ("name", "entity_type", "description", "source_document_id")
+                nodes = [dict(zip(ncols, r)) for r in cur.fetchall()]
+
+                cur.execute(
+                    f"SELECT a.name, b.name, r.description FROM kg_relation r "
+                    f"JOIN {m} a ON a.tenant_id=r.tenant_id AND a.mention_id=r.source_id "
+                    f"JOIN {m} b ON b.tenant_id=r.tenant_id AND b.mention_id=r.target_id "
+                    "WHERE r.tenant_id=%s AND (a.name=%s OR b.name=%s)",
+                    [self.tenant_id, name, name],
+                )
+                edges = [{"source": r[0], "target": r[1], "description": r[2]} for r in cur.fetchall()]
+            return {"nodes": nodes, "edges": edges}
+        except Exception:
+            return {"nodes": [], "edges": []}
+
 
 class GraphStore:
     """백엔드 파사드 — settings.GRAPH_BACKEND(neo4j|pg)로 구현을 고른다. 공개 인터페이스는
