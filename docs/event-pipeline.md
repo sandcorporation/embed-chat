@@ -10,8 +10,8 @@ HITL/세션 라이프사이클은 **카논 도메인 이벤트**로 흐릅니다
 |---|---|
 | `event_store` 테이블 | 영구 append-only 감사(삭제·published 없음). 재생·디버깅의 진실원천 |
 | `event_outbox` 테이블 | 전송 큐(자기완결 봉투). relay 발행 후 prune |
-| `record_event(...)` | 상태 전이 트랜잭션에서 event_store+outbox에 원자적 기록 + `pg_notify` |
-| `relay` (싱글톤) | `LISTEN/NOTIFY`로 outbox를 EventBus로 드레인(부팅 catch-up sweep 포함). **단일 인스턴스**(순서 보존) |
+| `record_event(...)` | 상태 전이 트랜잭션에서 event_store+outbox에 원자적 기록 + 커밋 후 relay wake(`transaction.on_commit`) |
+| `relay` (싱글톤) | outbox를 EventBus로 드레인. **Redis pub/sub wake**(record_event가 커밋 후 발행)로 저지연 깨움 + 부팅/주기 sweep(backstop). **단일 인스턴스**(순서 보존) |
 | `EventBus` 포트 / Redis Streams 어댑터 | publish/consume(group)/ack/claim/dead-letter. 추후 Kafka 어댑터 교체 가능 |
 | 소비자 4종 | `webhook` · `visitor-bridge`(→`session:{id}` hitl_start/end) · `console-bridge`(→`hitl:{tenant}` 델타) · `presence-bridge`(presence 전이) |
 | `processed_events` 테이블 | `(consumer_group, event_id)` 멱등 — at-least-once 중복 방지 |

@@ -75,3 +75,41 @@ def test_failed_publish_leaves_remaining_unpublished_and_retries():
     drain_once(ok)  # sweep/재시도
     assert ok.published == [1, 2]                                          # 남은 것 순서대로 재발행
     assert Outbox.objects.filter(published_at__isnull=True).count() == 0
+
+
+@pytest.mark.django_db(transaction=True)
+def test_record_event_publishes_wake_on_commit(redis_subscribe):
+    """record_event는 커밋 후 Redis pub/sub로 relay wake를 쏜다(폴링 대신 저지연 wake)."""
+    from django.db import transaction
+    from apps.events.store import record_event
+    from apps.events.wake import OUTBOX_WAKE_CHANNEL
+
+    pubsub = redis_subscribe(OUTBOX_WAKE_CHANNEL)
+    with transaction.atomic():
+        record_event("E", "s", "t", {}, topic=_topic())
+    # 커밋 시 on_commit → wake 발행
+    got = False
+    for _ in range(20):
+        m = pubsub.get_message(timeout=0.5)
+        if m and m["type"] == "message":
+            got = True
+            break
+    assert got
+
+
+@pytest.mark.django_db
+def test_run_relay_boot_sweep_drains_and_respects_stop():
+    """run_relay는 부팅 sweep으로 미발행 outbox를 드레인하고 stop을 따른다(pubsub 구독 정상)."""
+    from apps.events.store import record_event
+    from apps.events.relay import run_relay
+    from apps.events.models import Outbox
+    from apps.events.bus import RedisStreamsBus
+
+    topic = _topic()
+    bus = RedisStreamsBus()
+    bus.ensure_group(topic, "g")
+    record_event("E", "s", "t", {"i": 0}, topic=topic)
+
+    run_relay(bus=bus, idle_drain=0.1, stop=lambda: True)  # 부팅 sweep 후 즉시 중단
+
+    assert Outbox.objects.filter(published_at__isnull=True).count() == 0

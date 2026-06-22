@@ -4,9 +4,6 @@
 쓸어담는다(catch-up sweep — NOTIFY 유실 안전망). 단일 인스턴스라 outbox id 순서가 보존된다.
 발행 성공한 행만 prune하고 event_store(감사)는 건드리지 않는다.
 """
-import time
-
-
 def drain_once(bus, batch=200) -> int:
     """미발행 outbox 행을 id 순서로 발행하고 prune한다. 발행 실패 시 그 행부터 남긴다(재발행)."""
     from apps.events.models import Outbox
@@ -20,20 +17,27 @@ def drain_once(bus, batch=200) -> int:
     return published
 
 
-def run_relay(bus=None, poll_interval=1.0, stop=None) -> None:
-    """주기적 드레인 루프(부팅 sweep 포함). 매 틱 미발행 outbox를 드레인하므로 그 자체가
-    연속 catch-up sweep이다. 발행 실패는 다음 틱에 재시도(루프는 죽지 않음).
+def run_relay(bus=None, idle_drain=5.0, stop=None) -> None:
+    """Redis pub/sub wake로 깨어 outbox를 드레인한다(부팅 sweep + 주기 backstop 포함).
 
-    NOTE: record_event는 pg_notify를 쏘지만(저지연 wake 용도), psycopg3에서 Django 연결로
-    LISTEN/select를 안전하게 엮기가 까다로워 v1은 짧은 주기 폴링으로 정확성을 보장한다. NOTIFY
-    기반 sub-second wake는 후속 최적화(전용 psycopg3 연결).
+    record_event가 커밋 후 쏘는 wake를 구독해 저지연으로 드레인하고, wake가 없어도 idle_drain
+    마다 한 번 드레인해 유실된 wake를 회수한다(정합성 backstop). 발행 실패는 다음 깨움에 재시도.
+    pg LISTEN/NOTIFY 대신 이미 쓰는 Redis pub/sub라 psycopg3 비호환·플랫폼 문제가 없다.
     """
     from apps.events.bus import RedisStreamsBus
+    from apps.events.wake import OUTBOX_WAKE_CHANNEL, _redis
 
     bus = bus or RedisStreamsBus()
-    while stop is None or not stop():
-        try:
-            drain_once(bus)
-        except Exception:
-            pass
-        time.sleep(poll_interval)
+    pubsub = _redis().pubsub()
+    pubsub.subscribe(OUTBOX_WAKE_CHANNEL)
+    try:
+        drain_once(bus)  # 부팅 catch-up sweep
+        while stop is None or not stop():
+            pubsub.get_message(timeout=idle_drain)  # wake 시 즉시 반환, 없으면 idle_drain마다(backstop)
+            try:
+                drain_once(bus)
+            except Exception:
+                pass
+    finally:
+        pubsub.unsubscribe(OUTBOX_WAKE_CHANNEL)
+        pubsub.close()

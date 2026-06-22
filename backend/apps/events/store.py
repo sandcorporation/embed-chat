@@ -5,11 +5,8 @@ event_store(영구 감사)와 outbox(전송 큐)에 둘 다 insert한다. 호출
 """
 import uuid
 from django.conf import settings
-from django.db import connection
+from django.db import transaction
 from django.utils import timezone
-
-# relay가 LISTEN하는 NOTIFY 채널. pg_notify는 커밋 시 전달되므로 트랜잭션 원자성과 일치한다.
-OUTBOX_NOTIFY_CHANNEL = "event_outbox"
 
 
 def default_topic() -> str:
@@ -42,7 +39,8 @@ def record_event(event_type, aggregate_id, tenant_id, payload=None, *,
     Outbox.objects.create(
         event_id=event_id, topic=topic, key=str(key or aggregate_id), envelope=envelope,
     )
-    # relay를 깨운다. pg_notify는 COMMIT 시 전달되므로, 트랜잭션이 롤백되면 NOTIFY도 안 나간다.
-    with connection.cursor() as cur:
-        cur.execute("SELECT pg_notify(%s, %s)", [OUTBOX_NOTIFY_CHANNEL, str(event_id)])
+    # relay wake는 반드시 커밋 후에 발행한다 — 그래야 relay가 깨서 outbox를 조회할 때 이 행이
+    # 보인다(롤백되면 wake도 안 나감). 정합성은 outbox+relay sweep이 보장, wake는 저지연 신호.
+    from apps.events.wake import notify_outbox
+    transaction.on_commit(notify_outbox)
     return envelope
