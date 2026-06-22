@@ -67,7 +67,7 @@ def _second_agent_token(tenant):
 
 @pytest.mark.django_db
 def test_takeover_creates_claimed_escalation_and_notifies_visitor(
-    client, tenant_agent_token, tenant_with_key, redis_subscribe
+    client, tenant_agent_token, tenant_with_key, redis_subscribe, drain_events
 ):
     """takeover가 자동-claimed Escalation(trigger=agent)을 만들고 is_hitl을 켜고 hitl_start를 publish한다."""
     from apps.chat.models import ChatSession
@@ -89,7 +89,8 @@ def test_takeover_creates_claimed_escalation_and_notifies_visitor(
     session.refresh_from_db()
     assert session.is_hitl is True
 
-    # 방문자에게 상담원 연결(hitl_start)이 통지된다
+    # 컷오버(151): hitl_start는 SessionTakenOver 이벤트의 visitor-bridge 소비자가 발행한다.
+    drain_events()
     seen = False
     for _ in range(20):
         msg = pubsub.get_message(timeout=0.5)

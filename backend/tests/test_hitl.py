@@ -161,7 +161,11 @@ def test_needs_hitl_false_saves_assistant_message(tenant_with_key):
 
 
 @pytest.mark.django_db
-def test_hitl_start_sse_published_on_escalation(tenant_with_key, redis_subscribe):
+def test_hitl_start_sse_published_on_escalation(tenant_with_key, redis_subscribe, drain_events):
+    """AI escalation → SessionEscalated 이벤트 → visitor-bridge 소비자가 hitl_start를 발행한다.
+
+    컷오버(issue 151) 후 hitl_start는 직접이 아니라 이벤트 소비자가 단일 원천으로 낸다.
+    """
     from apps.agent.graph import run_chat_agent
 
     tenant, _ = tenant_with_key
@@ -171,6 +175,7 @@ def test_hitl_start_sse_published_on_escalation(tenant_with_key, redis_subscribe
     pubsub = redis_subscribe(f"session:{session.id}")
 
     run_chat_agent(session, "상담원 연결해 주세요")
+    drain_events()  # 전이 이벤트 → relay → 소비자 인프로세스 플러시
 
     data = get_redis_message(pubsub)
     assert data is not None, "hitl_start 이벤트가 Redis에 발행되지 않았습니다"

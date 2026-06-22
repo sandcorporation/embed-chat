@@ -128,8 +128,8 @@ def test_webhook_not_sent_when_type_is_empty(tenant_with_key, webhook_server):
 
 
 @pytest.mark.django_db
-def test_webhook_sent_when_escalation_created_by_agent(tenant_with_key, webhook_server):
-    """에이전트가 에스컬레이션을 생성하면 웹훅이 실제로 전송된다 (Celery ALWAYS_EAGER)."""
+def test_webhook_sent_when_escalation_created_by_agent(tenant_with_key, webhook_server, drain_events):
+    """AI escalation → SessionEscalated 이벤트 → webhook 소비자가 웹훅을 전송한다(컷오버 151)."""
     from apps.agent.graph import run_chat_agent
     from apps.chat.models import ChatSession
     from apps.escalation.models import Escalation
@@ -146,6 +146,7 @@ def test_webhook_sent_when_escalation_created_by_agent(tenant_with_key, webhook_
         visitor_id="v-webhook-agent",    )
 
     run_chat_agent(session, "상담원 연결해 주세요")
+    drain_events()  # 이벤트 → relay → webhook 소비자
 
     escalation = Escalation.objects.filter(session=session).first()
     assert escalation is not None

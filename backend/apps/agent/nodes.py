@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from apps.agent import llm as llm_boundary
 from apps.agent.providers import get_chat_provider
-from apps.chat.sse import publish_token, publish_done, publish_hitl_start, publish_hitl_new
+from apps.chat.sse import publish_token, publish_done
 
 
 # 플랫폼이 항상 주입하는 인젝션 하드닝 지침(Tenant base prompt와 별개). 아키텍처가 이미
@@ -200,35 +200,41 @@ def call_llm_plain(state: dict) -> dict:
 
 
 def create_escalation_node(state: dict) -> dict:
+    """AI escalation 전이 — 상태 변경 + SessionEscalated 이벤트를 한 트랜잭션으로 기록한다(issue 151).
+
+    방문자 알림(hitl_start)·콘솔 델타·webhook은 더 이상 직접 publish하지 않고, 소비자
+    (visitor/console-bridge·webhook)가 이 이벤트에서 파생한다(단일 원천, dual-write 제거).
+    """
+    from django.db import transaction
     from apps.chat.models import ChatSession, ChatMessage
     from apps.escalation.models import Escalation
+    from apps.events.store import record_event
+    from apps.events.types import SESSION_ESCALATED
 
-    session = ChatSession.objects.get(id=state["session_id"])
-    session.is_hitl = True
-    session.save(update_fields=["is_hitl"])
-
-    # AI가 만든 전환 멘트가 있으면 사용자 대화에 남긴다(이미 SSE로 스트리밍됨).
     response = state.get("assistant_response") or ""
-    if response:
-        ChatMessage.objects.create(
-            session=session, role=ChatMessage.ROLE_ASSISTANT, content=response
+    with transaction.atomic():
+        session = ChatSession.objects.get(id=state["session_id"])
+        session.is_hitl = True
+        session.save(update_fields=["is_hitl"])
+        # AI가 만든 전환 멘트가 있으면 사용자 대화에 남긴다(이미 SSE로 스트리밍됨).
+        if response:
+            ChatMessage.objects.create(
+                session=session, role=ChatMessage.ROLE_ASSISTANT, content=response
+            )
+        escalation = Escalation.objects.create(
+            session=session,
+            trigger_type=Escalation.TRIGGER_AI,
+            reason=state.get("hitl_reason", ""),
+            status=Escalation.STATUS_PENDING,
         )
-
-    escalation = Escalation.objects.create(
-        session=session,
-        trigger_type=Escalation.TRIGGER_AI,
-        reason=state.get("hitl_reason", ""),
-        status=Escalation.STATUS_PENDING,
-    )
-
-    publish_hitl_start(state["session_id"])
-    publish_hitl_new(state["tenant_id"], state["session_id"], state.get("hitl_reason", ""))
-
-    try:
-        from apps.escalation.tasks import dispatch_webhook_task
-        dispatch_webhook_task.delay(str(escalation.id))
-    except Exception:
-        pass
+        record_event(
+            SESSION_ESCALATED, aggregate_id=state["session_id"], tenant_id=state["tenant_id"],
+            payload={
+                "escalation_id": str(escalation.id),
+                "reason": state.get("hitl_reason", ""),
+                "trigger_type": Escalation.TRIGGER_AI,
+            },
+        )
 
     messages = [{"role": "user", "content": state["user_message"]}]
     if response:

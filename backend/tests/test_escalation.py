@@ -277,7 +277,7 @@ def test_visitor_message_in_hitl_session_publishes_to_hitl_channel(client, tenan
 
 
 @pytest.mark.django_db
-def test_resolve_escalation(client, tenant_with_key, tenant_agent_token, redis_subscribe):
+def test_resolve_escalation(client, tenant_with_key, tenant_agent_token, redis_subscribe, drain_events):
     from apps.escalation.models import Escalation
 
     tenant, _ = tenant_with_key
@@ -296,6 +296,8 @@ def test_resolve_escalation(client, tenant_with_key, tenant_agent_token, redis_s
     assert esc.resolved_at is not None
     assert session.is_hitl is False
 
+    # 컷오버(151): hitl_end는 EscalationResolved 이벤트의 visitor-bridge 소비자가 발행한다.
+    drain_events()
     data = get_redis_message(pubsub)
     assert data is not None, "hitl_end 이벤트가 Redis에 발행되지 않았습니다"
     assert data["type"] == "hitl_end"

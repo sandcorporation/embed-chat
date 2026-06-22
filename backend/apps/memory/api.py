@@ -112,7 +112,8 @@ def takeover_session(request, session_id: str):
     from django.db import transaction
     from apps.chat.models import ChatSession
     from apps.escalation.models import Escalation, EscalationClaim
-    from apps.chat.sse import publish_hitl_start, publish_hitl_new
+    from apps.events.store import record_event
+    from apps.events.types import SESSION_TAKEN_OVER
 
     tenant = request.auth.tenant
     agent = request.auth
@@ -148,9 +149,12 @@ def takeover_session(request, session_id: str):
 
         session.is_hitl = True
         session.save(update_fields=["is_hitl"])
+        # 방문자 hitl_start·콘솔 델타는 SessionTakenOver 이벤트의 소비자가 발행한다(issue 151).
+        record_event(
+            SESSION_TAKEN_OVER, aggregate_id=str(session.id), tenant_id=str(tenant.id),
+            payload={"escalation_id": str(esc.id), "claimed_by": agent.username},
+        )
 
-    publish_hitl_start(str(session.id))
-    publish_hitl_new(str(tenant.id), str(session.id), "상담원이 직접 시작한 상담")
     return 200, {"escalation_id": str(esc.id)}
 
 

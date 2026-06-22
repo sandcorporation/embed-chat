@@ -4,7 +4,9 @@ from ninja import Router, Schema
 from django.http import StreamingHttpResponse
 
 from apps.tenants.auth import tenant_agent_auth
-from apps.chat.sse import publish_hitl_message, publish_hitl_end, publish_hitl_new
+from apps.chat.sse import publish_hitl_message
+from apps.events.store import record_event
+from apps.events.types import ESCALATION_CLAIMED, ESCALATION_RESOLVED
 
 escalation_router = Router(tags=["escalations"], auth=tenant_agent_auth)
 
@@ -67,7 +69,7 @@ def list_escalations(request):
 @escalation_router.post("/{escalation_id}/claim", response={200: ActionOut, 404: DetailOut, 409: DetailOut})
 def claim_escalation(request, escalation_id: str):
     from apps.escalation.models import Escalation, EscalationClaim
-    from django.db import IntegrityError
+    from django.db import IntegrityError, transaction
 
     tenant = request.auth.tenant
     try:
@@ -76,17 +78,17 @@ def claim_escalation(request, escalation_id: str):
         return 404, {"detail": "Not found"}
 
     try:
-        EscalationClaim.objects.create(
-            escalation=esc,
-            claimed_by=request.auth.username,
-        )
+        with transaction.atomic():
+            EscalationClaim.objects.create(escalation=esc, claimed_by=request.auth.username)
+            esc.status = Escalation.STATUS_CLAIMED
+            esc.save(update_fields=["status"])
+            # 콘솔 델타는 EscalationClaimed 이벤트의 console-bridge 소비자가 발행한다(issue 151).
+            record_event(
+                ESCALATION_CLAIMED, aggregate_id=str(esc.session_id), tenant_id=str(tenant.id),
+                payload={"escalation_id": str(esc.id), "claimed_by": request.auth.username},
+            )
     except IntegrityError:
         return 409, {"detail": "Already claimed"}
-
-    esc.status = Escalation.STATUS_CLAIMED
-    esc.save(update_fields=["status"])
-
-    publish_hitl_new(str(tenant.id), str(esc.session_id), esc.reason)
 
     return {"status": "claimed"}
 
@@ -167,6 +169,7 @@ def send_typing_indicator(request, escalation_id: str):
 @escalation_router.post("/{escalation_id}/resolve", response={200: ActionOut, 404: DetailOut})
 def resolve_escalation(request, escalation_id: str):
     from apps.escalation.models import Escalation
+    from django.db import transaction
 
     tenant = request.auth.tenant
     try:
@@ -176,15 +179,18 @@ def resolve_escalation(request, escalation_id: str):
     except Escalation.DoesNotExist:
         return 404, {"detail": "Not found"}
 
-    esc.status = Escalation.STATUS_RESOLVED
-    esc.resolved_at = timezone.now()
-    esc.save(update_fields=["status", "resolved_at"])
-
-    session = esc.session
-    session.is_hitl = False
-    session.save(update_fields=["is_hitl"])
-
-    publish_hitl_end(str(session.id))
+    with transaction.atomic():
+        esc.status = Escalation.STATUS_RESOLVED
+        esc.resolved_at = timezone.now()
+        esc.save(update_fields=["status", "resolved_at"])
+        session = esc.session
+        session.is_hitl = False
+        session.save(update_fields=["is_hitl"])
+        # 방문자 hitl_end는 EscalationResolved 이벤트의 visitor-bridge 소비자가 발행한다(issue 151).
+        record_event(
+            ESCALATION_RESOLVED, aggregate_id=str(session.id), tenant_id=str(tenant.id),
+            payload={"escalation_id": str(esc.id)},
+        )
 
     return {"status": "resolved"}
 
