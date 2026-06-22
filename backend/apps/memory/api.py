@@ -20,6 +20,140 @@ class SessionMessageOut(Schema):
     created_at: str
 
 
+class SessionListItemOut(Schema):
+    session_id: str
+    visitor_id: str
+    is_hitl: bool
+    escalation_status: str = ""   # "" | pending | claimed (활성 escalation이 있으면 그 상태)
+    active: bool                   # presence(SSE 연결됨)
+    created_at: str
+    last_activity: str
+
+
+# 콘솔 기본 작업 집합: 최근 N일 세션 + escalation/활성은 창과 무관하게 항상 포함(issue 139).
+SESSION_WINDOW_DAYS = 7
+
+
+@session_router.get("/", response=List[SessionListItemOut])
+def list_sessions(request, limit: int = 50, offset: int = 0):
+    """세션 콘솔용 전체 세션 목록 — escalation(pending→claimed) → 활성(SSE) → 나머지(최근순).
+
+    escalation·활성 세션은 최근창 밖이라도 상단에 고정. 나머지는 최근 N일 + 페이지네이션.
+    """
+    from datetime import timedelta
+    from django.utils import timezone
+    from django.db.models import Max, Q
+    from apps.chat.models import ChatSession
+    from apps.escalation.models import Escalation
+    from apps.chat import presence
+
+    tenant = request.auth.tenant
+    esc_map = {
+        str(sid): status
+        for sid, status in Escalation.objects.filter(
+            session__tenant_id=tenant.id,
+            status__in=[Escalation.STATUS_PENDING, Escalation.STATUS_CLAIMED],
+        ).values_list("session_id", "status")
+    }
+    active_ids = presence.active_sessions(str(tenant.id))
+    pinned_ids = set(esc_map) | active_ids
+    cutoff = timezone.now() - timedelta(days=SESSION_WINDOW_DAYS)
+
+    qs = (
+        ChatSession.objects.filter(tenant_id=tenant.id)
+        .filter(Q(created_at__gte=cutoff) | Q(id__in=pinned_ids))
+        .annotate(last_msg=Max("messages__created_at"))
+    )
+
+    def tier(sid: str) -> int:
+        st = esc_map.get(sid)
+        if st == Escalation.STATUS_PENDING:
+            return 0
+        if st == Escalation.STATUS_CLAIMED:
+            return 1
+        return 2 if sid in active_ids else 3
+
+    rows = []
+    for s in qs:
+        sid = str(s.id)
+        last = s.last_msg or s.created_at
+        rows.append({
+            "session_id": sid,
+            "visitor_id": s.visitor_id,
+            "is_hitl": s.is_hitl,
+            "escalation_status": esc_map.get(sid, ""),
+            "active": sid in active_ids,
+            "created_at": s.created_at.isoformat(),
+            "last_activity": last.isoformat(),
+            "_tier": tier(sid),
+            "_last": last,
+        })
+    rows.sort(key=lambda r: r["_last"], reverse=True)  # 최근순
+    rows.sort(key=lambda r: r["_tier"])                # 계층 우선(stable)
+    page = rows[offset:offset + limit]
+    for r in page:
+        r.pop("_tier"); r.pop("_last")
+    return page
+
+
+class TakeoverOut(Schema):
+    escalation_id: str
+
+
+@session_router.post("/{session_id}/takeover", response={200: TakeoverOut, 404: DetailOut, 409: DetailOut})
+def takeover_session(request, session_id: str):
+    """상담원이 임의 세션의 상담을 직접 시작한다(issue 140).
+
+    자동-claimed Escalation(trigger=agent)을 만들고 is_hitl을 켜 방문자 메시지를 사람에게
+    라우팅하며, 방문자에게 '상담원 연결됨'을 알린다. 멱등(같은 상담원 재진입은 기존 escalation
+    반환) + 동시성(다른 상담원이 이미 잡은 세션은 409). 미claim된 AI escalation은 이어받는다.
+    select_for_update로 세션을 잠가 동시 takeover 경쟁을 직렬화한다(영업시간과 무관).
+    """
+    from django.db import transaction
+    from apps.chat.models import ChatSession
+    from apps.escalation.models import Escalation, EscalationClaim
+    from apps.chat.sse import publish_hitl_start, publish_hitl_new
+
+    tenant = request.auth.tenant
+    agent = request.auth
+
+    with transaction.atomic():
+        try:
+            session = ChatSession.objects.select_for_update().get(id=session_id, tenant_id=tenant.id)
+        except ChatSession.DoesNotExist:
+            return 404, {"detail": "Not found"}
+
+        active = (
+            Escalation.objects
+            .filter(session=session, status__in=[Escalation.STATUS_PENDING, Escalation.STATUS_CLAIMED])
+            .first()
+        )
+        if active is not None:
+            claim = EscalationClaim.objects.filter(escalation=active).first()
+            if claim is None:
+                # 미claim(AI pending) → 이 상담원이 이어받는다
+                EscalationClaim.objects.create(escalation=active, claimed_by=agent.username)
+                active.status = Escalation.STATUS_CLAIMED
+                active.save(update_fields=["status"])
+            elif claim.claimed_by != agent.username:
+                return 409, {"detail": "Already claimed by another agent"}
+            esc = active  # 같은 상담원 재진입은 멱등
+        else:
+            esc = Escalation.objects.create(
+                session=session,
+                trigger_type=Escalation.TRIGGER_AGENT,
+                status=Escalation.STATUS_CLAIMED,
+            )
+            EscalationClaim.objects.create(escalation=esc, claimed_by=agent.username)
+
+        session.is_hitl = True
+        session.save(update_fields=["is_hitl"])
+
+    publish_hitl_start(str(session.id))
+    publish_hitl_new(str(tenant.id), str(session.id), "상담원이 직접 시작한 상담")
+    return 200, {"escalation_id": str(esc.id)}
+
+
 class VisitorOut(Schema):
     visitor_id: str
 

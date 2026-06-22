@@ -50,6 +50,8 @@ import {
 import {
   appsMemoryApiGetSessionMessages,
   appsMemoryApiGetSessionCheckpoint,
+  appsMemoryApiListSessions,
+  appsMemoryApiTakeoverSession,
 } from './generated/endpoints/sessions/sessions'
 import {
   appsEscalationApiListEscalations,
@@ -201,6 +203,22 @@ export async function listVisitorSessions(visitorId: string) {
 export async function getSessionMessages(sessionId: string) {
   return (await appsMemoryApiGetSessionMessages(sessionId)).data
 }
+// 세션 콘솔: 전체 세션(escalation→활성→나머지) 목록(issue 139).
+export async function listSessions(limit = 50, offset = 0) {
+  return (await appsMemoryApiListSessions({ limit, offset })).data
+}
+// 임의 세션 takeover — 자동-claimed escalation 생성. 409(다른 상담원 점유) 정규화(issue 140).
+export async function takeoverSession(
+  sessionId: string,
+): Promise<{ ok: boolean; status: number; escalation_id?: string }> {
+  try {
+    const r = await appsMemoryApiTakeoverSession(sessionId)
+    return { ok: true, status: r.status, escalation_id: (r.data as { escalation_id: string }).escalation_id }
+  } catch (e) {
+    if (e instanceof HttpError) return { ok: false, status: e.status }
+    throw e
+  }
+}
 export async function getSessionCheckpoint(sessionId: string) {
   try {
     return (await appsMemoryApiGetSessionCheckpoint(sessionId)).data
@@ -261,6 +279,9 @@ export function openEscalationStream(onEvent: (event: any) => void): StreamHandl
     es.addEventListener('hitl_claimed', (e) => onEvent({ ...JSON.parse((e as MessageEvent).data), type: 'hitl_claimed' }))
     es.addEventListener('hitl_resolved', (e) => onEvent({ ...JSON.parse((e as MessageEvent).data), type: 'hitl_resolved' }))
     es.addEventListener('visitor_message', (e) => onEvent({ ...JSON.parse((e as MessageEvent).data), type: 'visitor_message' }))
+    // presence delta(issue 138) — 세션 콘솔 활성 계층 라이브 갱신
+    es.addEventListener('session_connected', (e) => onEvent({ ...JSON.parse((e as MessageEvent).data), type: 'session_connected' }))
+    es.addEventListener('session_disconnected', (e) => onEvent({ ...JSON.parse((e as MessageEvent).data), type: 'session_disconnected' }))
   }
   connect()
   const unsubscribe = onAccessChange('agent', connect)

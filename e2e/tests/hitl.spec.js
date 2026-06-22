@@ -111,4 +111,33 @@ test.describe('HITL 전체 플로우', () => {
 
     await expect(page.locator('button:has-text("AI에게 넘기기")').first()).toBeVisible({ timeout: 5000 })
   })
+
+  test('상담원이 escalation 없는 임의 세션을 직접 takeover할 수 있다', async ({ page, context }) => {
+    // 방문자가 일반 메시지로 세션을 연다(escalation 아님) — '상담원' 단어를 쓰지 않는다.
+    const visitorId = `take-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const visitor = await context.newPage()
+    await visitor.goto(`${WIDGET_URL}/embed/chatbot/${ctx.slug}/?visitor_id=${visitorId}`)
+    const ta = visitor.locator('textarea[placeholder="메시지를 입력하세요..."]')
+    await expect(ta).toBeEnabled({ timeout: 10000 })  // SSE 연결 → 세션 생성
+    await ta.fill('안녕하세요, 영업시간이 궁금해요')
+    await visitor.click('button:has-text("전송")')
+
+    // 어드민 에이전트 로그인 → 상담 콘솔
+    await page.goto(`${ADMIN_URL}/admin-ui/tenant`)
+    await page.fill('input[placeholder="Tenant 이름"]', ctx.tenantName)
+    await page.fill('input[placeholder="사용자명"]', ctx.agentUsername)
+    await page.fill('input[placeholder="비밀번호"]', ctx.agentPassword)
+    await page.click('button[type="submit"]')
+    await expect(page.locator('a:has-text("문서")')).toBeVisible({ timeout: 10000 })
+    await page.click('a:has-text("HITL")')
+
+    // "다른 세션" 목록에서 해당 방문자 행의 "상담 시작"으로 takeover
+    const row = page.locator('li', { hasText: visitorId })
+    await expect(row).toBeVisible({ timeout: 15000 })
+    await row.locator('button:has-text("상담 시작")').click()
+
+    // takeover → escalation 카드로 승격 → AI에게 넘기기(resolve) 노출
+    await expect(page.locator('button:has-text("AI에게 넘기기")').first()).toBeVisible({ timeout: 10000 })
+    await visitor.close()
+  })
 })

@@ -99,21 +99,24 @@ START → local_search → call_llm ─(context_sufficient=False)─→ source_s
                            └──────────────→ save_messages     → END
 ```
 
-채팅 그래프는 **Tenant의 `hitl_enabled` 토글에 따라 다르게 컴파일**됩니다. HITL-OFF면 `call_llm`이 `needs_hitl` 필드 없는 response-only 스키마를 쓰고 `save_messages`로 직행해, escalation 분기 자체가 없습니다(지키지 못할 전환 멘트 누수를 구조적으로 차단).
+채팅 그래프는 **Tenant의 `hitl_enabled` 토글 + 영업시간에 따라 다르게 컴파일**됩니다(`effective_hitl = hitl_enabled AND business_hours.is_open(now)`). HITL-OFF(또는 상담시간 외)면 `call_llm`이 `needs_hitl` 필드 없는 response-only 스키마를 쓰고 `save_messages`로 직행해, escalation 분기 자체가 없습니다(지키지 못할 전환 멘트 누수를 구조적으로 차단).
 
 - **실행 격리**: chat 1턴은 gevent web 워커가 아니라 **전용 Celery `worker-chat`**(chat 큐)에서 실행되어 블로킹이 SSE 서빙을 얼리지 않습니다. 동일 세션 동시 실행은 Redis 락으로 직렬화하며, 공개 URL 남용은 (tenant, visitor)당 레이트리밋으로 막습니다(at-most-once).
 - **Conversation Memory**: 단일 ChatSession 내 히스토리는 **LangGraph Checkpoint**(PostgreSQL)로 관리됩니다. `thread_id = session_id`라 수동 로드 없이 이전 state가 자동 복원됩니다.
 - **Visitor Memory**: ChatSession을 넘어 축적되는 장기 기억. 대화 중 LLM이 자동 추출하며 어드민에서 조회·수정·삭제할 수 있습니다.
 - **프롬프트 하드닝**(인젝션 방어): 비신뢰 입력(RAG·메모리·Visitor 메시지)을 `UNTRUSTED_DATA` 구역으로 격리·라벨링하고, 플랫폼이 anti-disclosure 지침을 항상 주입합니다. 테넌트 스코프 RAG와 무도구 에이전트가 크로스테넌트·행동 위험을 이미 차단합니다.
+- **프롬프트 캐싱 친화 구조**: 테넌트-불변 prefix(구조화 출력 tool 스키마 + Base System Prompt + 보안 지침)를 안정 prefix로 고정하고, 매 턴 바뀌는 휘발성(RAG·메모리·운영 안내)은 마지막 사용자 턴으로 내려 모든 세션·턴에서 prefix가 재사용되게 합니다. Anthropic provider는 안정 블록에 `cache_control` 분기점 1개를 주입(boundary에서 provider-aware), OpenAI·OpenRouter는 자동 prefix 캐싱을 탑니다.
 - **스트리밍**: 토큰·HITL 이벤트는 Redis pub/sub(`session:{id}` 채널)을 통해 SSE로 전달됩니다([ADR-0001](./docs/adr/0001-sse-redis-pubsub.md)). 다중 API 인스턴스에서도 스트리밍이 보장됩니다.
 
 ### HITL (Human-in-the-Loop)
 
 - **활성화**: Tenant가 `hitl_enabled`로 켜고 끕니다(기본 켜짐). 끄면 AI 전용으로 운영되며 escalation이 발생하지 않습니다.
 - **트리거**: (1) LLM이 구조화 출력으로 `needs_hitl: true` 반환(불확실 판단 + 상담원 요청 키워드 통합), (2) 방문자의 명시적 상담원 요청.
-- **상태**: Escalation `pending` → `claimed` → `resolved`.
+- **상태**: Escalation `pending` → `claimed` → `resolved`. trigger_type은 `ai`/`visitor`/`agent`(수동 takeover).
 - HITL 모드에서는 AI가 침묵하고, 팀원이 "수락하기"로 클레임한 뒤 메시지를 보냅니다. "AI에게 넘기기"로 다시 AI 모드로 복귀합니다.
 - Escalation 발생 시 Slack/Discord/Generic **웹훅**으로 알림을 보냅니다.
+- **상담 가능 시간(영업시간)**: Tenant가 타임존 + 요일별 시간창 + 휴일(예외 날짜)을 설정하면, 그 시간 외에는 그래프가 plain으로 컴파일돼 **AI 자동 escalation이 일어나지 않고** 운영 안내만 곁들여 AI가 계속 답합니다. 미설정 시 24/7(opt-in 하위호환). 수동 takeover는 시간과 무관하게 항상 가능합니다.
+- **세션 콘솔 + 임의 takeover**: HITL 탭이 세션 콘솔로 진화 — 상단에 진행 중 상담(escalation) 카드, 하단에 **다른 세션 목록**(SSE 연결된 활성 세션 우선)을 보여줍니다. 팀원은 escalation이 없는 임의 세션도 **"상담 시작"으로 직접 takeover**(자동-claimed `agent` escalation)할 수 있습니다. 활성 여부는 Redis presence(SSE keepalive로 갱신되는 TTL = 자가치유)로 판단하고, 연결/해제는 `hitl:{tenant}` 채널로 콘솔에 실시간 push됩니다.
 
 ### Visitor 접근 & 신원 (공개 Slug URL)
 

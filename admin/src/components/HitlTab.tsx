@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, ChangeEvent } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { listEscalations, claimEscalation, sendEscalationMessage, resolveEscalation, openEscalationStream, sendTypingIndicator, getEscalationMessages } from '../api'
+import { listEscalations, claimEscalation, sendEscalationMessage, resolveEscalation, openEscalationStream, sendTypingIndicator, getEscalationMessages, listSessions, takeoverSession } from '../api'
 import type { StreamHandle } from '../api'
-import type { EscalationOut } from '../generated/model'
+import type { EscalationOut, SessionListItemOut } from '../generated/model'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -107,17 +107,28 @@ function EscalationCard({ esc, onUpdate, incomingMessage }: { esc: EscalationOut
   )
 }
 
-// /tenant/hitl(목록) · /tenant/hitl/:escalationId(특정 상담 딥링크). SSE·claim/resolve는 보존(ADR-0014).
+// 세션 콘솔(ADR-0017): 상단 = 진행 중 상담(escalation 카드, claim/message/resolve 보존),
+// 하단 = 다른 세션 목록(활성 먼저) + 임의 takeover. /tenant/hitl/:escalationId는 단독 딥링크.
 export default function HitlTab() {
   const { escalationId } = useParams<{ escalationId?: string }>()
   const navigate = useNavigate()
   const [escalations, setEscalations] = useState<EscalationOut[]>([])
+  const [sessions, setSessions] = useState<SessionListItemOut[]>([])
+  const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [incomingBySession, setIncomingBySession] = useState<Record<string, ChatMsg>>({})
+  const [takingOver, setTakingOver] = useState<string | null>(null)
   const esRef = useRef<StreamHandle | null>(null)
 
   const refresh = () => {
-    listEscalations().then(data => { setEscalations(data); setLoading(false) })
+    Promise.all([listEscalations(), listSessions()]).then(([es, ss]) => {
+      const escs = Array.isArray(es) ? es : []
+      const sess = Array.isArray(ss) ? ss : []
+      setEscalations(escs)
+      setSessions(sess)
+      setActiveIds(new Set(sess.filter(s => s.active).map(s => s.session_id)))
+      setLoading(false)
+    })
   }
 
   useEffect(() => {
@@ -126,8 +137,12 @@ export default function HitlTab() {
       if (event.type === 'visitor_message') {
         const msg: ChatMsg = { role: 'user', content: event.content, created_at: new Date().toISOString() }
         setIncomingBySession(prev => ({ ...prev, [event.session_id]: msg }))
+      } else if (event.type === 'session_connected') {
+        setActiveIds(prev => new Set(prev).add(event.session_id))
+      } else if (event.type === 'session_disconnected') {
+        setActiveIds(prev => { const n = new Set(prev); n.delete(event.session_id); return n })
       } else {
-        refresh()
+        refresh() // hitl_new/claimed/resolved 등 → 목록 갱신
       }
     })
     return () => esRef.current?.close()
@@ -135,22 +150,38 @@ export default function HitlTab() {
 
   if (loading) return <p className="text-sm text-muted-foreground">로딩 중...</p>
 
-  const visible = escalationId ? escalations.filter(e => e.id === escalationId) : escalations
+  const escSessionIds = new Set(escalations.map(e => e.session_id))
+  const visibleEsc = escalationId ? escalations.filter(e => e.id === escalationId) : escalations
+  // 다른 세션 = 진행 중 상담이 없는 세션. 활성(SSE) 먼저, 그다음 최근순.
+  const otherSessions = escalationId ? [] : sessions
+    .filter(s => !escSessionIds.has(s.session_id))
+    .sort((a, b) =>
+      (Number(activeIds.has(b.session_id)) - Number(activeIds.has(a.session_id))) ||
+      b.last_activity.localeCompare(a.last_activity))
+
+  const handleTakeover = async (sessionId: string) => {
+    setTakingOver(sessionId)
+    const r = await takeoverSession(sessionId)
+    setTakingOver(null)
+    if (r.status === 409) { alert('이미 다른 상담원이 상담 중인 세션입니다.'); return }
+    if (r.ok) refresh()
+  }
 
   return (
     <div className="max-w-3xl">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">HITL 상담 세션</h3>
+        <h3 className="text-sm font-semibold">상담 콘솔</h3>
         <div className="flex gap-2">
           {escalationId && <Button size="sm" variant="ghost" onClick={() => navigate('/tenant/hitl')}>← 전체 보기</Button>}
           <Button size="sm" variant="outline" onClick={refresh}>새로고침</Button>
         </div>
       </div>
 
-      {visible.length === 0 ? (
-        <p className="text-sm text-muted-foreground">활성 세션이 없습니다.</p>
+      {/* ── 진행 중 상담(escalation) ── */}
+      {visibleEsc.length === 0 ? (
+        <p className="text-sm text-muted-foreground">진행 중인 상담이 없습니다.</p>
       ) : (
-        visible.map(esc => (
+        visibleEsc.map(esc => (
           <div key={esc.id}>
             {!escalationId && (
               <div className="mb-1 flex justify-end">
@@ -160,6 +191,34 @@ export default function HitlTab() {
             <EscalationCard esc={esc} onUpdate={refresh} incomingMessage={incomingBySession[esc.session_id] ?? null} />
           </div>
         ))
+      )}
+
+      {/* ── 다른 세션(임의 takeover) ── */}
+      {!escalationId && (
+        <div className="mt-8 border-t border-border pt-4">
+          <h4 className="mb-2 text-sm font-semibold">다른 세션</h4>
+          {otherSessions.length === 0 ? (
+            <p className="text-xs text-muted-foreground">표시할 다른 세션이 없습니다.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {otherSessions.map(s => {
+                const isActive = activeIds.has(s.session_id)
+                return (
+                  <li key={s.session_id}
+                    className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
+                    <span className="font-medium">{s.visitor_id}</span>
+                    <Badge variant={isActive ? 'success' : 'secondary'}>{isActive ? '접속중' : '유휴'}</Badge>
+                    <span className="ml-auto text-xs text-muted-foreground">{new Date(s.last_activity).toLocaleString()}</span>
+                    <Button size="sm" variant="outline" disabled={takingOver === s.session_id}
+                      onClick={() => handleTakeover(s.session_id)}>
+                      {takingOver === s.session_id ? '연결 중…' : '상담 시작'}
+                    </Button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
       )}
     </div>
   )

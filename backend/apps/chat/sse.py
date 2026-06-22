@@ -55,10 +55,28 @@ def publish_visitor_message(tenant_id: str, session_id: str, content: str) -> No
     }))
 
 
-def sse_event_stream(session_id: str, welcome_message: str = "", history=None, is_hitl: bool = False, brand_name: str = ""):
+def publish_session_connected(tenant_id: str, session_id: str) -> None:
+    """방문자 SSE 연결 시작을 어드민 콘솔에 알린다(presence 실시간 push — issue 138)."""
+    r = get_redis_client()
+    r.publish(f"hitl:{tenant_id}", json.dumps({"type": "session_connected", "session_id": session_id}))
+
+
+def publish_session_disconnected(tenant_id: str, session_id: str) -> None:
+    """방문자 SSE 연결 종료를 어드민 콘솔에 알린다(presence 실시간 push — issue 138)."""
+    r = get_redis_client()
+    r.publish(f"hitl:{tenant_id}", json.dumps({"type": "session_disconnected", "session_id": session_id}))
+
+
+def sse_event_stream(session_id: str, welcome_message: str = "", history=None, is_hitl: bool = False, brand_name: str = "", tenant_id: str = ""):
+    from apps.chat import presence
+
     r = get_redis_client()
     pubsub = r.pubsub()
     pubsub.subscribe(f"session:{session_id}")
+    # presence: 연결 시작을 표시·통지(tenant_id가 있을 때만 — 어드민 콘솔 활성 계층용, issue 138).
+    if tenant_id:
+        presence.mark_active(tenant_id, session_id)
+        publish_session_connected(tenant_id, session_id)
     connected_payload = {"session_id": session_id}
     # 브랜드 텍스트는 신규/재연결 무관하게 항상 헤더에 표시한다.
     if brand_name:
@@ -76,6 +94,8 @@ def sse_event_stream(session_id: str, welcome_message: str = "", history=None, i
             if message is None:
                 # keepalive: SSE comment (ignored by clients). If client disconnected,
                 # this yield raises BrokenPipeError, freeing the gunicorn worker.
+                if tenant_id:
+                    presence.mark_active(tenant_id, session_id)  # 연결 살아있는 동안 presence 갱신
                 yield ": keepalive\n\n"
                 continue
             if message["type"] != "message":
@@ -88,3 +108,5 @@ def sse_event_stream(session_id: str, welcome_message: str = "", history=None, i
     finally:
         pubsub.unsubscribe(f"session:{session_id}")
         pubsub.close()
+        if tenant_id:
+            publish_session_disconnected(tenant_id, session_id)  # 연결 종료 통지(presence delta)

@@ -60,6 +60,8 @@ def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
         stream_kwargs = {"welcome_message": config.welcome_message if config else ""}
     if config and config.brand_name:
         stream_kwargs["brand_name"] = config.brand_name
+    # presence: 이 SSE 연결을 어드민 콘솔 활성 계층에 반영(issue 138).
+    stream_kwargs["tenant_id"] = str(tenant.id)
 
     response = StreamingHttpResponse(
         sse_event_stream(str(session.id), **stream_kwargs),

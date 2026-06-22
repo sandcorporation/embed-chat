@@ -15,9 +15,11 @@ class Escalation(models.Model):
 
     TRIGGER_AI = "ai"
     TRIGGER_VISITOR = "visitor"
+    TRIGGER_AGENT = "agent"  # 상담원이 임의 세션을 직접 잡은 수동 takeover (issue 140)
     TRIGGER_CHOICES = [
         (TRIGGER_AI, "AI"),
         (TRIGGER_VISITOR, "Visitor"),
+        (TRIGGER_AGENT, "Agent"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
