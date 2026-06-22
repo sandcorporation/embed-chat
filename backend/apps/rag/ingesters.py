@@ -46,46 +46,43 @@ def get_embeddings(texts: List[str], provider=None) -> List[List[float]]:
 
 
 class DocumentIngester(ABC):
-    """문서에서 텍스트를 추출하는 인터페이스. (GraphRAG: 추출 텍스트는 GraphIngester가 그래프로 변환)"""
+    """문서에서 텍스트를 추출하는 인터페이스. (GraphRAG: 추출 텍스트는 GraphIngester가 그래프로 변환)
+
+    OCR이 필요한 ingester(이미지·스캔PDF)는 주입된 `ocr`(OCRBackend 포트)로 전사한다. mime_type은
+    생성자로 받는다(이미지 ingester가 vision OCR에 마임을 넘겨야 하므로 — issue 158).
+    """
+
+    def __init__(self, mime_type: str = ""):
+        self.mime_type = mime_type
 
     @abstractmethod
-    def extract_text(self, file_bytes: bytes) -> str:
+    def extract_text(self, file_bytes: bytes, ocr=None) -> str:
         pass
-
-
-def _call_ocr(image_bytes: bytes) -> str:
-    import base64
-    import httpx
-    from django.conf import settings
-
-    b64 = base64.b64encode(image_bytes).decode()
-    resp = httpx.post(
-        f"{settings.PADDLE_OCR_URL}/ocr",
-        json={"image_b64": b64},
-        timeout=getattr(settings, "PADDLE_OCR_TIMEOUT", 60.0),
-    )
-    resp.raise_for_status()
-    return resp.json().get("text", "")
 
 
 PDF_OCR_FALLBACK_MIN_WORDS = 50
 
 
-def _ocr_pdf(file_bytes: bytes) -> str:
+def _ocr_pdf(file_bytes: bytes, ocr) -> str:
     import fitz
+    from django.conf import settings
+
+    max_pages = getattr(settings, "OCR_MAX_PAGES", 30)
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     texts = []
-    for page in doc:
+    for i, page in enumerate(doc):
+        if i >= max_pages:  # 거대한 스캔 PDF의 OCR 비용 통제(초과 페이지 생략)
+            break
         pix = page.get_pixmap(dpi=150)
         png_bytes = pix.tobytes(output="png")
-        page_text = _call_ocr(png_bytes)
+        page_text = ocr.transcribe(png_bytes, "image/png")  # 렌더 페이지는 항상 PNG
         if page_text:
             texts.append(page_text)
     return "\n".join(texts)
 
 
 class PDFIngester(DocumentIngester):
-    def extract_text(self, file_bytes: bytes) -> str:
+    def extract_text(self, file_bytes: bytes, ocr=None) -> str:
         import fitz  # pymupdf
         from apps.rag.text_quality import is_garbled
 
@@ -93,18 +90,18 @@ class PDFIngester(DocumentIngester):
         text = "\n".join(str(page.get_text()) for page in doc)
         # 텍스트 레이어가 희소(스캔)하거나 폰트 인코딩이 깨져(mojibake) 추출되면 OCR로 재추출한다.
         if len(text.split()) < PDF_OCR_FALLBACK_MIN_WORDS or is_garbled(text):
-            text = _ocr_pdf(file_bytes)
+            text = _ocr_pdf(file_bytes, ocr)
         return text
 
 
 class TXTIngester(DocumentIngester):
-    def extract_text(self, file_bytes: bytes) -> str:
+    def extract_text(self, file_bytes: bytes, ocr=None) -> str:
         return file_bytes.decode("utf-8", errors="replace")
 
 
 class ImageIngester(DocumentIngester):
-    def extract_text(self, file_bytes: bytes) -> str:
-        return _call_ocr(file_bytes)
+    def extract_text(self, file_bytes: bytes, ocr=None) -> str:
+        return ocr.transcribe(file_bytes, self.mime_type or "image/png")
 
 
 def _sheet_text(name: str, rows: list) -> str:
@@ -128,7 +125,7 @@ def _sheet_text(name: str, rows: list) -> str:
 class ExcelIngester(DocumentIngester):
     """Excel(xlsx·xls)을 시트별 헤더-키 행별 텍스트로 평탄화한다(행 단위 Entity 추출 적합)."""
 
-    def extract_text(self, file_bytes: bytes) -> str:
+    def extract_text(self, file_bytes: bytes, ocr=None) -> str:
         # 매직 바이트로 포맷 판별: xlsx=zip(PK), xls=OLE(D0CF11E0)
         if file_bytes[:2] == b"PK":
             sections = self._from_xlsx(file_bytes)
@@ -169,4 +166,4 @@ def get_ingester(mime_type: str) -> DocumentIngester:
     cls = MIME_TO_INGESTER.get(mime_type)
     if not cls:
         raise ValueError(f"Unsupported mime type: {mime_type}")
-    return cls()
+    return cls(mime_type)

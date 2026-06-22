@@ -31,10 +31,16 @@ def ingest_document(self, document_id: str, tenant_id: str, mime_type: str):
                 if title:
                     doc.name = title
         else:
+            from apps.rag.ocr import get_ocr_backend
+            from apps.tenants.models import TenantConfig
+
             file_path = os.path.join(settings.MEDIA_ROOT, "documents", document_id)
             with open(file_path, "rb") as f:
                 file_bytes = f.read()
-            text = get_ingester(mime_type).extract_text(file_bytes)
+            # OCR 백엔드는 tenant config로 해석한다(prod=vision, dev/test=Paddle 폴백).
+            config = TenantConfig.objects.filter(tenant_id=tenant_id).first()
+            ocr = get_ocr_backend(config)
+            text = get_ingester(mime_type).extract_text(file_bytes, ocr)
         ingest_to_graph(text, tenant_id, document_id, doc.name)
         doc.status = Document.STATUS_READY
         doc.save()
