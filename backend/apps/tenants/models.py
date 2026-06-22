@@ -143,6 +143,13 @@ class TenantConfig(models.Model):
     require_identity_verification = models.BooleanField(default=False)
     # HITL(사람 상담원 전환) 사용 여부. 꺼지면 에이전트 그래프가 escalation 분기 없이 로드된다.
     hitl_enabled = models.BooleanField(default=True)
+    # 상담 가능 시간(영업시간) — opt-in. 미설정(타임존·스케줄 비어 있음)이면 24/7(하위호환).
+    # 시간 외엔 그래프 선택이 plain으로 떨어져 AI 자동 escalation이 일어나지 않는다(issue 136).
+    hitl_timezone = models.CharField(max_length=64, blank=True, default="")  # IANA, 예 "Asia/Seoul"
+    # 요일별 시간창: {"mon": {"enabled": true, "start": "09:00", "end": "18:00"}, ...} (mon~sun)
+    hitl_schedule = models.JSONField(default=dict, blank=True)
+    # 휴일(요일 무관 강제 휴무) ISO 날짜 리스트: ["2026-01-01", ...]
+    hitl_holidays = models.JSONField(default=list, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
@@ -85,6 +85,45 @@ describe('ConfigTab — HITL 토글', () => {
     await save()
     await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
       expect.objectContaining({ hitl_enabled: false }),
+    ))
+  })
+})
+
+describe('ConfigTab — 영업시간(상담 가능 시간)', () => {
+  it('handoff 탭에서 타임존·요일별 시간을 편집하면 hitl_timezone/hitl_schedule을 저장 payload에 담는다', async () => {
+    renderConfig('handoff')
+    await screen.findByLabelText('HITL 사용')
+
+    await userEvent.type(screen.getByLabelText('타임존'), 'Asia/Seoul')
+    await userEvent.click(screen.getByLabelText('월 영업'))            // 월요일 켜기 → 시간 입력 활성화
+    fireEvent.change(screen.getByLabelText('월 시작'), { target: { value: '09:00' } })
+    fireEvent.change(screen.getByLabelText('월 종료'), { target: { value: '18:00' } })
+    await save()
+
+    await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hitl_timezone: 'Asia/Seoul',
+        hitl_schedule: expect.objectContaining({
+          mon: expect.objectContaining({ enabled: true, start: '09:00', end: '18:00' }),
+        }),
+      }),
+    ))
+  })
+
+  it('휴일을 추가하면 hitl_holidays에 담기고, HITL을 끄면 영업시간 편집기가 사라진다', async () => {
+    renderConfig('handoff')
+    const toggle = await screen.findByLabelText('HITL 사용')
+
+    fireEvent.change(screen.getByLabelText('휴일 추가'), { target: { value: '2026-01-01' } })
+    await userEvent.click(screen.getByRole('button', { name: '추가' }))
+    expect(screen.getByText('2026-01-01')).toBeInTheDocument()
+
+    await userEvent.click(toggle)  // HITL 끄기 → 영업시간 섹션 비노출
+    expect(screen.queryByLabelText('타임존')).toBeNull()
+
+    await save()
+    await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ hitl_holidays: ['2026-01-01'] }),
     ))
   })
 })

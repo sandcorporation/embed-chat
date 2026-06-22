@@ -4,6 +4,7 @@
  * Embed Chat API
  * OpenAPI spec version: 1.0.0
  */
+import type { TenantConfigInHitlSchedule } from './tenantConfigInHitlSchedule';
 
 export interface TenantConfigIn {
   agent_display_name?: string;
@@ -15,6 +16,9 @@ export interface TenantConfigIn {
   embed_provider_type?: string;
   extraction_model?: string;
   hitl_enabled?: boolean;
+  hitl_holidays?: unknown[];
+  hitl_schedule?: TenantConfigInHitlSchedule;
+  hitl_timezone?: string;
   llm_api_key?: string;
   llm_base_url?: string;
   llm_provider_type?: string;

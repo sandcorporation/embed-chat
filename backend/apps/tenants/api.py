@@ -59,6 +59,9 @@ class TenantConfigOut(Schema):
     welcome_message: str
     brand_name: str
     hitl_enabled: bool
+    hitl_timezone: str
+    hitl_schedule: dict
+    hitl_holidays: list
     require_identity_verification: bool
     llm_provider_type: str
     llm_base_url: str
@@ -83,6 +86,9 @@ class TenantConfigIn(Schema):
     welcome_message: str = None
     brand_name: str = None
     hitl_enabled: bool = None
+    hitl_timezone: str = None
+    hitl_schedule: dict = None
+    hitl_holidays: list = None
     require_identity_verification: bool = None
     llm_provider_type: str = None
     llm_base_url: str = None
@@ -356,6 +362,9 @@ def _config_out(config):
         "welcome_message": config.welcome_message,
         "brand_name": config.brand_name,
         "hitl_enabled": config.hitl_enabled,
+        "hitl_timezone": config.hitl_timezone,
+        "hitl_schedule": config.hitl_schedule,
+        "hitl_holidays": config.hitl_holidays,
         "require_identity_verification": config.require_identity_verification,
         "llm_provider_type": config.llm_provider_type,
         "llm_base_url": config.llm_base_url,
@@ -423,7 +432,7 @@ def update_config(request, body: TenantConfigIn):
     except ProviderError as e:
         return 400, {"detail": str(e)}
 
-    for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message", "brand_name", "hitl_enabled", "require_identity_verification", "llm_provider_type", "llm_base_url", "extraction_model", "embed_provider_type", "embed_base_url", "embed_model", "embed_dim"):
+    for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message", "brand_name", "hitl_enabled", "hitl_timezone", "hitl_schedule", "hitl_holidays", "require_identity_verification", "llm_provider_type", "llm_base_url", "extraction_model", "embed_provider_type", "embed_base_url", "embed_model", "embed_dim"):
         value = getattr(body, field)
         if value is not None:
             setattr(config, field, value)

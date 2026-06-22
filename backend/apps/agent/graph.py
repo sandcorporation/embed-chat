@@ -27,6 +27,7 @@ class ChatState(TypedDict):
     hitl_reason: str
     context_sufficient: bool
     source_text_tried: bool
+    operational_notice: str
 
 
 def _route_after_llm(state: ChatState) -> str:
@@ -107,8 +108,18 @@ def build_graph(checkpointer=None, hitl_enabled=True):
     return graph.compile(checkpointer=checkpointer)
 
 
+def _off_hours_notice(config) -> str:
+    """상담시간 외에 trailing 컨텍스트로 실을 운영 안내(휘발성이라 system prefix를 안 깸)."""
+    return (
+        "[운영 안내] 지금은 상담원 연결 가능 시간이 아닙니다. "
+        "운영시간에 다시 문의해 주시면 상담원이 도와드립니다. 현재는 AI가 답변합니다."
+    )
+
+
 def run_chat_agent(session, user_message: str) -> str:
+    from django.utils import timezone
     from apps.tenants.models import TenantConfig
+    from apps.tenants import business_hours
     from apps.memory.manager import get_visitor_memories
     from apps.agent.providers import set_chat_provider, chat_provider
 
@@ -116,6 +127,13 @@ def run_chat_agent(session, user_message: str) -> str:
     # 챗 그래프 노드가 쓸 LLM provider를 컨텍스트에 싣는다(비밀키를 state/Checkpoint에 안 넣음).
     set_chat_provider(chat_provider(config))
     memories = get_visitor_memories(str(session.tenant_id), session.visitor_id)
+
+    # 영업시간 게이팅(issue 136): HITL이 켜져 있어도 상담시간 외엔 plain 그래프로 떨어뜨려
+    # AI 자동 escalation을 막는다(ADR-0001의 두 토폴로지를 시간으로 선택). 시간 외엔 운영 안내를
+    # trailing 컨텍스트에 실어 AI가 자연스럽게 안내하게 한다(수동 takeover는 별개로 항상 가능).
+    open_now = business_hours.is_open(config, timezone.now())
+    effective_hitl = config.hitl_enabled and open_now
+    operational_notice = _off_hours_notice(config) if (config.hitl_enabled and not open_now) else ""
 
     initial_state: ChatState = {
         "session_id": str(session.id),
@@ -132,11 +150,12 @@ def run_chat_agent(session, user_message: str) -> str:
         "hitl_reason": "",
         "context_sufficient": True,
         "source_text_tried": False,
+        "operational_notice": operational_notice,
     }
 
     saver, conn = _create_checkpointer()
     try:
-        graph = build_graph(checkpointer=saver, hitl_enabled=config.hitl_enabled)
+        graph = build_graph(checkpointer=saver, hitl_enabled=effective_hitl)
         result = graph.invoke(
             initial_state,
             config={"configurable": {"thread_id": str(session.id)}},

@@ -432,6 +432,25 @@ def test_unauthenticated_config_access_rejected(client):
 
 
 @pytest.mark.django_db
+def test_business_hours_config_roundtrips(client, tenant_agent_token):
+    """PATCH로 영업시간(타임존·요일별 시간창·휴일)을 저장하면 GET이 동일 값을 돌려준다(issue 137)."""
+    schedule = {"mon": {"enabled": True, "start": "09:00", "end": "18:00"}}
+    resp = client.patch(
+        "/api/tenant/config/",
+        {"hitl_timezone": "Asia/Seoul", "hitl_schedule": schedule, "hitl_holidays": ["2026-01-01"]},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert resp.status_code == 200
+    data = client.get(
+        "/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}"
+    ).json()
+    assert data["hitl_timezone"] == "Asia/Seoul"
+    assert data["hitl_schedule"]["mon"]["start"] == "09:00"
+    assert data["hitl_holidays"] == ["2026-01-01"]
+
+
+@pytest.mark.django_db
 def test_reset_tenant_key_returns_new_key(client, tenant_agent_token, tenant_with_key):
     """POST /api/tenant/reset-key → 새 키 반환, 기존 키로 인증 불가."""
     tenant, old_raw_key = tenant_with_key

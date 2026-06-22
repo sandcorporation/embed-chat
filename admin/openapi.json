@@ -555,6 +555,49 @@
         "title": "ResetKeyOut",
         "type": "object"
       },
+      "SessionListItemOut": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "escalation_status": {
+            "default": "",
+            "title": "Escalation Status",
+            "type": "string"
+          },
+          "is_hitl": {
+            "title": "Is Hitl",
+            "type": "boolean"
+          },
+          "last_activity": {
+            "title": "Last Activity",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "visitor_id": {
+            "title": "Visitor Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "visitor_id",
+          "is_hitl",
+          "active",
+          "created_at",
+          "last_activity"
+        ],
+        "title": "SessionListItemOut",
+        "type": "object"
+      },
       "SessionMessageOut": {
         "properties": {
           "content": {
@@ -596,6 +639,19 @@
         "title": "SlugIn",
         "type": "object"
       },
+      "TakeoverOut": {
+        "properties": {
+          "escalation_id": {
+            "title": "Escalation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "escalation_id"
+        ],
+        "title": "TakeoverOut",
+        "type": "object"
+      },
       "TenantConfigIn": {
         "properties": {
           "agent_display_name": {
@@ -633,6 +689,20 @@
           "hitl_enabled": {
             "title": "Hitl Enabled",
             "type": "boolean"
+          },
+          "hitl_holidays": {
+            "items": {},
+            "title": "Hitl Holidays",
+            "type": "array"
+          },
+          "hitl_schedule": {
+            "additionalProperties": true,
+            "title": "Hitl Schedule",
+            "type": "object"
+          },
+          "hitl_timezone": {
+            "title": "Hitl Timezone",
+            "type": "string"
           },
           "llm_api_key": {
             "title": "Llm Api Key",
@@ -712,6 +782,20 @@
             "title": "Hitl Enabled",
             "type": "boolean"
           },
+          "hitl_holidays": {
+            "items": {},
+            "title": "Hitl Holidays",
+            "type": "array"
+          },
+          "hitl_schedule": {
+            "additionalProperties": true,
+            "title": "Hitl Schedule",
+            "type": "object"
+          },
+          "hitl_timezone": {
+            "title": "Hitl Timezone",
+            "type": "string"
+          },
           "llm_api_key": {
             "title": "Llm Api Key",
             "type": "string"
@@ -762,6 +846,9 @@
           "welcome_message",
           "brand_name",
           "hitl_enabled",
+          "hitl_timezone",
+          "hitl_schedule",
+          "hitl_holidays",
           "require_identity_verification",
           "llm_provider_type",
           "llm_base_url",
@@ -2514,6 +2601,59 @@
         ]
       }
     },
+    "/api/tenant/sessions/": {
+      "get": {
+        "description": "세션 콘솔용 전체 세션 목록 — escalation(pending→claimed) → 활성(SSE) → 나머지(최근순).\n\nescalation·활성 세션은 최근창 밖이라도 상단에 고정. 나머지는 최근 N일 + 페이지네이션.",
+        "operationId": "apps_memory_api_list_sessions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SessionListItemOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "TenantAgentAuth": []
+          }
+        ],
+        "summary": "List Sessions",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/tenant/sessions/{session_id}/checkpoint": {
       "get": {
         "operationId": "apps_memory_api_get_session_checkpoint",
@@ -2609,6 +2749,64 @@
           }
         ],
         "summary": "Get Session Messages",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/tenant/sessions/{session_id}/takeover": {
+      "post": {
+        "description": "상담원이 임의 세션의 상담을 직접 시작한다(issue 140).\n\n자동-claimed Escalation(trigger=agent)을 만들고 is_hitl을 켜 방문자 메시지를 사람에게\n라우팅하며, 방문자에게 '상담원 연결됨'을 알린다. 멱등(같은 상담원 재진입은 기존 escalation\n반환) + 동시성(다른 상담원이 이미 잡은 세션은 409). 미claim된 AI escalation은 이어받는다.\nselect_for_update로 세션을 잠가 동시 takeover 경쟁을 직렬화한다(영업시간과 무관).",
+        "operationId": "apps_memory_api_takeover_session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetailOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetailOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "TenantAgentAuth": []
+          }
+        ],
+        "summary": "Takeover Session",
         "tags": [
           "sessions"
         ]

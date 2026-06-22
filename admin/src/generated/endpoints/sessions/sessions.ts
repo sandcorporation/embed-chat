@@ -6,11 +6,59 @@
  */
 import type {
   AppsMemoryApiGetSessionCheckpoint200,
+  AppsMemoryApiListSessionsParams,
   DetailOut,
-  SessionMessageOut
+  SessionListItemOut,
+  SessionMessageOut,
+  TakeoverOut
 } from '../../model';
 
 import { customInstance } from '../../../mutator';
+
+/**
+ * 세션 콘솔용 전체 세션 목록 — escalation(pending→claimed) → 활성(SSE) → 나머지(최근순).
+
+escalation·활성 세션은 최근창 밖이라도 상단에 고정. 나머지는 최근 N일 + 페이지네이션.
+ * @summary List Sessions
+ */
+export type appsMemoryApiListSessionsResponse200 = {
+  data: SessionListItemOut[]
+  status: 200
+}
+    
+export type appsMemoryApiListSessionsResponseSuccess = (appsMemoryApiListSessionsResponse200) & {
+  headers: Headers;
+};
+;
+
+export type appsMemoryApiListSessionsResponse = (appsMemoryApiListSessionsResponseSuccess)
+
+export const getAppsMemoryApiListSessionsUrl = (params?: AppsMemoryApiListSessionsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/tenant/sessions/?${stringifiedParams}` : `/api/tenant/sessions/`
+}
+
+export const appsMemoryApiListSessions = async (params?: AppsMemoryApiListSessionsParams, options?: RequestInit): Promise<appsMemoryApiListSessionsResponse> => {
+  
+  return customInstance<appsMemoryApiListSessionsResponse>(getAppsMemoryApiListSessionsUrl(params),
+  {      
+    ...options,
+    method: 'GET'
+    
+    
+  }
+);}
+
 
 /**
  * @summary Get Session Checkpoint
@@ -90,6 +138,59 @@ export const appsMemoryApiGetSessionMessages = async (sessionId: string, options
   {      
     ...options,
     method: 'GET'
+    
+    
+  }
+);}
+
+
+/**
+ * 상담원이 임의 세션의 상담을 직접 시작한다(issue 140).
+
+자동-claimed Escalation(trigger=agent)을 만들고 is_hitl을 켜 방문자 메시지를 사람에게
+라우팅하며, 방문자에게 '상담원 연결됨'을 알린다. 멱등(같은 상담원 재진입은 기존 escalation
+반환) + 동시성(다른 상담원이 이미 잡은 세션은 409). 미claim된 AI escalation은 이어받는다.
+select_for_update로 세션을 잠가 동시 takeover 경쟁을 직렬화한다(영업시간과 무관).
+ * @summary Takeover Session
+ */
+export type appsMemoryApiTakeoverSessionResponse200 = {
+  data: TakeoverOut
+  status: 200
+}
+
+export type appsMemoryApiTakeoverSessionResponse404 = {
+  data: DetailOut
+  status: 404
+}
+
+export type appsMemoryApiTakeoverSessionResponse409 = {
+  data: DetailOut
+  status: 409
+}
+    
+export type appsMemoryApiTakeoverSessionResponseSuccess = (appsMemoryApiTakeoverSessionResponse200) & {
+  headers: Headers;
+};
+export type appsMemoryApiTakeoverSessionResponseError = (appsMemoryApiTakeoverSessionResponse404 | appsMemoryApiTakeoverSessionResponse409) & {
+  headers: Headers;
+};
+
+export type appsMemoryApiTakeoverSessionResponse = (appsMemoryApiTakeoverSessionResponseSuccess | appsMemoryApiTakeoverSessionResponseError)
+
+export const getAppsMemoryApiTakeoverSessionUrl = (sessionId: string,) => {
+
+
+  
+
+  return `/api/tenant/sessions/${sessionId}/takeover`
+}
+
+export const appsMemoryApiTakeoverSession = async (sessionId: string, options?: RequestInit): Promise<appsMemoryApiTakeoverSessionResponse> => {
+  
+  return customInstance<appsMemoryApiTakeoverSessionResponse>(getAppsMemoryApiTakeoverSessionUrl(sessionId),
+  {      
+    ...options,
+    method: 'POST'
     
     
   }

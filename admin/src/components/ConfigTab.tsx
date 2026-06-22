@@ -8,7 +8,13 @@ import { Select } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+
+type DaySchedule = { enabled?: boolean; start?: string; end?: string }
+const WEEKDAYS: [string, string][] = [
+  ['mon', '월'], ['tue', '화'], ['wed', '수'], ['thu', '목'], ['fri', '금'], ['sat', '토'], ['sun', '일'],
+]
 
 function modelOptions(loaded: string[], current: string, extra: string[] = []): string[] {
   return Array.from(new Set([...extra, ...loaded, current].filter(Boolean)))
@@ -54,6 +60,20 @@ export default function ConfigTab() {
   const [embedModelError, setEmbedModelError] = useState('')
   const [saveError, setSaveError] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [holidayInput, setHolidayInput] = useState('')
+
+  const schedule = ((config as TenantConfigOut).hitl_schedule || {}) as Record<string, DaySchedule>
+  const holidays = ((config as TenantConfigOut).hitl_holidays || []) as string[]
+  const setDay = (key: string, patch: DaySchedule) =>
+    setConfig(c => {
+      const sched = ((c as TenantConfigOut).hitl_schedule || {}) as Record<string, DaySchedule>
+      return { ...c, hitl_schedule: { ...sched, [key]: { ...(sched[key] || {}), ...patch } } } as TenantConfigOut
+    })
+  const addHoliday = (d: string) => {
+    if (d && !holidays.includes(d)) setConfig(c => ({ ...c, hitl_holidays: [...holidays, d] }) as TenantConfigOut)
+  }
+  const removeHoliday = (d: string) =>
+    setConfig(c => ({ ...c, hitl_holidays: holidays.filter(x => x !== d) }) as TenantConfigOut)
 
   const loadLlmModels = async () => {
     setLlmModelError('')
@@ -285,6 +305,64 @@ export default function ConfigTab() {
               <Label>웹훅 URL</Label>
               <Input value={config.webhook_url} onChange={e => setConfig(c => ({ ...c, webhook_url: e.target.value }))}
                 placeholder="https://hooks.slack.com/..." />
+            </div>
+          )}
+
+          {/* ── 상담 가능 시간(영업시간) ─ HITL 켜진 경우에만 ── */}
+          {config.hitl_enabled && (
+            <div className="space-y-4 border-t border-border pt-6">
+              <div>
+                <h3 className="text-sm font-semibold">상담 가능 시간 (영업시간)</h3>
+                <p className="text-xs text-muted-foreground">상담원이 응대 가능한 요일·시간이에요. 이 시간 외에는 AI만 답하고 상담원 자동 연결은 일어나지 않습니다. 비워두면 24시간 항상 연결돼요.</p>
+              </div>
+              <div className="space-y-2">
+                <Label>표준시간대 (타임존)</Label>
+                <Input aria-label="타임존" className="w-64" value={config.hitl_timezone || ''}
+                  onChange={e => setConfig(c => ({ ...c, hitl_timezone: e.target.value }))} placeholder="예: Asia/Seoul" />
+                <p className={hint}>시간을 어느 지역 기준으로 볼지예요. 한국이면 Asia/Seoul.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>요일별 시간</Label>
+                {WEEKDAYS.map(([key, label]) => {
+                  const day = schedule[key] || {}
+                  return (
+                    <div key={key} className="flex items-center gap-2 text-sm">
+                      <label className="flex w-14 cursor-pointer items-center gap-1.5">
+                        <input type="checkbox" aria-label={`${label} 영업`} className="h-4 w-4 rounded border-input"
+                          checked={!!day.enabled} onChange={e => setDay(key, { enabled: e.target.checked })} />
+                        {label}
+                      </label>
+                      <Input aria-label={`${label} 시작`} type="time" className="w-32" value={day.start || ''}
+                        disabled={!day.enabled} onChange={e => setDay(key, { start: e.target.value })} />
+                      <span className="text-muted-foreground">~</span>
+                      <Input aria-label={`${label} 종료`} type="time" className="w-32" value={day.end || ''}
+                        disabled={!day.enabled} onChange={e => setDay(key, { end: e.target.value })} />
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="space-y-2">
+                <Label>휴일 (쉬는 날)</Label>
+                <div className="flex items-center gap-2">
+                  <Input aria-label="휴일 추가" type="date" className="w-44" value={holidayInput}
+                    onChange={e => setHolidayInput(e.target.value)} />
+                  <Button size="sm" variant="outline" type="button"
+                    onClick={() => { addHoliday(holidayInput); setHolidayInput('') }}>추가</Button>
+                </div>
+                {holidays.length > 0 && (
+                  <ul className="flex flex-wrap gap-1.5">
+                    {holidays.map(d => (
+                      <li key={d}>
+                        <Badge variant="secondary" className="gap-1">{d}
+                          <button type="button" aria-label={`휴일 ${d} 삭제`} className="ml-1 leading-none"
+                            onClick={() => removeHoliday(d)}>×</button>
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className={hint}>공휴일·정기휴무처럼 요일과 상관없이 쉬는 날이에요. 그날은 상담원 연결이 꺼집니다.</p>
+              </div>
             </div>
           )}
         </div>
