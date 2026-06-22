@@ -79,20 +79,23 @@ def publish_session_disconnected(tenant_id: str, session_id: str) -> None:
 
 
 def sse_event_stream(session_id: str, welcome_message: str = "", history=None, is_hitl: bool = False, brand_name: str = "", tenant_id: str = ""):
+    import uuid
     from apps.chat import presence
 
     r = get_redis_client()
     pubsub = r.pubsub()
     pubsub.subscribe(f"session:{session_id}")
     connected_payload: dict[str, Any]
-    # presence: 연결 시작을 표시(직접 ZADD = 하트비트, 진실원천) + VisitorConnected 이벤트 발행
-    # (EventBus ephemeral → presence-bridge가 콘솔 델타로 — issue 150). 하트비트는 직접 유지.
+    # presence: 이 연결을 참조 계수로 등록(직접 ZADD = 하트비트, 진실원천). VisitorConnected는
+    # 세션의 '첫' 연결(0→1)에서만 발행한다 — 새로고침으로 옛/새 연결이 겹쳐도 콘솔이 유휴로
+    # 뒤집히지 않게(EventBus ephemeral → presence-bridge가 콘솔 델타로 — issue 150).
+    conn_id = uuid.uuid4().hex
     if tenant_id:
         from apps.events.signals import publish_presence
         from apps.events.types import VISITOR_CONNECTED
 
-        presence.mark_active(tenant_id, session_id)
-        publish_presence(VISITOR_CONNECTED, tenant_id, session_id)
+        if presence.register_connection(tenant_id, session_id, conn_id):
+            publish_presence(VISITOR_CONNECTED, tenant_id, session_id)
     connected_payload = {"session_id": session_id}
     # 브랜드 텍스트는 신규/재연결 무관하게 항상 헤더에 표시한다.
     if brand_name:
@@ -111,7 +114,7 @@ def sse_event_stream(session_id: str, welcome_message: str = "", history=None, i
                 # keepalive: SSE comment (ignored by clients). If client disconnected,
                 # this yield raises BrokenPipeError, freeing the gunicorn worker.
                 if tenant_id:
-                    presence.mark_active(tenant_id, session_id)  # 연결 살아있는 동안 presence 갱신
+                    presence.touch_connection(tenant_id, session_id, conn_id)  # 하트비트 + 연결 TTL 갱신
                 yield ": keepalive\n\n"
                 continue
             if message["type"] != "message":
@@ -128,4 +131,7 @@ def sse_event_stream(session_id: str, welcome_message: str = "", history=None, i
             from apps.events.signals import publish_presence
             from apps.events.types import VISITOR_DISCONNECTED
 
-            publish_presence(VISITOR_DISCONNECTED, tenant_id, session_id)  # 연결 종료 → 이벤트
+            # 세션의 '마지막' 연결(1→0)에서만 disconnect를 낸다 — 새로고침으로 옛 연결이
+            # 늦게 닫혀도 새 연결이 살아있으면 콘솔을 유휴로 뒤집지 않는다.
+            if presence.unregister_connection(tenant_id, session_id, conn_id):
+                publish_presence(VISITOR_DISCONNECTED, tenant_id, session_id)
