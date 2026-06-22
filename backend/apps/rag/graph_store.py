@@ -426,12 +426,16 @@ def _parse_vec(value) -> list:
 
 
 class _PgGraphStore:
+    """Postgres+pgvector 백엔드. 메타데이터(content·name, 차원 무관)는 정적 공유 테이블
+    (kg_text_unit·kg_mention)에, 임베딩은 차원별 vec 테이블(kg_*_vec_d{dim})에 둔다 — 임베딩
+    차원이 바뀌어도(reembed) 메타데이터가 보존되고 임베딩만 새 차원으로 재기록된다."""
+
     def __init__(self, tenant_id: str):
         if not tenant_id:
             raise ValueError("tenant_id is required")
         self.tenant_id = str(tenant_id)
         self._dim_cache = None
-        self._ensured_tu = set()  # 이 인스턴스에서 DDL 보장한 차원(중복 DDL 회피)
+        self._ensured = set()  # 이 인스턴스에서 DDL 보장한 vec 테이블(중복 DDL 회피)
 
     def _dim(self) -> int:
         if self._dim_cache is None:
@@ -440,8 +444,11 @@ class _PgGraphStore:
             self._dim_cache = cfg.embed_dim if cfg else 1024
         return self._dim_cache
 
-    def _tu_table(self) -> str:
-        return f"kg_text_unit_d{self._dim()}"
+    def _tu_vec(self) -> str:
+        return f"kg_text_unit_vec_d{self._dim()}"
+
+    def _m_vec(self) -> str:
+        return f"kg_mention_vec_d{self._dim()}"
 
     def _embedding_provider(self):
         from apps.tenants.models import TenantConfig
@@ -449,92 +456,91 @@ class _PgGraphStore:
         cfg = TenantConfig.objects.filter(tenant_id=self.tenant_id).first()
         return embedding_provider(cfg) if cfg else None
 
-    # ── DDL (차원별 테이블 + HNSW, IF NOT EXISTS — 동적) ──────────────────────
-    def _ensure_tu(self, dim: int) -> None:
-        if dim in self._ensured_tu:
+    # ── 차원별 vec 테이블 DDL (IF NOT EXISTS — 동적) ─────────────────────────
+    def _ensure_vec(self, kind: str, dim: int) -> None:
+        key = (kind, dim)
+        if key in self._ensured:
             return
         from django.db import connection
-        t = f"kg_text_unit_d{dim}"
+        t = f"kg_{kind}_vec_d{dim}"
+        id_col = "unit_id" if kind == "text_unit" else "mention_id"
         with connection.cursor() as cur:
             cur.execute(
                 f"CREATE TABLE IF NOT EXISTS {t} ("
-                "tenant_id text NOT NULL, unit_id text NOT NULL, content text, "
-                "source_document_id text DEFAULT '', chunk_index int DEFAULT 0, "
-                f"embedding vector({dim}), PRIMARY KEY (tenant_id, unit_id))"
+                f"tenant_id text NOT NULL, {id_col} text NOT NULL, embedding vector({dim}), "
+                f"PRIMARY KEY (tenant_id, {id_col}))"
             )
-            cur.execute(f"CREATE INDEX IF NOT EXISTS {t}_doc ON {t} (tenant_id, source_document_id)")
             cur.execute(
-                f"CREATE INDEX IF NOT EXISTS {t}_hnsw ON {t} "
-                "USING hnsw (embedding vector_cosine_ops)"
+                f"CREATE INDEX IF NOT EXISTS {t}_hnsw ON {t} USING hnsw (embedding vector_cosine_ops)"
             )
-        self._ensured_tu.add(dim)
+        self._ensured.add(key)
 
     def ensure_vector_index(self, dimensions: int = 1024) -> None:
-        self._ensure_tu(dimensions)
+        self._ensure_vec("text_unit", dimensions)
 
-    # ── Text Unit ────────────────────────────────────────────────────────────
+    def ensure_mention_vector_index(self, dimensions: int = 1024) -> None:
+        self._ensure_vec("mention", dimensions)
+
+    # ── Text Unit (메타데이터 kg_text_unit + 임베딩 kg_text_unit_vec_d{dim}) ──
     def upsert_text_unit(self, unit_id, content, embedding, source_document_id="", chunk_index=0) -> None:
         from django.db import connection
-        self._ensure_tu(self._dim())
-        t = self._tu_table()
+        self._ensure_vec("text_unit", self._dim())
         with connection.cursor() as cur:
             cur.execute(
-                f"INSERT INTO {t} (tenant_id, unit_id, content, source_document_id, chunk_index, embedding) "
-                "VALUES (%s, %s, %s, %s, %s, %s::vector) "
-                "ON CONFLICT (tenant_id, unit_id) DO UPDATE SET "
+                "INSERT INTO kg_text_unit (tenant_id, unit_id, content, source_document_id, chunk_index) "
+                "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (tenant_id, unit_id) DO UPDATE SET "
                 "content=EXCLUDED.content, source_document_id=EXCLUDED.source_document_id, "
-                "chunk_index=EXCLUDED.chunk_index, embedding=EXCLUDED.embedding",
-                [self.tenant_id, unit_id, content, source_document_id, chunk_index, _vec_literal(embedding)],
+                "chunk_index=EXCLUDED.chunk_index",
+                [self.tenant_id, unit_id, content, source_document_id, chunk_index],
+            )
+            cur.execute(
+                f"INSERT INTO {self._tu_vec()} (tenant_id, unit_id, embedding) VALUES (%s, %s, %s::vector) "
+                "ON CONFLICT (tenant_id, unit_id) DO UPDATE SET embedding=EXCLUDED.embedding",
+                [self.tenant_id, unit_id, _vec_literal(embedding)],
             )
 
     def query_text_units(self, document_id: str) -> list:
         from django.db import connection
-        t = self._tu_table()
-        try:
-            with connection.cursor() as cur:
-                cur.execute(
-                    f"SELECT coalesce(chunk_index,0) AS chunk_index, content FROM {t} "
-                    "WHERE tenant_id=%s AND source_document_id=%s ORDER BY chunk_index",
-                    [self.tenant_id, document_id],
-                )
-                return [{"chunk_index": r[0], "content": r[1]} for r in cur.fetchall()]
-        except Exception:
-            return []
+        with connection.cursor() as cur:
+            cur.execute(
+                "SELECT coalesce(chunk_index,0), content FROM kg_text_unit "
+                "WHERE tenant_id=%s AND source_document_id=%s ORDER BY chunk_index",
+                [self.tenant_id, document_id],
+            )
+            return [{"chunk_index": r[0], "content": r[1]} for r in cur.fetchall()]
 
     def all_text_units(self) -> list:
         from django.db import connection
-        t = self._tu_table()
-        try:
-            with connection.cursor() as cur:
-                cur.execute(f"SELECT unit_id, content FROM {t} WHERE tenant_id=%s", [self.tenant_id])
-                return [{"unit_id": r[0], "content": r[1]} for r in cur.fetchall()]
-        except Exception:
-            return []
+        with connection.cursor() as cur:
+            cur.execute("SELECT unit_id, content FROM kg_text_unit WHERE tenant_id=%s", [self.tenant_id])
+            return [{"unit_id": r[0], "content": r[1]} for r in cur.fetchall()]
 
     def set_text_unit_embedding(self, unit_id: str, embedding: list) -> None:
         from django.db import connection
-        self._ensure_tu(self._dim())
-        t = self._tu_table()
+        self._ensure_vec("text_unit", self._dim())
         with connection.cursor() as cur:
             cur.execute(
-                f"UPDATE {t} SET embedding=%s::vector WHERE tenant_id=%s AND unit_id=%s",
-                [_vec_literal(embedding), self.tenant_id, unit_id],
+                f"INSERT INTO {self._tu_vec()} (tenant_id, unit_id, embedding) VALUES (%s, %s, %s::vector) "
+                "ON CONFLICT (tenant_id, unit_id) DO UPDATE SET embedding=EXCLUDED.embedding",
+                [self.tenant_id, unit_id, _vec_literal(embedding)],
             )
 
     def vector_search(self, query_embedding: list, top_k: int = 5) -> list:
-        from django.db import connection
-        t = self._tu_table()
+        from django.db import connection, transaction
         lit = _vec_literal(query_embedding)
         try:
-            with connection.cursor() as cur:
+            # savepoint로 격리 — vec 테이블 부재/차원불일치 시 바깥 트랜잭션을 오염시키지 않는다.
+            with transaction.atomic(), connection.cursor() as cur:
                 cur.execute(
-                    f"SELECT content, source_document_id, 1 - (embedding <=> %s::vector) AS score "
-                    f"FROM {t} WHERE tenant_id=%s ORDER BY embedding <=> %s::vector LIMIT %s",
+                    f"SELECT tu.content, tu.source_document_id, 1 - (v.embedding <=> %s::vector) AS score "
+                    f"FROM {self._tu_vec()} v JOIN kg_text_unit tu "
+                    "ON tu.tenant_id=v.tenant_id AND tu.unit_id=v.unit_id "
+                    "WHERE v.tenant_id=%s ORDER BY v.embedding <=> %s::vector LIMIT %s",
                     [lit, self.tenant_id, lit, top_k],
                 )
                 return [{"content": r[0], "source_document_id": r[1], "score": r[2]} for r in cur.fetchall()]
         except Exception:
-            # 테이블 미존재(문서 미인제스트 tenant 등) → 근거 없음
+            # vec 테이블 미존재(문서 미인제스트 tenant 등) → 근거 없음
             return []
 
     # ── Graph Freshness (정적 공유 테이블) ───────────────────────────────────
@@ -554,97 +560,76 @@ class _PgGraphStore:
             row = cur.fetchone()
         return row[0] if row and row[0] else "fresh"
 
-    # ── Entity Mention ───────────────────────────────────────────────────────
-    def _m_table(self) -> str:
-        return f"kg_mention_d{self._dim()}"
-
-    def _ensure_m(self, dim: int) -> None:
-        from django.db import connection
-        t = f"kg_mention_d{dim}"
-        with connection.cursor() as cur:
-            cur.execute(
-                f"CREATE TABLE IF NOT EXISTS {t} ("
-                "tenant_id text NOT NULL, mention_id text NOT NULL, name text, "
-                "entity_type text DEFAULT '', description text DEFAULT '', "
-                "source_document_id text DEFAULT '', "
-                f"embedding vector({dim}), PRIMARY KEY (tenant_id, mention_id))"
-            )
-            cur.execute(f"CREATE INDEX IF NOT EXISTS {t}_tenant ON {t} (tenant_id)")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS {t}_doc ON {t} (tenant_id, source_document_id)")
-            cur.execute(
-                f"CREATE INDEX IF NOT EXISTS {t}_hnsw ON {t} "
-                "USING hnsw (embedding vector_cosine_ops)"
-            )
-
-    def ensure_mention_vector_index(self, dimensions: int = 1024) -> None:
-        self._ensure_m(dimensions)
-
+    # ── Entity Mention (메타데이터 kg_mention + 임베딩 kg_mention_vec_d{dim}) ─
     def upsert_mention(self, mention_id, name, entity_type="", description="",
                        source_document_id="", embedding=None) -> None:
         from django.db import connection
-        self._ensure_m(self._dim())
-        t = self._m_table()
-        emb = _vec_literal(embedding) if embedding is not None else None
         with connection.cursor() as cur:
             cur.execute(
-                f"INSERT INTO {t} (tenant_id, mention_id, name, entity_type, description, "
-                "source_document_id, embedding) VALUES (%s, %s, %s, %s, %s, %s, %s::vector) "
+                "INSERT INTO kg_mention (tenant_id, mention_id, name, entity_type, description, "
+                "source_document_id) VALUES (%s, %s, %s, %s, %s, %s) "
                 "ON CONFLICT (tenant_id, mention_id) DO UPDATE SET "
                 "name=EXCLUDED.name, entity_type=EXCLUDED.entity_type, description=EXCLUDED.description, "
-                "source_document_id=EXCLUDED.source_document_id, "
-                # 임베딩은 None이면 기존값 보존(현 Neo4j CASE WHEN과 동일)
-                f"embedding=COALESCE(EXCLUDED.embedding, {t}.embedding)",
-                [self.tenant_id, mention_id, name, entity_type, description, source_document_id, emb],
+                "source_document_id=EXCLUDED.source_document_id",
+                [self.tenant_id, mention_id, name, entity_type, description, source_document_id],
             )
+            if embedding is not None:
+                self._ensure_vec("mention", self._dim())
+                cur.execute(
+                    f"INSERT INTO {self._m_vec()} (tenant_id, mention_id, embedding) "
+                    "VALUES (%s, %s, %s::vector) ON CONFLICT (tenant_id, mention_id) "
+                    "DO UPDATE SET embedding=EXCLUDED.embedding",
+                    [self.tenant_id, mention_id, _vec_literal(embedding)],
+                )
 
     def query_mentions(self) -> list:
         from django.db import connection
-        t = self._m_table()
-        try:
-            with connection.cursor() as cur:
-                cur.execute(
-                    f"SELECT mention_id, name, entity_type, description, source_document_id "
-                    f"FROM {t} WHERE tenant_id=%s", [self.tenant_id],
-                )
-                cols = ("mention_id", "name", "entity_type", "description", "source_document_id")
-                return [dict(zip(cols, r)) for r in cur.fetchall()]
-        except Exception:
-            return []
+        with connection.cursor() as cur:
+            cur.execute(
+                "SELECT mention_id, name, entity_type, description, source_document_id "
+                "FROM kg_mention WHERE tenant_id=%s", [self.tenant_id],
+            )
+            cols = ("mention_id", "name", "entity_type", "description", "source_document_id")
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
 
     def mention_embeddings(self) -> list:
-        from django.db import connection
-        t = self._m_table()
+        from django.db import connection, transaction
         try:
-            with connection.cursor() as cur:
+            with transaction.atomic(), connection.cursor() as cur:
                 cur.execute(
-                    f"SELECT mention_id, embedding FROM {t} "
-                    "WHERE tenant_id=%s AND embedding IS NOT NULL", [self.tenant_id],
+                    f"SELECT mention_id, embedding FROM {self._m_vec()} WHERE tenant_id=%s", [self.tenant_id],
                 )
                 return [{"mention_id": r[0], "embedding": _parse_vec(r[1])} for r in cur.fetchall()]
         except Exception:
             return []
 
     def mentions_without_embedding(self) -> list:
-        from django.db import connection
-        t = self._m_table()
+        from django.db import connection, transaction
         try:
-            with connection.cursor() as cur:
+            with transaction.atomic(), connection.cursor() as cur:
                 cur.execute(
-                    f"SELECT mention_id, name, coalesce(description,'') FROM {t} "
-                    "WHERE tenant_id=%s AND embedding IS NULL", [self.tenant_id],
+                    "SELECT m.mention_id, m.name, coalesce(m.description,'') FROM kg_mention m "
+                    f"LEFT JOIN {self._m_vec()} v ON v.tenant_id=m.tenant_id AND v.mention_id=m.mention_id "
+                    "WHERE m.tenant_id=%s AND v.mention_id IS NULL", [self.tenant_id],
                 )
                 return [{"mention_id": r[0], "name": r[1], "description": r[2]} for r in cur.fetchall()]
         except Exception:
-            return []
+            # vec 테이블 미존재 → 전부 임베딩 없음(savepoint 롤백 후 메타데이터만)
+            with connection.cursor() as cur:
+                cur.execute(
+                    "SELECT mention_id, name, coalesce(description,'') FROM kg_mention WHERE tenant_id=%s",
+                    [self.tenant_id],
+                )
+                return [{"mention_id": r[0], "name": r[1], "description": r[2]} for r in cur.fetchall()]
 
     def set_mention_embedding(self, mention_id: str, embedding: list) -> None:
         from django.db import connection
-        self._ensure_m(self._dim())
-        t = self._m_table()
+        self._ensure_vec("mention", self._dim())
         with connection.cursor() as cur:
             cur.execute(
-                f"UPDATE {t} SET embedding=%s::vector WHERE tenant_id=%s AND mention_id=%s",
-                [_vec_literal(embedding), self.tenant_id, mention_id],
+                f"INSERT INTO {self._m_vec()} (tenant_id, mention_id, embedding) VALUES (%s, %s, %s::vector) "
+                "ON CONFLICT (tenant_id, mention_id) DO UPDATE SET embedding=EXCLUDED.embedding",
+                [self.tenant_id, mention_id, _vec_literal(embedding)],
             )
 
     def upsert_mention_same_as(self, id_a: str, id_b: str) -> None:
@@ -666,30 +651,28 @@ class _PgGraphStore:
     def search_entities(self, term: str, top_k: int = 10) -> list:
         """어휘(부분일치) ∪ 의미(벡터) Mention 검색 → SAME_AS 클러스터로 dedup (현 Neo4j와 동일)."""
         from django.db import connection
-        t = self._m_table()
         cols = ("mention_id", "name", "entity_type", "description", "source_document_id")
         by_mid = {}
+        with connection.cursor() as cur:
+            cur.execute(
+                "SELECT mention_id, name, entity_type, description, source_document_id FROM kg_mention "
+                "WHERE tenant_id=%s AND (position(lower(%s) in lower(name))>0 "
+                "OR position(lower(%s) in lower(coalesce(description,'')))>0)",
+                [self.tenant_id, term, term],
+            )
+            for r in cur.fetchall():
+                by_mid[r[0]] = dict(zip(cols, r))
+        # 의미(벡터) 보강 — 인덱스/임베딩이 없으면 어휘만으로 무중단(savepoint로 격리)
         try:
-            with connection.cursor() as cur:
-                cur.execute(
-                    f"SELECT mention_id, name, entity_type, description, source_document_id FROM {t} "
-                    "WHERE tenant_id=%s AND (position(lower(%s) in lower(name))>0 "
-                    "OR position(lower(%s) in lower(coalesce(description,'')))>0)",
-                    [self.tenant_id, term, term],
-                )
-                for r in cur.fetchall():
-                    by_mid[r[0]] = dict(zip(cols, r))
-        except Exception:
-            pass
-        # 의미(벡터) 보강 — 인덱스/임베딩이 없으면 어휘만으로 무중단
-        try:
+            from django.db import transaction
             from apps.rag.ingesters import get_embeddings
             q = _vec_literal(get_embeddings([term], provider=self._embedding_provider())[0])
-            with connection.cursor() as cur:
+            with transaction.atomic(), connection.cursor() as cur:
                 cur.execute(
-                    f"SELECT mention_id, name, entity_type, description, source_document_id FROM {t} "
-                    "WHERE tenant_id=%s AND embedding IS NOT NULL "
-                    "ORDER BY embedding <=> %s::vector LIMIT %s",
+                    "SELECT m.mention_id, m.name, m.entity_type, m.description, m.source_document_id "
+                    f"FROM {self._m_vec()} v JOIN kg_mention m "
+                    "ON m.tenant_id=v.tenant_id AND m.mention_id=v.mention_id "
+                    "WHERE v.tenant_id=%s ORDER BY v.embedding <=> %s::vector LIMIT %s",
                     [self.tenant_id, q, top_k],
                 )
                 for r in cur.fetchall():
@@ -719,7 +702,7 @@ class _PgGraphStore:
             by_cluster.setdefault(_find(mid), data)
         return list(by_cluster.values())
 
-    # ── RELATED 관계 + 1-hop 이웃 ────────────────────────────────────────────
+    # ── RELATED 관계 + 1-hop 이웃 (메타데이터만 사용) ─────────────────────────
     def upsert_mention_relation(self, source_id, target_id, description="", source_document_id="") -> None:
         from django.db import connection
         with connection.cursor() as cur:
@@ -742,32 +725,93 @@ class _PgGraphStore:
     def neighbors(self, name: str) -> dict:
         """이름의 Mention + 1-hop RELATED 이웃·엣지를 {nodes, edges}로 (tenant 스코프, 이름 기준)."""
         from django.db import connection
-        m = self._m_table()
-        try:
-            with connection.cursor() as cur:
-                cur.execute(
-                    f"WITH seed AS (SELECT mention_id FROM {m} WHERE tenant_id=%s AND name=%s) "
-                    f"SELECT DISTINCT mm.name, mm.entity_type, mm.description, mm.source_document_id "
-                    f"FROM {m} mm WHERE mm.tenant_id=%s AND (mm.mention_id IN (SELECT mention_id FROM seed) "
-                    "OR mm.mention_id IN ("
-                    "  SELECT target_id FROM kg_relation WHERE tenant_id=%s AND source_id IN (SELECT mention_id FROM seed) "
-                    "  UNION SELECT source_id FROM kg_relation WHERE tenant_id=%s AND target_id IN (SELECT mention_id FROM seed)))",
-                    [self.tenant_id, name, self.tenant_id, self.tenant_id, self.tenant_id],
-                )
-                ncols = ("name", "entity_type", "description", "source_document_id")
-                nodes = [dict(zip(ncols, r)) for r in cur.fetchall()]
+        with connection.cursor() as cur:
+            cur.execute(
+                "WITH seed AS (SELECT mention_id FROM kg_mention WHERE tenant_id=%s AND name=%s) "
+                "SELECT DISTINCT mm.name, mm.entity_type, mm.description, mm.source_document_id "
+                "FROM kg_mention mm WHERE mm.tenant_id=%s AND (mm.mention_id IN (SELECT mention_id FROM seed) "
+                "OR mm.mention_id IN ("
+                "  SELECT target_id FROM kg_relation WHERE tenant_id=%s AND source_id IN (SELECT mention_id FROM seed) "
+                "  UNION SELECT source_id FROM kg_relation WHERE tenant_id=%s AND target_id IN (SELECT mention_id FROM seed)))",
+                [self.tenant_id, name, self.tenant_id, self.tenant_id, self.tenant_id],
+            )
+            ncols = ("name", "entity_type", "description", "source_document_id")
+            nodes = [dict(zip(ncols, r)) for r in cur.fetchall()]
 
+            cur.execute(
+                "SELECT a.name, b.name, r.description FROM kg_relation r "
+                "JOIN kg_mention a ON a.tenant_id=r.tenant_id AND a.mention_id=r.source_id "
+                "JOIN kg_mention b ON b.tenant_id=r.tenant_id AND b.mention_id=r.target_id "
+                "WHERE r.tenant_id=%s AND (a.name=%s OR b.name=%s)",
+                [self.tenant_id, name, name],
+            )
+            edges = [{"source": r[0], "target": r[1], "description": r[2]} for r in cur.fetchall()]
+        return {"nodes": nodes, "edges": edges}
+
+    # ── 라이프사이클: 삭제·재시드·재임베딩 재구축 ─────────────────────────────
+    def delete_document(self, document_id: str) -> None:
+        from django.db import connection
+        with connection.cursor() as cur:
+            cur.execute(
+                "SELECT mention_id FROM kg_mention WHERE tenant_id=%s AND source_document_id=%s",
+                [self.tenant_id, document_id],
+            )
+            mids = [r[0] for r in cur.fetchall()]
+            cur.execute(
+                "SELECT unit_id FROM kg_text_unit WHERE tenant_id=%s AND source_document_id=%s",
+                [self.tenant_id, document_id],
+            )
+            uids = [r[0] for r in cur.fetchall()]
+
+            if mids:
+                # 연결 엣지 제거(DETACH 동등) — 양 끝 어디든 삭제 Mention을 참조하면 제거
                 cur.execute(
-                    f"SELECT a.name, b.name, r.description FROM kg_relation r "
-                    f"JOIN {m} a ON a.tenant_id=r.tenant_id AND a.mention_id=r.source_id "
-                    f"JOIN {m} b ON b.tenant_id=r.tenant_id AND b.mention_id=r.target_id "
-                    "WHERE r.tenant_id=%s AND (a.name=%s OR b.name=%s)",
-                    [self.tenant_id, name, name],
+                    "DELETE FROM kg_relation WHERE tenant_id=%s AND (source_id = ANY(%s) OR target_id = ANY(%s))",
+                    [self.tenant_id, mids, mids],
                 )
-                edges = [{"source": r[0], "target": r[1], "description": r[2]} for r in cur.fetchall()]
-            return {"nodes": nodes, "edges": edges}
+                cur.execute(
+                    "DELETE FROM kg_same_as WHERE tenant_id=%s AND (a = ANY(%s) OR b = ANY(%s))",
+                    [self.tenant_id, mids, mids],
+                )
+            cur.execute(
+                "DELETE FROM kg_mention WHERE tenant_id=%s AND source_document_id=%s",
+                [self.tenant_id, document_id],
+            )
+            cur.execute(
+                "DELETE FROM kg_text_unit WHERE tenant_id=%s AND source_document_id=%s",
+                [self.tenant_id, document_id],
+            )
+        # vec 행 제거는 vec 테이블 부재 가능 → savepoint로 격리(바깥 트랜잭션 보호)
+        if mids:
+            self._safe_delete_vec(self._m_vec(), "mention_id", mids)
+        if uids:
+            self._safe_delete_vec(self._tu_vec(), "unit_id", uids)
+        self.set_freshness("stale")
+
+    def _safe_delete_vec(self, table, id_col, ids) -> None:
+        from django.db import connection, transaction
+        try:
+            with transaction.atomic(), connection.cursor() as cur:
+                cur.execute(f"DELETE FROM {table} WHERE tenant_id=%s AND {id_col} = ANY(%s)", [self.tenant_id, ids])
         except Exception:
-            return {"nodes": [], "edges": []}
+            pass  # vec 테이블 미존재면 지울 것 없음
+
+    def reseed_document_label(self, document_id: str, new_label: str) -> None:
+        self.upsert_mention(
+            f"{document_id}:{new_label}", new_label, "document",
+            f"Source document: {new_label}", source_document_id=document_id,
+        )
+        self.set_freshness("stale")
+
+    def recreate_vector_indexes(self, dimensions: int) -> None:
+        """새 차원 vec 테이블을 보장하고 이 tenant의 임베딩을 비운다(메타데이터는 보존).
+        reembed가 이어서 set_*_embedding으로 새 차원 벡터를 재기록한다."""
+        from django.db import connection
+        self._ensure_vec("text_unit", dimensions)
+        self._ensure_vec("mention", dimensions)
+        with connection.cursor() as cur:
+            cur.execute(f"DELETE FROM kg_text_unit_vec_d{dimensions} WHERE tenant_id=%s", [self.tenant_id])
+            cur.execute(f"DELETE FROM kg_mention_vec_d{dimensions} WHERE tenant_id=%s", [self.tenant_id])
 
 
 class GraphStore:

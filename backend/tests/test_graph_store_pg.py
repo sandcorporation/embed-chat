@@ -229,3 +229,68 @@ def test_neighbors_tenant_scoped(pg_backend):
 
     assert {n["name"] for n in gb.neighbors("Shared")["nodes"]} == {"Shared"}  # 이웃 없음
     assert gb.neighbors("Shared")["edges"] == []
+
+
+# ── issue 165: 라이프사이클(삭제·재시드·재임베딩 차원변경) ──────────────────
+
+@pytest.mark.django_db
+def test_delete_document_removes_units_mentions_edges(pg_backend):
+    """문서 삭제 시 그 문서의 TextUnit·Mention·연결 엣지가 사라지고 freshness=stale."""
+    from apps.rag.graph_store import GraphStore
+    gs = GraphStore(str(_tenant(dim=3).id))
+    gs.upsert_text_unit("u1", "내용", [1.0, 0.0, 0.0], source_document_id="d1")
+    gs.upsert_mention("d1:A", "A", "x", "", source_document_id="d1")
+    gs.upsert_mention("d1:B", "B", "x", "", source_document_id="d1")
+    gs.upsert_mention_relation("d1:A", "d1:B", "rel", "d1")
+    gs.set_freshness("fresh")
+
+    gs.delete_document("d1")
+
+    assert gs.query_text_units("d1") == []
+    assert gs.query_mentions() == []
+    assert gs.query_mention_relations() == []  # 연결 엣지도 제거(DETACH 동등)
+    assert gs.get_freshness() == "stale"
+
+
+@pytest.mark.django_db
+def test_reseed_document_label(pg_backend):
+    """레이블 재시드: 대표 Mention upsert + freshness=stale."""
+    from apps.rag.graph_store import GraphStore
+    gs = GraphStore(str(_tenant(dim=3).id))
+    gs.set_freshness("fresh")
+    gs.reseed_document_label("doc7", "새 레이블")
+
+    names = [m["name"] for m in gs.query_mentions()]
+    assert "새 레이블" in names
+    assert gs.get_freshness() == "stale"
+
+
+@pytest.mark.django_db
+def test_reembed_dim_change_preserves_structure(pg_backend):
+    """임베딩 차원 변경: 메타데이터(Mention·TextUnit)는 보존되고 새 차원에서 검색된다.
+
+    재임베딩 흐름(reembed_tenant)이 의존하는 GraphStore 원시동작을 합성으로 검증한다 —
+    config dim이 바뀌어도 query_mentions/all_text_units는 동작하고, recreate_vector_indexes +
+    set_*_embedding으로 새 차원 벡터를 기록하면 검색이 새 차원에서 동작한다.
+    """
+    from apps.rag.graph_store import GraphStore
+    from apps.tenants.models import TenantConfig
+    t = _tenant(dim=3)
+    gs3 = GraphStore(str(t.id))
+    gs3.upsert_mention("m1", "Entity", "x", "설명", embedding=[1.0, 0.0, 0.0])
+    gs3.upsert_text_unit("u1", "원문", [1.0, 0.0, 0.0], source_document_id="d1")
+
+    # 차원 변경(3→4) — config 갱신 후 새 GraphStore(새 dim)
+    cfg = TenantConfig.objects.get(tenant=t); cfg.embed_dim = 4; cfg.save()
+    gs4 = GraphStore(str(t.id))
+
+    # 메타데이터는 차원 무관하게 보존된다
+    assert [m["name"] for m in gs4.query_mentions()] == ["Entity"]
+    assert [u["content"] for u in gs4.all_text_units()] == ["원문"]
+
+    # 새 차원으로 재임베딩 후 검색
+    gs4.recreate_vector_indexes(4)
+    gs4.set_mention_embedding("m1", [1.0, 0.0, 0.0, 0.0])
+    gs4.set_text_unit_embedding("u1", [1.0, 0.0, 0.0, 0.0])
+    assert gs4.search_entities("entity")[0]["name"] == "Entity"
+    assert gs4.vector_search([1.0, 0.0, 0.0, 0.0], top_k=1)[0]["content"] == "원문"
