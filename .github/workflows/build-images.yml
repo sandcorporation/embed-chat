@@ -1,0 +1,66 @@
+# prod 이미지(arm64) 빌드 → GHCR push (ADR-0015).
+#
+# sub의 self-hosted 러너(x86)에서 QEMU buildx로 linux/arm64를 빌드해 oracle(Ampere A1)이
+# pull만 하게 한다. 빌드 대상은 backend(api·worker·worker-chat·relay·bridge 공용), admin,
+# widget 3개. paddle은 Vision OCR 전환으로 prod에서 제거(ADR-0020), ollama·nginx·pg·redis·
+# neo4j는 공식 멀티아치 이미지라 빌드 불필요.
+#
+# 인증: GITHUB_TOKEN(packages:write) — PAT 불필요. 태그: <git sha>(불변, 배포 핀) + latest(main).
+# on: push라 fork PR은 트리거되지 않는다(self-hosted 러너 보안).
+
+name: build-images
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: [self-hosted, arm64-builder]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            context: ./backend
+          - image: admin
+            context: ./admin
+          - image: widget
+            context: ./widget
+    steps:
+      - uses: actions/checkout@v4
+
+      # 호스트 dockerd(DooD)에 arm64 에뮬레이션 등록 + buildx 빌더 준비(매 실행 idempotent).
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/embed-chat-${{ matrix.image }}
+          tags: |
+            type=raw,value=${{ github.sha }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 러너 재시작에도 캐시 보존 — GHCR :buildcache 태그에 layer 캐시 저장/재사용.
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/embed-chat-${{ matrix.image }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/embed-chat-${{ matrix.image }}:buildcache,mode=max
