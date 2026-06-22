@@ -199,6 +199,17 @@ def call_llm_plain(state: dict) -> dict:
     }
 
 
+def _clear_transient() -> dict:
+    """종단 노드에서 턴 한정·휘발성 채널을 비운다(Checkpoint 슬림화).
+
+    rag_chunks(그래프 근거 + 원문 폴백 청크)·visitor_memories·operational_notice는 매 턴
+    새로 조립되는 임시 산출물이라 휴지 체크포인트에 남길 이유가 없다. 그래프 채널에 두면 어드민
+    Checkpoint 뷰어가 마지막 턴의 검색 원문까지 통째로 노출하며 스냅샷마다 누적된다(MEMORY 원칙).
+    messages(대화)만 보존한다.
+    """
+    return {"rag_chunks": [], "visitor_memories": [], "operational_notice": ""}
+
+
 def create_escalation_node(state: dict) -> dict:
     """AI escalation 전이 — 상태 변경 + SessionEscalated 이벤트를 한 트랜잭션으로 기록한다(issue 151).
 
@@ -239,7 +250,7 @@ def create_escalation_node(state: dict) -> dict:
     messages = [{"role": "user", "content": state["user_message"]}]
     if response:
         messages.append({"role": "assistant", "content": response})
-    return {"messages": messages}
+    return {"messages": messages, **_clear_transient()}
 
 
 def save_messages_node(state: dict) -> dict:
@@ -265,5 +276,6 @@ def save_messages_node(state: dict) -> dict:
         "messages": [
             {"role": "user", "content": state["user_message"]},
             {"role": "assistant", "content": state["assistant_response"]},
-        ]
+        ],
+        **_clear_transient(),
     }

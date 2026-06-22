@@ -103,7 +103,7 @@ START → local_search → call_llm ─(context_sufficient=False)─→ source_s
 채팅 그래프는 **Tenant의 `hitl_enabled` 토글 + 영업시간에 따라 다르게 컴파일**됩니다(`effective_hitl = hitl_enabled AND business_hours.is_open(now)`). HITL-OFF(또는 상담시간 외)면 `call_llm`이 `needs_hitl` 필드 없는 response-only 스키마를 쓰고 `save_messages`로 직행해, escalation 분기 자체가 없습니다(지키지 못할 전환 멘트 누수를 구조적으로 차단).
 
 - **실행 격리**: chat 1턴은 gevent web 워커가 아니라 **전용 Celery `worker-chat`**(chat 큐)에서 실행되어 블로킹이 SSE 서빙을 얼리지 않습니다. 동일 세션 동시 실행은 Redis 락으로 직렬화하며, 공개 URL 남용은 (tenant, visitor)당 레이트리밋으로 막습니다(at-most-once).
-- **Conversation Memory**: 단일 ChatSession 내 히스토리는 **LangGraph Checkpoint**(PostgreSQL)로 관리됩니다. `thread_id = session_id`라 수동 로드 없이 이전 state가 자동 복원됩니다.
+- **Conversation Memory**: 단일 ChatSession 내 히스토리는 **LangGraph Checkpoint**(PostgreSQL)로 관리됩니다. `thread_id = session_id`라 수동 로드 없이 이전 state가 자동 복원됩니다. 턴마다 새로 조립되는 검색 산출물(RAG 청크·원문 폴백)·휘발성 컨텍스트는 종단 노드에서 비워, 체크포인트엔 **대화만** 남고 비대해지지 않습니다.
 - **Visitor Memory**: ChatSession을 넘어 축적되는 장기 기억. 대화 중 LLM이 자동 추출하며 어드민에서 조회·수정·삭제할 수 있습니다.
 - **프롬프트 하드닝**(인젝션 방어): 비신뢰 입력(RAG·메모리·Visitor 메시지)을 `UNTRUSTED_DATA` 구역으로 격리·라벨링하고, 플랫폼이 anti-disclosure 지침을 항상 주입합니다. 테넌트 스코프 RAG와 무도구 에이전트가 크로스테넌트·행동 위험을 이미 차단합니다.
 - **프롬프트 캐싱 친화 구조**: 테넌트-불변 prefix(구조화 출력 tool 스키마 + Base System Prompt + 보안 지침)를 안정 prefix로 고정하고, 매 턴 바뀌는 휘발성(RAG·메모리·운영 안내)은 마지막 사용자 턴으로 내려 모든 세션·턴에서 prefix가 재사용되게 합니다. Anthropic provider는 안정 블록에 `cache_control` 분기점 1개를 주입(boundary에서 provider-aware), OpenAI·OpenRouter는 자동 prefix 캐싱을 탑니다.
@@ -117,7 +117,7 @@ START → local_search → call_llm ─(context_sufficient=False)─→ source_s
 - HITL 모드에서는 AI가 침묵하고, 팀원이 "수락하기"로 클레임한 뒤 메시지를 보냅니다. "AI에게 넘기기"로 다시 AI 모드로 복귀합니다.
 - Escalation 발생 시 Slack/Discord/Generic **웹훅**으로 알림을 보냅니다.
 - **상담 가능 시간(영업시간)**: Tenant가 타임존 + 요일별 시간창 + 휴일(예외 날짜)을 설정하면, 그 시간 외에는 그래프가 plain으로 컴파일돼 **AI 자동 escalation이 일어나지 않고** 운영 안내만 곁들여 AI가 계속 답합니다. 미설정 시 24/7(opt-in 하위호환). 수동 takeover는 시간과 무관하게 항상 가능합니다.
-- **세션 콘솔 + 임의 takeover**: HITL 탭이 세션 콘솔로 진화 — 상단에 진행 중 상담(escalation) 카드, 하단에 **다른 세션 목록**(SSE 연결된 활성 세션 우선)을 보여줍니다. 팀원은 escalation이 없는 임의 세션도 **"상담 시작"으로 직접 takeover**(자동-claimed `agent` escalation)할 수 있습니다. 활성 여부는 Redis presence(SSE keepalive로 갱신되는 TTL = 자가치유)로 판단하고, 연결/해제는 `hitl:{tenant}` 채널로 콘솔에 실시간 push됩니다.
+- **세션 콘솔 + 임의 takeover**: HITL 탭이 세션 콘솔로 진화 — 상단에 진행 중 상담(escalation) 카드, 하단에 **다른 세션 목록**(SSE 연결된 활성 세션 우선)을 보여줍니다. 팀원은 escalation이 없는 임의 세션도 **"상담 시작"으로 직접 takeover**(자동-claimed `agent` escalation)할 수 있습니다. 활성 여부는 Redis presence(SSE keepalive로 갱신되는 TTL = 자가치유)로 판단하고, 연결/해제는 `hitl:{tenant}` 채널로 콘솔에 실시간 push됩니다. 위젯 새로고침처럼 옛/새 SSE 연결이 겹칠 때 콘솔이 "유휴"로 잘못 뒤집히지 않도록 **연결을 참조 계수**해 세션의 첫 연결(0→1)·마지막 종료(1→0) 전이에서만 콘솔 델타를 발행합니다.
 - **Event-Driven 파이프라인**: HITL 라이프사이클 전이(Escalated/Claimed/TakenOver/Resolved)는 **Transactional Outbox**로 상태 변경과 한 트랜잭션에 이벤트로 기록되고, **relay 싱글톤**(Redis pub/sub wake로 깨어 드레인)이 **EventBus**(Redis Streams, 추후 Kafka 교체 가능)로 발행합니다. webhook·방문자 SSE(hitl_start/end)·콘솔 델타·presence가 **디커플링된 소비자**로 이 이벤트에서 파생되어, dual-write 유실 없이 at-least-once+멱등+DLQ로 동작합니다. 설계·원리: **[docs/event-driven-architecture.md](docs/event-driven-architecture.md)** · 운영(프로세스·dead-letter 리플레이): [docs/event-pipeline.md](docs/event-pipeline.md).
 
 ### Visitor 접근 & 신원 (공개 Slug URL)

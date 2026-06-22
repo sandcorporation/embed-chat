@@ -124,6 +124,49 @@ def test_fallback_streams_answer_once(tenant_with_key, fake_chat_llm, monkeypatc
 
 
 @pytest.mark.django_db
+def test_transient_rag_chunks_not_retained_in_resting_checkpoint(tenant_with_key, fake_chat_llm):
+    """휴지 체크포인트는 대화(messages)만 보존하고 턴 한정 검색 산출물(rag_chunks)은 비운다.
+
+    rag_chunks는 그래프 근거 + 원문 폴백 청크(원문 수백 단어)로 채워지는 임시 산출물인데,
+    그래프 채널로 두면 매 super-step 스냅샷에 영구 저장돼 Checkpoint(어드민 뷰어)가 비대해진다.
+    """
+    from apps.agent.graph import run_chat_agent, _create_checkpointer
+    from apps.agent.nodes import HITLResponse
+    from apps.chat.models import ChatSession
+    from apps.rag.graph_store import GraphStore
+    from apps.rag.ingesters import get_embeddings
+
+    tenant, _ = tenant_with_key
+    gs = GraphStore(str(tenant.id))
+    fact = "이 모니터는 1920 x 1080 FHD 해상도를 지원합니다."
+    gs.ensure_vector_index(dimensions=1024)
+    emb = get_embeddings([fact], provider=gs._embedding_provider())[0]
+    gs.upsert_text_unit("u-res", fact, emb, source_document_id="d1", chunk_index=0)
+
+    def fake(messages):
+        joined = " ".join(getattr(m, "content", "") for m in messages)
+        if "1920" in joined:
+            return HITLResponse(response="지원 해상도는 1920x1080(FHD)입니다.",
+                                needs_hitl=False, hitl_reason="", context_sufficient=True)
+        return HITLResponse(response="", needs_hitl=False, hitl_reason="", context_sufficient=False)
+    fake_chat_llm.override = fake
+
+    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-slim")
+    run_chat_agent(session, "지원하는 모니터의 해상도")  # 원문 폴백으로 rag_chunks가 채워졌다 비워진다
+
+    saver, conn = _create_checkpointer()
+    try:
+        cv = saver.get({"configurable": {"thread_id": str(session.id)}})["channel_values"]
+    finally:
+        conn.close()
+
+    assert cv.get("rag_chunks") == []        # 임시 검색 산출물은 휴지 상태에 남지 않음
+    assert cv.get("visitor_memories") == []  # 휘발성 컨텍스트도 비움
+    # 대화는 보존된다(체크포인트의 본래 역할).
+    assert len([m for m in (cv.get("messages") or []) if m.get("role") == "assistant"]) >= 1
+
+
+@pytest.mark.django_db
 def test_no_source_fallback_when_graph_answers(tenant_with_key, fake_chat_llm):
     """그래프로 답한 happy path(context_sufficient=True)에선 원문 폴백을 타지 않는다(토큰 가드).
 
