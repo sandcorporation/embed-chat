@@ -119,6 +119,9 @@ OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3")
 OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "60.0"))
 
 # Neo4j (GraphRAG Knowledge Graph)
+# GraphStore 백엔드 선택(neo4j|pg). pg = Postgres+pgvector 흡수(PRD-pgvector-graphstore).
+# 개발 중엔 neo4j 기본, 전 메서드 검증 후 컷오버(167)에서 pg로 전환·Neo4j 제거.
+GRAPH_BACKEND = os.environ.get("GRAPH_BACKEND", "neo4j")
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "neo4j-test-password")

@@ -28,7 +28,7 @@ VECTOR_INDEX = "text_unit_embedding"
 MENTION_VECTOR_INDEX = "mention_embedding"
 
 
-class GraphStore:
+class _Neo4jGraphStore:
     def __init__(self, tenant_id: str):
         if not tenant_id:
             raise ValueError("tenant_id is required")
@@ -404,3 +404,157 @@ class GraphStore:
             nodes = [dict(rec) for rec in session.run(nodes_q, tenant_id=self.tenant_id, name=name)]
             edges = [dict(rec) for rec in session.run(edges_q, tenant_id=self.tenant_id, name=name)]
         return {"nodes": nodes, "edges": edges}
+
+
+# ── Postgres + pgvector 백엔드 (PRD-pgvector-graphstore) ──────────────────────
+# 같은 deep module 인터페이스를 Postgres로 백킹한다. per-Tenant 임베딩 차원은 차원별 테이블
+# (kg_text_unit_d{dim} 등)로 라우팅하고, 검색은 tenant_id 스코프 + HNSW(+iterative scan)다.
+# 비-벡터(엣지·meta)는 정적 공유 테이블(마이그레이션). 모든 쿼리에 tenant_id를 강제 주입한다.
+
+def _vec_literal(embedding) -> str:
+    """파이썬 시퀀스를 pgvector 텍스트 리터럴('[a,b,c]')로. %s::vector 파라미터로 바인딩한다."""
+    return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+
+
+class _PgGraphStore:
+    def __init__(self, tenant_id: str):
+        if not tenant_id:
+            raise ValueError("tenant_id is required")
+        self.tenant_id = str(tenant_id)
+        self._dim_cache = None
+        self._ensured_tu = set()  # 이 인스턴스에서 DDL 보장한 차원(중복 DDL 회피)
+
+    def _dim(self) -> int:
+        if self._dim_cache is None:
+            from apps.tenants.models import TenantConfig
+            cfg = TenantConfig.objects.filter(tenant_id=self.tenant_id).first()
+            self._dim_cache = cfg.embed_dim if cfg else 1024
+        return self._dim_cache
+
+    def _tu_table(self) -> str:
+        return f"kg_text_unit_d{self._dim()}"
+
+    def _embedding_provider(self):
+        from apps.tenants.models import TenantConfig
+        from apps.agent.providers import embedding_provider
+        cfg = TenantConfig.objects.filter(tenant_id=self.tenant_id).first()
+        return embedding_provider(cfg) if cfg else None
+
+    # ── DDL (차원별 테이블 + HNSW, IF NOT EXISTS — 동적) ──────────────────────
+    def _ensure_tu(self, dim: int) -> None:
+        if dim in self._ensured_tu:
+            return
+        from django.db import connection
+        t = f"kg_text_unit_d{dim}"
+        with connection.cursor() as cur:
+            cur.execute(
+                f"CREATE TABLE IF NOT EXISTS {t} ("
+                "tenant_id text NOT NULL, unit_id text NOT NULL, content text, "
+                "source_document_id text DEFAULT '', chunk_index int DEFAULT 0, "
+                f"embedding vector({dim}), PRIMARY KEY (tenant_id, unit_id))"
+            )
+            cur.execute(f"CREATE INDEX IF NOT EXISTS {t}_doc ON {t} (tenant_id, source_document_id)")
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS {t}_hnsw ON {t} "
+                "USING hnsw (embedding vector_cosine_ops)"
+            )
+        self._ensured_tu.add(dim)
+
+    def ensure_vector_index(self, dimensions: int = 1024) -> None:
+        self._ensure_tu(dimensions)
+
+    # ── Text Unit ────────────────────────────────────────────────────────────
+    def upsert_text_unit(self, unit_id, content, embedding, source_document_id="", chunk_index=0) -> None:
+        from django.db import connection
+        self._ensure_tu(self._dim())
+        t = self._tu_table()
+        with connection.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO {t} (tenant_id, unit_id, content, source_document_id, chunk_index, embedding) "
+                "VALUES (%s, %s, %s, %s, %s, %s::vector) "
+                "ON CONFLICT (tenant_id, unit_id) DO UPDATE SET "
+                "content=EXCLUDED.content, source_document_id=EXCLUDED.source_document_id, "
+                "chunk_index=EXCLUDED.chunk_index, embedding=EXCLUDED.embedding",
+                [self.tenant_id, unit_id, content, source_document_id, chunk_index, _vec_literal(embedding)],
+            )
+
+    def query_text_units(self, document_id: str) -> list:
+        from django.db import connection
+        t = self._tu_table()
+        try:
+            with connection.cursor() as cur:
+                cur.execute(
+                    f"SELECT coalesce(chunk_index,0) AS chunk_index, content FROM {t} "
+                    "WHERE tenant_id=%s AND source_document_id=%s ORDER BY chunk_index",
+                    [self.tenant_id, document_id],
+                )
+                return [{"chunk_index": r[0], "content": r[1]} for r in cur.fetchall()]
+        except Exception:
+            return []
+
+    def all_text_units(self) -> list:
+        from django.db import connection
+        t = self._tu_table()
+        try:
+            with connection.cursor() as cur:
+                cur.execute(f"SELECT unit_id, content FROM {t} WHERE tenant_id=%s", [self.tenant_id])
+                return [{"unit_id": r[0], "content": r[1]} for r in cur.fetchall()]
+        except Exception:
+            return []
+
+    def set_text_unit_embedding(self, unit_id: str, embedding: list) -> None:
+        from django.db import connection
+        self._ensure_tu(self._dim())
+        t = self._tu_table()
+        with connection.cursor() as cur:
+            cur.execute(
+                f"UPDATE {t} SET embedding=%s::vector WHERE tenant_id=%s AND unit_id=%s",
+                [_vec_literal(embedding), self.tenant_id, unit_id],
+            )
+
+    def vector_search(self, query_embedding: list, top_k: int = 5) -> list:
+        from django.db import connection
+        t = self._tu_table()
+        lit = _vec_literal(query_embedding)
+        try:
+            with connection.cursor() as cur:
+                cur.execute(
+                    f"SELECT content, source_document_id, 1 - (embedding <=> %s::vector) AS score "
+                    f"FROM {t} WHERE tenant_id=%s ORDER BY embedding <=> %s::vector LIMIT %s",
+                    [lit, self.tenant_id, lit, top_k],
+                )
+                return [{"content": r[0], "source_document_id": r[1], "score": r[2]} for r in cur.fetchall()]
+        except Exception:
+            # 테이블 미존재(문서 미인제스트 tenant 등) → 근거 없음
+            return []
+
+    # ── Graph Freshness (정적 공유 테이블) ───────────────────────────────────
+    def set_freshness(self, state: str) -> None:
+        from django.db import connection
+        with connection.cursor() as cur:
+            cur.execute(
+                "INSERT INTO kg_graph_meta (tenant_id, freshness) VALUES (%s, %s) "
+                "ON CONFLICT (tenant_id) DO UPDATE SET freshness=EXCLUDED.freshness",
+                [self.tenant_id, state],
+            )
+
+    def get_freshness(self) -> str:
+        from django.db import connection
+        with connection.cursor() as cur:
+            cur.execute("SELECT freshness FROM kg_graph_meta WHERE tenant_id=%s", [self.tenant_id])
+            row = cur.fetchone()
+        return row[0] if row and row[0] else "fresh"
+
+
+class GraphStore:
+    """백엔드 파사드 — settings.GRAPH_BACKEND(neo4j|pg)로 구현을 고른다. 공개 인터페이스는
+    호출부가 쓰는 그대로이며, 모든 메서드는 선택된 백엔드로 위임된다(인터페이스 불변)."""
+
+    def __init__(self, tenant_id: str):
+        if not tenant_id:
+            raise ValueError("tenant_id is required")
+        backend = _PgGraphStore if getattr(settings, "GRAPH_BACKEND", "neo4j") == "pg" else _Neo4jGraphStore
+        self.__dict__["_backend"] = backend(str(tenant_id))
+
+    def __getattr__(self, name):
+        return getattr(self.__dict__["_backend"], name)
