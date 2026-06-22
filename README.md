@@ -117,6 +117,7 @@ START → local_search → call_llm ─(context_sufficient=False)─→ source_s
 - Escalation 발생 시 Slack/Discord/Generic **웹훅**으로 알림을 보냅니다.
 - **상담 가능 시간(영업시간)**: Tenant가 타임존 + 요일별 시간창 + 휴일(예외 날짜)을 설정하면, 그 시간 외에는 그래프가 plain으로 컴파일돼 **AI 자동 escalation이 일어나지 않고** 운영 안내만 곁들여 AI가 계속 답합니다. 미설정 시 24/7(opt-in 하위호환). 수동 takeover는 시간과 무관하게 항상 가능합니다.
 - **세션 콘솔 + 임의 takeover**: HITL 탭이 세션 콘솔로 진화 — 상단에 진행 중 상담(escalation) 카드, 하단에 **다른 세션 목록**(SSE 연결된 활성 세션 우선)을 보여줍니다. 팀원은 escalation이 없는 임의 세션도 **"상담 시작"으로 직접 takeover**(자동-claimed `agent` escalation)할 수 있습니다. 활성 여부는 Redis presence(SSE keepalive로 갱신되는 TTL = 자가치유)로 판단하고, 연결/해제는 `hitl:{tenant}` 채널로 콘솔에 실시간 push됩니다.
+- **Event-Driven 파이프라인**: HITL 라이프사이클 전이(Escalated/Claimed/TakenOver/Resolved)는 **Transactional Outbox**로 상태 변경과 한 트랜잭션에 이벤트로 기록되고, **relay**(LISTEN/NOTIFY 싱글톤)가 **EventBus**(Redis Streams, 추후 Kafka 교체 가능)로 발행합니다. webhook·방문자 SSE(hitl_start/end)·콘솔 델타·presence가 **디커플링된 소비자**로 이 이벤트에서 파생되어, dual-write 유실 없이 at-least-once+DLQ로 동작합니다. 구성·운영(dead-letter 리플레이): [docs/event-pipeline.md](docs/event-pipeline.md).
 
 ### Visitor 접근 & 신원 (공개 Slug URL)
 

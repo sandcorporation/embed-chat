@@ -1,0 +1,63 @@
+# Event Pipeline (Transactional Outbox + EventBus)
+
+HITL/세션 라이프사이클은 **카논 도메인 이벤트**로 흐릅니다. 상태 전이는 같은 트랜잭션에서
+이벤트를 기록(Transactional Outbox)하고, relay가 EventBus로 발행하면 디커플링된 소비자가
+각자 파생합니다. 관련 PRD: `.scratch/embed-chatbot-platform/PRD-eventdriven-hitl-outbox.md`.
+
+## 구성요소
+
+| 컴포넌트 | 역할 |
+|---|---|
+| `event_store` 테이블 | 영구 append-only 감사(삭제·published 없음). 재생·디버깅의 진실원천 |
+| `event_outbox` 테이블 | 전송 큐(자기완결 봉투). relay 발행 후 prune |
+| `record_event(...)` | 상태 전이 트랜잭션에서 event_store+outbox에 원자적 기록 + `pg_notify` |
+| `relay` (싱글톤) | `LISTEN/NOTIFY`로 outbox를 EventBus로 드레인(부팅 catch-up sweep 포함). **단일 인스턴스**(순서 보존) |
+| `EventBus` 포트 / Redis Streams 어댑터 | publish/consume(group)/ack/claim/dead-letter. 추후 Kafka 어댑터 교체 가능 |
+| 소비자 4종 | `webhook` · `visitor-bridge`(→`session:{id}` hitl_start/end) · `console-bridge`(→`hitl:{tenant}` 델타) · `presence-bridge`(presence 전이) |
+| `processed_events` 테이블 | `(consumer_group, event_id)` 멱등 — at-least-once 중복 방지 |
+
+## 이벤트
+
+- **내구(outbox→event_store→bus, DLQ)**: `SessionEscalated` · `EscalationClaimed` · `SessionTakenOver` · `EscalationResolved`.
+- **ephemeral(EventBus capped 스트림, outbox 미경유)**: `VisitorConnected` · `VisitorDisconnected`.
+- 토큰·라이브 HITL 메시지·presence 하트비트는 기존 Redis pub/sub 유지(이벤트화 안 함).
+
+## 프로세스 (compose)
+
+```
+relay                     # 싱글톤 — outbox 드레인
+worker-webhook            # consume_events --group=webhook
+worker-visitor-bridge     # consume_events --group=visitor-bridge
+worker-console-bridge     # consume_events --group=console-bridge
+worker-presence-bridge    # consume_events --group=presence-bridge --topic=signals.presence
+```
+
+prod=`docker-compose.yml`, dev=`docker-compose.dev.yml`, e2e=`docker-compose.test.yml`.
+
+## 운영: dead-letter 처리
+
+소비자가 제한 횟수(`max_attempts`) 실패하면 이벤트는 `{topic}.dlq` 스트림으로 이동하고 경고
+로그가 남습니다. **자동 재처리 루프는 없습니다**(poison 폭풍 방지) — 원인을 고친 뒤 수동 리플레이.
+
+```bash
+# 조회
+python manage.py events_dlq list
+python manage.py events_dlq list --topic=signals.presence
+
+# 원인 수정 후 재처리(원 스트림으로 되돌림 → 소비자 재처리, DLQ에서 제거)
+python manage.py events_dlq replay
+```
+
+재처리는 멱등(`processed_events`)이라 이미 성공한 소비자는 다시 효과를 내지 않습니다(예: webhook 이중발송 없음).
+
+## 운영 점검
+
+```bash
+python manage.py relay --once                          # outbox 1회 강제 드레인
+python manage.py consume_events --group=webhook --once  # 소비자 1회 처리
+```
+
+## 주의
+
+- **relay는 반드시 단일 인스턴스**(순서 보존). 복제 금지(향후 leader-election 시 완화).
+- Kafka 전환 시 EventBus 어댑터만 교체 — outbox·relay·트랜잭션 보장은 불변(dual-write 해결은 브로커 무관).
