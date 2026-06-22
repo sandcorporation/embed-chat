@@ -13,11 +13,12 @@ Embed Chat는 타사 웹사이트에 iframe으로 삽입하는 챗봇을 제공�
 | **Django API** (`/api/`) | 인증, 채팅(SSE), RAG/지식그래프, Visitor Memory, HITL, Provider 설정 |
 | **Celery Worker** (배치) | 문서 인제스션(그래프 구축), 엔티티 해소(SAME_AS) 재구축, 재임베딩, 메모리 추출 |
 | **Celery worker-chat** (chat 전용 큐) | Visitor chat 1턴 실행 — gevent web 워커에서 분리·격리(배치가 chat을 굶기지 않게) |
+| **relay + 이벤트 소비자** (Event 파이프라인) | HITL/세션 라이프사이클의 **Transactional Outbox** 발행(relay 싱글톤) + 디커플링된 소비자(webhook·visitor-bridge·console-bridge·presence-bridge). → [event-driven-architecture.md](./docs/event-driven-architecture.md) |
 | **Neo4j** (Community) | **Knowledge Graph**(Entity Mention·관계) + **per-Tenant 가변차원 벡터 인덱스**(Text Unit/Mention 임베딩) |
 | **PostgreSQL** | Django 모델(Tenant·Document·ChatMessage 등) + **LangGraph Checkpoint**(대화 state) |
 | **Ollama** | dev 기본 임베딩 `bge-m3`(다국어, 1024차원). prod에선 Tenant Embedding Provider가 대체 |
 | **PaddleOCR 서비스** | 이미지/스캔 PDF에서 텍스트 추출(OCR, 한·영 혼용) |
-| **Redis** | SSE pub/sub + Celery 브로커 + 레이트리밋·세션 락 |
+| **Redis** | SSE pub/sub + Celery 브로커 + **EventBus(Streams)** + relay wake + 레이트리밋·세션 락 |
 | **Widget** (`/chatbot/{slug}/`) | Visitor용 채팅 위젯 (React) — 토큰 없이 slug로 접근 |
 | **Admin UI** (`/admin-ui/`) | Operator·Tenant 관리 화면 (React + Tailwind/shadcn) — **좌측 사이드바 내비 + 자원별 URL 라우트**(ADR-0017). 문서·**지식그래프 인스펙터**·Visitors·설정(Provider 포함)·팀원·HITL 섹션 |
 | **Nginx** | 리버스 프록시, 정적 파일 서빙 |
@@ -117,7 +118,7 @@ START → local_search → call_llm ─(context_sufficient=False)─→ source_s
 - Escalation 발생 시 Slack/Discord/Generic **웹훅**으로 알림을 보냅니다.
 - **상담 가능 시간(영업시간)**: Tenant가 타임존 + 요일별 시간창 + 휴일(예외 날짜)을 설정하면, 그 시간 외에는 그래프가 plain으로 컴파일돼 **AI 자동 escalation이 일어나지 않고** 운영 안내만 곁들여 AI가 계속 답합니다. 미설정 시 24/7(opt-in 하위호환). 수동 takeover는 시간과 무관하게 항상 가능합니다.
 - **세션 콘솔 + 임의 takeover**: HITL 탭이 세션 콘솔로 진화 — 상단에 진행 중 상담(escalation) 카드, 하단에 **다른 세션 목록**(SSE 연결된 활성 세션 우선)을 보여줍니다. 팀원은 escalation이 없는 임의 세션도 **"상담 시작"으로 직접 takeover**(자동-claimed `agent` escalation)할 수 있습니다. 활성 여부는 Redis presence(SSE keepalive로 갱신되는 TTL = 자가치유)로 판단하고, 연결/해제는 `hitl:{tenant}` 채널로 콘솔에 실시간 push됩니다.
-- **Event-Driven 파이프라인**: HITL 라이프사이클 전이(Escalated/Claimed/TakenOver/Resolved)는 **Transactional Outbox**로 상태 변경과 한 트랜잭션에 이벤트로 기록되고, **relay**(LISTEN/NOTIFY 싱글톤)가 **EventBus**(Redis Streams, 추후 Kafka 교체 가능)로 발행합니다. webhook·방문자 SSE(hitl_start/end)·콘솔 델타·presence가 **디커플링된 소비자**로 이 이벤트에서 파생되어, dual-write 유실 없이 at-least-once+DLQ로 동작합니다. 구성·운영(dead-letter 리플레이): [docs/event-pipeline.md](docs/event-pipeline.md).
+- **Event-Driven 파이프라인**: HITL 라이프사이클 전이(Escalated/Claimed/TakenOver/Resolved)는 **Transactional Outbox**로 상태 변경과 한 트랜잭션에 이벤트로 기록되고, **relay 싱글톤**(Redis pub/sub wake로 깨어 드레인)이 **EventBus**(Redis Streams, 추후 Kafka 교체 가능)로 발행합니다. webhook·방문자 SSE(hitl_start/end)·콘솔 델타·presence가 **디커플링된 소비자**로 이 이벤트에서 파생되어, dual-write 유실 없이 at-least-once+멱등+DLQ로 동작합니다. 설계·원리: **[docs/event-driven-architecture.md](docs/event-driven-architecture.md)** · 운영(프로세스·dead-letter 리플레이): [docs/event-pipeline.md](docs/event-pipeline.md).
 
 ### Visitor 접근 & 신원 (공개 Slug URL)
 
