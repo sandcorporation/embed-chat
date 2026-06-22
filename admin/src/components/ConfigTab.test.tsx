@@ -13,6 +13,7 @@ const baseConfig = {
   brand_name: '', hitl_enabled: true, require_identity_verification: false,
   llm_provider_type: '', llm_base_url: '', llm_api_key: '', extraction_model: '',
   embed_provider_type: '', embed_base_url: '', embed_api_key: '', embed_model: '', embed_dim: 1024,
+  ocr_provider_type: '', ocr_base_url: '', ocr_api_key: '', ocr_model: '',
   platform_default_providers_enabled: true,
 }
 
@@ -190,6 +191,27 @@ describe('ConfigTab — 고급 설정(자료 정리 모델)', () => {
     await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
       expect.objectContaining({ extraction_model: 'extract-model' }),
     ))
+  })
+})
+
+describe('ConfigTab — OCR(Vision) Provider', () => {
+  it('OCR provider 설정을 저장 payload에 담는다', async () => {
+    renderConfig('ai')
+    await userEvent.selectOptions(await screen.findByLabelText('OCR Provider 타입'), 'custom')
+    await userEvent.type(screen.getByLabelText('OCR Base URL'), 'https://x/v1')
+    await userEvent.type(screen.getByLabelText('OCR API Key'), 'sk-ocr')
+    await userEvent.type(screen.getByLabelText('OCR 모델 직접 입력'), 'gpt-4o')
+    await save()
+    await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(expect.objectContaining({
+      ocr_provider_type: 'custom', ocr_base_url: 'https://x/v1',
+      ocr_api_key: 'sk-ocr', ocr_model: 'gpt-4o',
+    })))
+  })
+
+  it('OCR Provider 타입에 anthropic 옵션이 있다(vision)', async () => {
+    renderConfig('ai')
+    const select = await screen.findByLabelText('OCR Provider 타입')
+    expect(select.querySelector('option[value="anthropic"]')).not.toBeNull()
   })
 })
 

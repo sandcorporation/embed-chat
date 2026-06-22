@@ -56,8 +56,10 @@ export default function ConfigTab() {
   const [slugSaved, setSlugSaved] = useState(false)
   const [llmModels, setLlmModels] = useState<string[]>([])
   const [embedModels, setEmbedModels] = useState<string[]>([])
+  const [ocrModels, setOcrModels] = useState<string[]>([])
   const [llmModelError, setLlmModelError] = useState('')
   const [embedModelError, setEmbedModelError] = useState('')
+  const [ocrModelError, setOcrModelError] = useState('')
   const [saveError, setSaveError] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [holidayInput, setHolidayInput] = useState('')
@@ -86,6 +88,12 @@ export default function ConfigTab() {
     try {
       setEmbedModels(await fetchProviderModels('embed', config.embed_provider_type, config.embed_base_url, config.embed_api_key, config.embed_model))
     } catch { setEmbedModelError('Embedding 모델 조회 실패 — Base URL / API Key를 확인하세요') }
+  }
+  const loadOcrModels = async () => {
+    setOcrModelError('')
+    try {
+      setOcrModels(await fetchProviderModels('ocr', config.ocr_provider_type, config.ocr_base_url, config.ocr_api_key, config.ocr_model))
+    } catch { setOcrModelError('OCR 모델 조회 실패 — Base URL / API Key를 확인하세요') }
   }
   const handleSaveSlug = async () => {
     try {
@@ -276,6 +284,49 @@ export default function ConfigTab() {
               <Input type="number" aria-label="Embedding 차원" className="w-40" value={config.embed_dim ?? 1024}
                 onChange={e => setConfig(c => ({ ...c, embed_dim: Number(e.target.value) }))} />
               <p className={hint}>임베딩 모델이 만드는 "숫자 지문"의 길이예요. 모델 기본값을 쓰면 됩니다(예: 1024).</p>
+            </div>
+          </div>
+
+          <div className="space-y-4 border-t border-border pt-6">
+            <div>
+              <h3 className="text-sm font-semibold">OCR(Vision) Provider</h3>
+              <p className="text-xs text-muted-foreground">이미지·스캔 PDF의 글자를 읽어들이는 vision 모델이에요(예: GPT-4o, Claude, Gemini). 미설정 시 개발 환경은 Paddle로 대체하고, 프로덕션에선 설정해야 이미지·스캔 문서를 올릴 수 있어요.</p>
+            </div>
+            <div className="space-y-2">
+              <Label>OCR Provider 타입</Label>
+              <Select aria-label="OCR Provider 타입" value={config.ocr_provider_type || ''}
+                onChange={e => { const v = e.target.value; setConfig(c => ({ ...c, ocr_provider_type: v, ocr_base_url: v === 'custom' ? c.ocr_base_url : '' })) }}>
+                <option value="">(미설정)</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="custom">Custom (OpenAI-호환)</option>
+              </Select>
+            </div>
+            {config.ocr_provider_type === 'custom' && (
+              <div className="space-y-2">
+                <Label>OCR Base URL</Label>
+                <Input aria-label="OCR Base URL" value={config.ocr_base_url || ''}
+                  onChange={e => setConfig(c => ({ ...c, ocr_base_url: e.target.value }))} />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>OCR API Key</Label>
+              <Input type="password" aria-label="OCR API Key" value={config.ocr_api_key || ''}
+                onChange={e => setConfig(c => ({ ...c, ocr_api_key: e.target.value }))} placeholder="설정됨이면 ******** (변경할 때만 입력)" />
+            </div>
+            <div>
+              <Button size="sm" variant="outline" type="button" onClick={loadOcrModels}>OCR 모델 불러오기</Button>
+              {ocrModelError && <p className={errorCls}>{ocrModelError}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label>OCR 모델</Label>
+              <Select aria-label="OCR 모델" value={config.ocr_model || ''}
+                onChange={e => setConfig(c => ({ ...c, ocr_model: e.target.value }))}>
+                <option value="">(선택)</option>
+                {modelOptions(ocrModels, config.ocr_model).map(m => <option key={m} value={m}>{m}</option>)}
+              </Select>
+              <Input aria-label="OCR 모델 직접 입력" className="text-xs" value={config.ocr_model || ''}
+                onChange={e => setConfig(c => ({ ...c, ocr_model: e.target.value }))} placeholder="직접 입력(vision 가능 모델)" />
             </div>
           </div>
         </div>

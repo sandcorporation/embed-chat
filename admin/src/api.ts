@@ -150,7 +150,7 @@ export async function resetTenantKey() {
 // provider의 사용가능 모델 목록을 폼 현재 값으로 조회한다(어드민 "모델 불러오기").
 // 마스크 키(********)는 백엔드가 저장 키로 대체한다. 실패 시 throw(키/URL 오류).
 export async function fetchProviderModels(
-  kind: 'llm' | 'embed',
+  kind: 'llm' | 'embed' | 'ocr',
   providerType: string,
   baseUrl: string,
   apiKey: string,
