@@ -1,3 +1,4 @@
+# pyright: reportOptionalSubscript=false
 """Global Search 제거 (issues 120-121).
 
 챗은 항상 Local Search로 직결되고, Community 서브시스템은 제거된다.

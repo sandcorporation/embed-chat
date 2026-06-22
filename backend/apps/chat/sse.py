@@ -1,4 +1,6 @@
 import json
+from typing import Any
+
 import redis
 from django.conf import settings
 
@@ -82,6 +84,7 @@ def sse_event_stream(session_id: str, welcome_message: str = "", history=None, i
     r = get_redis_client()
     pubsub = r.pubsub()
     pubsub.subscribe(f"session:{session_id}")
+    connected_payload: dict[str, Any]
     # presence: 연결 시작을 표시(직접 ZADD = 하트비트, 진실원천) + VisitorConnected 이벤트 발행
     # (EventBus ephemeral → presence-bridge가 콘솔 델타로 — issue 150). 하트비트는 직접 유지.
     if tenant_id:

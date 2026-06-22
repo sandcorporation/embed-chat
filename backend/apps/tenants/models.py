@@ -1,6 +1,7 @@
 import hashlib
 import secrets
 import uuid
+from typing import TYPE_CHECKING
 from django.contrib.auth.hashers import make_password, check_password as django_check_password
 from django.db import models
 from django.contrib.auth.models import AbstractUser
@@ -29,7 +30,8 @@ class Tenant(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    objects = TenantManager()
+    # 커스텀 매니저를 명시 주석해 django-types의 기본 Manager 추론을 덮어쓴다(create_with_key 인식).
+    objects: "TenantManager" = TenantManager()
 
     class Meta:
         db_table = "tenants"
@@ -55,6 +57,8 @@ class Tenant(models.Model):
 class TenantAgent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="agents")
+    if TYPE_CHECKING:
+        tenant_id: uuid.UUID  # FK _id 접근자 — django-types가 추론 못 함
     username = models.CharField(max_length=150)
     password_hash = models.CharField(max_length=255)
     is_active = models.BooleanField(default=True)
@@ -85,6 +89,9 @@ class RefreshToken(models.Model):
     tenant_agent = models.ForeignKey(
         TenantAgent, on_delete=models.CASCADE, null=True, blank=True, related_name="refresh_tokens"
     )
+    if TYPE_CHECKING:
+        operator_id: int | None      # FK _id 접근자 — django-types가 추론 못 함
+        tenant_agent_id: uuid.UUID | None
     family_id = models.UUIDField(db_index=True)
     token_hash = models.CharField(max_length=64, unique=True)
     family_expires_at = models.DateTimeField()

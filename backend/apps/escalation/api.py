@@ -229,7 +229,7 @@ def escalation_stream(request, token: str):
             pubsub.unsubscribe(channel)
             pubsub.close()
 
-    response = StreamingHttpResponse(_event_generator(), content_type="text/event-stream")
+    response = StreamingHttpResponse(_event_generator(), content_type="text/event-stream")  # pyright: ignore[reportArgumentType]
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
     return response

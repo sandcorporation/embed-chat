@@ -1,3 +1,5 @@
+# langgraph add_node / psycopg PostgresSaver의 느슨한 시그니처 타입 — 런타임은 정상.
+# pyright: reportArgumentType=false
 from typing import Annotated, List
 import operator
 from typing_extensions import TypedDict

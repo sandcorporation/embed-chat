@@ -6,6 +6,7 @@ LLM 경계가 전역 settings 대신 이 리졸버로 per-Tenant 클라이언트
 """
 import contextvars
 from dataclasses import dataclass
+from typing import Any
 
 PROVIDER_OPENAI = "openai"
 PROVIDER_ANTHROPIC = "anthropic"
@@ -33,12 +34,13 @@ def build_llm_client(provider: LLMProvider):
     if provider.type == PROVIDER_ANTHROPIC:
         from langchain_anthropic import ChatAnthropic
 
-        return ChatAnthropic(model=provider.model, api_key=provider.api_key or None)
+        # langchain_anthropic는 model을 alias로 받지만 타입 스텁은 model_name만 노출한다.
+        return ChatAnthropic(model=provider.model, api_key=provider.api_key or None)  # pyright: ignore[reportCallIssue]
 
     # openai / custom / "" → OpenAI-호환
     from langchain_openai import ChatOpenAI
 
-    kwargs = {"model": provider.model}
+    kwargs: dict[str, Any] = {"model": provider.model}
     if provider.api_key:
         kwargs["api_key"] = provider.api_key
     if provider.base_url:
@@ -78,7 +80,9 @@ def chat_provider(config) -> LLMProvider:
 
 # 챗 그래프 노드가 쓸 chat provider를 흘리는 contextvar. 비밀키를 LangGraph state에
 # 넣으면 Checkpoint(Postgres)에 영속되므로, state 대신 호출 컨텍스트로 전달한다.
-_current_chat_provider = contextvars.ContextVar("chat_provider", default=None)
+_current_chat_provider: contextvars.ContextVar["LLMProvider | None"] = contextvars.ContextVar(
+    "chat_provider", default=None
+)
 
 
 def set_chat_provider(provider: LLMProvider) -> None:

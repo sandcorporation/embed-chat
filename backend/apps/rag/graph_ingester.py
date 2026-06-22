@@ -91,12 +91,12 @@ def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> 
     # 레이블 대표 Mention 시드
     gs.upsert_mention(
         f"{document_id}:{label}", label, "document", f"Source document: {label}",
-        source_document_id=document_id, embedding=embed_by_name.get(label),
+        source_document_id=document_id, embedding=embed_by_name.get(label),  # pyright: ignore[reportArgumentType]
     )
     for e in valid_entities:
         gs.upsert_mention(
             f"{document_id}:{e.name}", e.name, e.type, e.description,
-            source_document_id=document_id, embedding=embed_by_name.get(e.name),
+            source_document_id=document_id, embedding=embed_by_name.get(e.name),  # pyright: ignore[reportArgumentType]
         )
         # 문서(레이블) Mention을 그 문서에서 추출된 Mention과 연결한다(고립 방지).
         if e.name != label:

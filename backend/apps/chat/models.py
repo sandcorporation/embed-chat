@@ -1,5 +1,9 @@
 import uuid
+from typing import TYPE_CHECKING
 from django.db import models
+
+if TYPE_CHECKING:
+    from apps.escalation.models import Escalation
 
 
 class ChatSession(models.Model):
@@ -9,6 +13,11 @@ class ChatSession(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     is_hitl = models.BooleanField(default=False)
+
+    # 역참조 매니저(related_name) — django-types는 역참조를 추론하지 못하므로 명시 주석한다.
+    if TYPE_CHECKING:
+        messages: "models.Manager[ChatMessage]"
+        escalations: "models.Manager[Escalation]"
 
     class Meta:
         db_table = "chat_sessions"

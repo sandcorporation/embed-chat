@@ -78,27 +78,27 @@ class TenantConfigOut(Schema):
 
 
 class TenantConfigIn(Schema):
-    model_id: str = None
-    system_prompt: str = None
-    agent_display_name: str = None
-    webhook_url: str = None
-    webhook_type: str = None
-    welcome_message: str = None
-    brand_name: str = None
-    hitl_enabled: bool = None
-    hitl_timezone: str = None
-    hitl_schedule: dict = None
-    hitl_holidays: list = None
-    require_identity_verification: bool = None
-    llm_provider_type: str = None
-    llm_base_url: str = None
-    llm_api_key: str = None
-    extraction_model: str = None
-    embed_provider_type: str = None
-    embed_base_url: str = None
-    embed_api_key: str = None
-    embed_model: str = None
-    embed_dim: int = None
+    model_id: str | None = None
+    system_prompt: str | None = None
+    agent_display_name: str | None = None
+    webhook_url: str | None = None
+    webhook_type: str | None = None
+    welcome_message: str | None = None
+    brand_name: str | None = None
+    hitl_enabled: bool | None = None
+    hitl_timezone: str | None = None
+    hitl_schedule: dict | None = None
+    hitl_holidays: list | None = None
+    require_identity_verification: bool | None = None
+    llm_provider_type: str | None = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    extraction_model: str | None = None
+    embed_provider_type: str | None = None
+    embed_base_url: str | None = None
+    embed_api_key: str | None = None
+    embed_model: str | None = None
+    embed_dim: int | None = None
 
 
 class SlugIn(Schema):
@@ -415,7 +415,7 @@ def _validate_changed_provider(config, body, kind):
     changed = (new_type != cur_type) or (new_base != cur_base) or key_changed
     if not changed or not new_type:
         return
-    eff_key = new_key_raw if key_changed else (decrypt_secret(stored_enc) if stored_enc else "")
+    eff_key = (new_key_raw if key_changed else (decrypt_secret(stored_enc) if stored_enc else "")) or ""
     validate_provider(kind, new_type, new_base, eff_key, model)
 
 

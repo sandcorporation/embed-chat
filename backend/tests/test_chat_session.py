@@ -1,3 +1,4 @@
+# pyright: reportOptionalSubscript=false
 import pytest
 from utils import open_stream
 

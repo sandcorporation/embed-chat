@@ -1,4 +1,5 @@
 import uuid
+from typing import TYPE_CHECKING
 from django.db import models
 from apps.chat.models import ChatSession
 
@@ -24,6 +25,8 @@ class Escalation(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="escalations")
+    if TYPE_CHECKING:
+        session_id: uuid.UUID  # FK _id 접근자 — django-types가 추론 못 함
     trigger_type = models.CharField(max_length=10, choices=TRIGGER_CHOICES)
     reason = models.TextField(blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)

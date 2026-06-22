@@ -21,7 +21,7 @@ _DELTA = {
 def handle(envelope: dict) -> None:
     from apps.chat.sse import publish_console_delta
 
-    delta = _DELTA.get(envelope.get("type"))
+    delta = _DELTA.get(envelope.get("type") or "")
     if not delta:
         return
     publish_console_delta(envelope["tenant_id"], delta, envelope["aggregate_id"])

@@ -1,3 +1,4 @@
+# pyright: reportOptionalSubscript=false, reportArgumentType=false
 """Issue 114 — ProviderModels 딥모듈(모델 조회 + 기능호출 검증).
 
 provider HTTP는 외부 경계이므로 결정적 Fake로 교체한다(CLAUDE.md). DB 불필요.

@@ -3,6 +3,9 @@
 모든 그래프 접근은 이 모듈을 통하며, 생성자에서 받은 tenant_id를 모든 쿼리에
 강제로 주입한다. tenant_id 없이는 그래프에 닿을 수 없으므로 테넌트 누수를 구조적으로 막는다.
 """
+# neo4j 드라이버는 query를 LiteralString으로 요구(인젝션 가드)하지만 본 모듈은 동적 Cypher를
+# tenant_id 파라미터 바인딩과 함께 안전하게 쓴다 — 런타임 정상.
+# pyright: reportArgumentType=false
 from django.conf import settings
 from neo4j import GraphDatabase
 from neo4j.exceptions import Neo4jError

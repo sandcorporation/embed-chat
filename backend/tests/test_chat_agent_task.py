@@ -1,3 +1,4 @@
+# pyright: reportOperatorIssue=false
 import pytest
 from utils import get_redis_message, open_stream
 

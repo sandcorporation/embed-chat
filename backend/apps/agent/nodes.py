@@ -1,4 +1,4 @@
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
 from pydantic import BaseModel, Field
 
 from apps.agent import llm as llm_boundary
@@ -144,7 +144,7 @@ def _assemble_lc_messages(state: dict) -> list:
     """
     system_content = state["system_prompt"] + _ANTI_DISCLOSURE
 
-    lc_messages = [SystemMessage(content=system_content)]
+    lc_messages: list[BaseMessage] = [SystemMessage(content=system_content)]
     for msg in state.get("messages", []):
         if msg["role"] == "user":
             lc_messages.append(HumanMessage(content=msg["content"]))

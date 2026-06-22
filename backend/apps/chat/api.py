@@ -1,3 +1,4 @@
+from typing import Any
 from ninja import Router, Schema
 from django.http import StreamingHttpResponse
 from apps.chat.models import ChatSession, ChatMessage
@@ -53,6 +54,7 @@ def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
 
     config = getattr(tenant, "config", None)
     existing_messages = ChatMessage.objects.filter(session=session).order_by("created_at")
+    stream_kwargs: dict[str, Any]
     if existing_messages.exists():
         history = [{"role": m.role, "content": m.content} for m in existing_messages]
         stream_kwargs = {"history": history, "is_hitl": session.is_hitl}
@@ -64,7 +66,7 @@ def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
     stream_kwargs["tenant_id"] = str(tenant.id)
 
     response = StreamingHttpResponse(
-        sse_event_stream(str(session.id), **stream_kwargs),
+        sse_event_stream(str(session.id), **stream_kwargs),  # pyright: ignore[reportArgumentType]
         content_type="text/event-stream",
     )
     response["Cache-Control"] = "no-cache"

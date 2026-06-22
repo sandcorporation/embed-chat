@@ -24,7 +24,7 @@ class UrlsIn(Schema):
 
 
 @rag_router.post("/", response={201: DocumentOut})
-def upload_document(request, file: UploadedFile = File(...), name: str = Form(None)):
+def upload_document(request, file: UploadedFile = File(...), name: str = Form(None)):  # pyright: ignore[reportCallIssue]
     tenant = request.auth.tenant
     mime_type = file.content_type or "text/plain"
 

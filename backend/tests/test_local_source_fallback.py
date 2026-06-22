@@ -1,3 +1,4 @@
+# pyright: reportOptionalSubscript=false
 """GraphRAG Local Search — 미스 기반 원문(TextUnit) 폴백 (issues 118-119).
 
 LLM은 결정적 Fake(CLAUDE.md). Neo4j·임베딩·vector_search는 실제로 검증한다.

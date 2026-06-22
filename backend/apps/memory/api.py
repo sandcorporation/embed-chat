@@ -76,7 +76,7 @@ def list_sessions(request, limit: int = 50, offset: int = 0):
     rows = []
     for s in qs:
         sid = str(s.id)
-        last = s.last_msg or s.created_at
+        last = getattr(s, "last_msg", None) or s.created_at  # .annotate() 동적 필드
         rows.append({
             "session_id": sid,
             "visitor_id": s.visitor_id,

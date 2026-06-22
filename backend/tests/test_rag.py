@@ -603,7 +603,7 @@ def test_pdf_ocr_fallback_used_when_text_too_sparse(client, tenant_agent_token, 
 
     # 텍스트 레이어가 없음을 먼저 확인
     doc_check = fitz.open(stream=pdf_bytes, filetype="pdf")
-    extracted = " ".join(page.get_text() for page in doc_check)
+    extracted = " ".join(str(page.get_text()) for page in doc_check)
     assert len(extracted.split()) < 50, "테스트 PDF에 텍스트 레이어가 있으면 안 됩니다"
 
     uploaded = SimpleUploadedFile("scan.pdf", pdf_bytes, content_type="application/pdf")
@@ -692,7 +692,7 @@ def test_pdf_garbled_text_layer_triggers_ocr_recovery(client, tenant_agent_token
 
     # 전제: 텍스트 레이어가 깨졌고(단어 수는 충분) → 단어 수 조건이 아니라 깨짐 감지로 트리거되어야 한다.
     check = fitz.open(stream=pdf_bytes, filetype="pdf")
-    extracted = " ".join(p.get_text() for p in check)
+    extracted = " ".join(str(p.get_text()) for p in check)
     assert len(extracted.split()) >= 50, "단어 수가 충분해야 깨짐 감지 경로를 검증한다"
     assert is_garbled(extracted), "테스트 PDF의 텍스트 레이어가 깨져 있어야 한다"
 
@@ -979,7 +979,7 @@ def test_ingest_document_sets_failed_status_on_ollama_timeout(settings, tenant_w
         with open(file_path, "wb") as fh:
             fh.write(b"Some content that needs embedding")
 
-        ingest_document.apply(args=[str(doc.id), str(tenant.id), "text/plain"])
+        ingest_document.apply(args=(str(doc.id), str(tenant.id), "text/plain"))
     finally:
         if os.path.exists(file_path):
             os.unlink(file_path)

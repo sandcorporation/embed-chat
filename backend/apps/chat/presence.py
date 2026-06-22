@@ -6,6 +6,7 @@
 (워커 비정상 종료에도 stale 활성이 남지 않는다). 진실의 원천이며 콘솔이 이를 조회한다.
 """
 import time
+from typing import cast
 
 PRESENCE_TTL_SECONDS = 20  # 이 시간 동안 갱신이 없으면 비활성으로 본다(keepalive 1s 대비 여유)
 
@@ -31,4 +32,5 @@ def active_sessions(tenant_id: str, now: float | None = None) -> set[str]:
     r = _redis()
     key = _key(tenant_id)
     r.zremrangebyscore(key, "-inf", now - PRESENCE_TTL_SECONDS)  # 임계 밖(stale) 제거
-    return {m.decode() if isinstance(m, bytes) else m for m in r.zrange(key, 0, -1)}
+    members = cast(list, r.zrange(key, 0, -1))  # 동기 클라이언트지만 redis-py 타입은 Awaitable|... 유니온
+    return {m.decode() if isinstance(m, bytes) else m for m in members}

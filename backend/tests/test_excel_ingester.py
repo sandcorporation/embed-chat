@@ -1,3 +1,4 @@
+# pyright: reportArgumentType=false
 import io
 
 import pytest

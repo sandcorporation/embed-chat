@@ -23,3 +23,7 @@ httpx>=0.27,<1.0
 langgraph-checkpoint-postgres>=2.0,<3.0
 psycopg[binary]>=3.0,<4.0
 neo4j>=5.20,<6.0
+
+# 타입 체크 스텁(Pylance/Pyright; 런타임 무관)
+django-types>=0.19
+celery-types>=0.22
