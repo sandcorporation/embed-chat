@@ -72,6 +72,10 @@ class TenantConfigOut(Schema):
     embed_api_key: str
     embed_model: str
     embed_dim: int
+    ocr_provider_type: str
+    ocr_base_url: str
+    ocr_api_key: str
+    ocr_model: str
     # 서버 capability(저장 필드 아님): dev에서만 플랫폼 기본(OpenRouter/ollama) Provider 폴백이
     # 켜진다. 어드민 UI는 이 값이 false면 "기본" Provider 옵션을 숨긴다(ADR-0012).
     platform_default_providers_enabled: bool
@@ -99,6 +103,10 @@ class TenantConfigIn(Schema):
     embed_api_key: str | None = None
     embed_model: str | None = None
     embed_dim: int | None = None
+    ocr_provider_type: str | None = None
+    ocr_base_url: str | None = None
+    ocr_api_key: str | None = None
+    ocr_model: str | None = None
 
 
 class SlugIn(Schema):
@@ -376,6 +384,10 @@ def _config_out(config):
         "embed_api_key": _KEY_MASK if config.embed_api_key else "",
         "embed_model": config.embed_model,
         "embed_dim": config.embed_dim,
+        "ocr_provider_type": config.ocr_provider_type,
+        "ocr_base_url": config.ocr_base_url,
+        "ocr_api_key": _KEY_MASK if config.ocr_api_key else "",
+        "ocr_model": config.ocr_model,
         "platform_default_providers_enabled": getattr(
             settings, "PLATFORM_DEFAULT_PROVIDERS_ENABLED", False
         ),
@@ -404,12 +416,18 @@ def _validate_changed_provider(config, body, kind):
         new_key_raw, stored_enc = body.llm_api_key, config.llm_api_key
         cur_type, cur_base = config.llm_provider_type, config.llm_base_url
         model = body.model_id if body.model_id is not None else config.model_id
-    else:
+    elif kind == "embed":
         new_type = body.embed_provider_type if body.embed_provider_type is not None else config.embed_provider_type
         new_base = body.embed_base_url if body.embed_base_url is not None else config.embed_base_url
         new_key_raw, stored_enc = body.embed_api_key, config.embed_api_key
         cur_type, cur_base = config.embed_provider_type, config.embed_base_url
         model = body.embed_model if body.embed_model is not None else config.embed_model
+    else:  # ocr
+        new_type = body.ocr_provider_type if body.ocr_provider_type is not None else config.ocr_provider_type
+        new_base = body.ocr_base_url if body.ocr_base_url is not None else config.ocr_base_url
+        new_key_raw, stored_enc = body.ocr_api_key, config.ocr_api_key
+        cur_type, cur_base = config.ocr_provider_type, config.ocr_base_url
+        model = body.ocr_model if body.ocr_model is not None else config.ocr_model
 
     key_changed = new_key_raw is not None and new_key_raw != _KEY_MASK
     changed = (new_type != cur_type) or (new_base != cur_base) or key_changed
@@ -429,10 +447,11 @@ def update_config(request, body: TenantConfigIn):
     try:
         _validate_changed_provider(config, body, "llm")
         _validate_changed_provider(config, body, "embed")
+        _validate_changed_provider(config, body, "ocr")
     except ProviderError as e:
         return 400, {"detail": str(e)}
 
-    for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message", "brand_name", "hitl_enabled", "hitl_timezone", "hitl_schedule", "hitl_holidays", "require_identity_verification", "llm_provider_type", "llm_base_url", "extraction_model", "embed_provider_type", "embed_base_url", "embed_model", "embed_dim"):
+    for field in ("model_id", "system_prompt", "agent_display_name", "webhook_url", "webhook_type", "welcome_message", "brand_name", "hitl_enabled", "hitl_timezone", "hitl_schedule", "hitl_holidays", "require_identity_verification", "llm_provider_type", "llm_base_url", "extraction_model", "embed_provider_type", "embed_base_url", "embed_model", "embed_dim", "ocr_provider_type", "ocr_base_url", "ocr_model"):
         value = getattr(body, field)
         if value is not None:
             setattr(config, field, value)
@@ -443,6 +462,8 @@ def update_config(request, body: TenantConfigIn):
         config.llm_api_key = encrypt_secret(body.llm_api_key)
     if body.embed_api_key is not None and body.embed_api_key != _KEY_MASK:
         config.embed_api_key = encrypt_secret(body.embed_api_key)
+    if body.ocr_api_key is not None and body.ocr_api_key != _KEY_MASK:
+        config.ocr_api_key = encrypt_secret(body.ocr_api_key)
     config.save()
 
     # Embedding Provider(벡터 공간) 변경 시 재임베딩 재구축을 트리거한다(LLM 변경은 제외).
@@ -486,7 +507,9 @@ def provider_models(request, body: ProviderModelsIn):
             base_url, api_key = settings.OPEN_ROUTER_BASE_URL, settings.OPEN_ROUTER_API_KEY
     elif api_key == _KEY_MASK:
         from apps.tenants.crypto import decrypt_secret
-        stored = config.embed_api_key if body.kind == "embed" else config.llm_api_key
+        stored = {"embed": config.embed_api_key, "ocr": config.ocr_api_key}.get(
+            body.kind, config.llm_api_key
+        )
         api_key = decrypt_secret(stored) if stored else ""
 
     try:

@@ -4,28 +4,56 @@
  * Embed Chat API
  * OpenAPI spec version: 1.0.0
  */
+import type { TenantConfigInAgentDisplayName } from './tenantConfigInAgentDisplayName';
+import type { TenantConfigInBrandName } from './tenantConfigInBrandName';
+import type { TenantConfigInEmbedApiKey } from './tenantConfigInEmbedApiKey';
+import type { TenantConfigInEmbedBaseUrl } from './tenantConfigInEmbedBaseUrl';
+import type { TenantConfigInEmbedDim } from './tenantConfigInEmbedDim';
+import type { TenantConfigInEmbedModel } from './tenantConfigInEmbedModel';
+import type { TenantConfigInEmbedProviderType } from './tenantConfigInEmbedProviderType';
+import type { TenantConfigInExtractionModel } from './tenantConfigInExtractionModel';
+import type { TenantConfigInHitlEnabled } from './tenantConfigInHitlEnabled';
+import type { TenantConfigInHitlHolidays } from './tenantConfigInHitlHolidays';
 import type { TenantConfigInHitlSchedule } from './tenantConfigInHitlSchedule';
+import type { TenantConfigInHitlTimezone } from './tenantConfigInHitlTimezone';
+import type { TenantConfigInLlmApiKey } from './tenantConfigInLlmApiKey';
+import type { TenantConfigInLlmBaseUrl } from './tenantConfigInLlmBaseUrl';
+import type { TenantConfigInLlmProviderType } from './tenantConfigInLlmProviderType';
+import type { TenantConfigInModelId } from './tenantConfigInModelId';
+import type { TenantConfigInOcrApiKey } from './tenantConfigInOcrApiKey';
+import type { TenantConfigInOcrBaseUrl } from './tenantConfigInOcrBaseUrl';
+import type { TenantConfigInOcrModel } from './tenantConfigInOcrModel';
+import type { TenantConfigInOcrProviderType } from './tenantConfigInOcrProviderType';
+import type { TenantConfigInRequireIdentityVerification } from './tenantConfigInRequireIdentityVerification';
+import type { TenantConfigInSystemPrompt } from './tenantConfigInSystemPrompt';
+import type { TenantConfigInWebhookType } from './tenantConfigInWebhookType';
+import type { TenantConfigInWebhookUrl } from './tenantConfigInWebhookUrl';
+import type { TenantConfigInWelcomeMessage } from './tenantConfigInWelcomeMessage';
 
 export interface TenantConfigIn {
-  agent_display_name?: string;
-  brand_name?: string;
-  embed_api_key?: string;
-  embed_base_url?: string;
-  embed_dim?: number;
-  embed_model?: string;
-  embed_provider_type?: string;
-  extraction_model?: string;
-  hitl_enabled?: boolean;
-  hitl_holidays?: unknown[];
+  agent_display_name?: TenantConfigInAgentDisplayName;
+  brand_name?: TenantConfigInBrandName;
+  embed_api_key?: TenantConfigInEmbedApiKey;
+  embed_base_url?: TenantConfigInEmbedBaseUrl;
+  embed_dim?: TenantConfigInEmbedDim;
+  embed_model?: TenantConfigInEmbedModel;
+  embed_provider_type?: TenantConfigInEmbedProviderType;
+  extraction_model?: TenantConfigInExtractionModel;
+  hitl_enabled?: TenantConfigInHitlEnabled;
+  hitl_holidays?: TenantConfigInHitlHolidays;
   hitl_schedule?: TenantConfigInHitlSchedule;
-  hitl_timezone?: string;
-  llm_api_key?: string;
-  llm_base_url?: string;
-  llm_provider_type?: string;
-  model_id?: string;
-  require_identity_verification?: boolean;
-  system_prompt?: string;
-  webhook_type?: string;
-  webhook_url?: string;
-  welcome_message?: string;
+  hitl_timezone?: TenantConfigInHitlTimezone;
+  llm_api_key?: TenantConfigInLlmApiKey;
+  llm_base_url?: TenantConfigInLlmBaseUrl;
+  llm_provider_type?: TenantConfigInLlmProviderType;
+  model_id?: TenantConfigInModelId;
+  ocr_api_key?: TenantConfigInOcrApiKey;
+  ocr_base_url?: TenantConfigInOcrBaseUrl;
+  ocr_model?: TenantConfigInOcrModel;
+  ocr_provider_type?: TenantConfigInOcrProviderType;
+  require_identity_verification?: TenantConfigInRequireIdentityVerification;
+  system_prompt?: TenantConfigInSystemPrompt;
+  webhook_type?: TenantConfigInWebhookType;
+  webhook_url?: TenantConfigInWebhookUrl;
+  welcome_message?: TenantConfigInWelcomeMessage;
 }

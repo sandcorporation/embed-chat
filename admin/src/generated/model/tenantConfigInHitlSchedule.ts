@@ -4,5 +4,6 @@
  * Embed Chat API
  * OpenAPI spec version: 1.0.0
  */
+import type { TenantConfigInHitlScheduleAnyOf } from './tenantConfigInHitlScheduleAnyOf';
 
-export type TenantConfigInHitlSchedule = { [key: string]: unknown };
+export type TenantConfigInHitlSchedule = TenantConfigInHitlScheduleAnyOf | null;

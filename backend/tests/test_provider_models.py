@@ -273,3 +273,73 @@ def test_update_config_skips_validation_when_provider_unchanged(client, tenant_a
     assert resp.status_code == 200
     assert counter["n"] == 0  # provider 미변경 → 검증(HTTP) 미호출
     assert resp.json()["system_prompt"] == "새 프롬프트"
+
+
+# ── OCR(Vision) Provider (issue 159) ──────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_provider_models_endpoint_ocr_kind(client, tenant_agent_token, monkeypatch):
+    """kind="ocr" 모델 목록은 LLM-style /models로 조회된다(vision 모델 선택용)."""
+    _patch_get(monkeypatch, {"data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]})
+    resp = client.post(
+        "/api/tenant/providers/models",
+        {"kind": "ocr", "type": "openai", "base_url": "https://api.openai.com/v1", "api_key": "sk-x"},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert resp.status_code == 200
+    assert resp.json()["models"] == ["gpt-4o", "gpt-4o-mini"]
+
+
+@pytest.mark.django_db
+def test_provider_models_ocr_masked_key_uses_stored_ocr_key(client, tenant_agent_token, tenant_with_key, monkeypatch):
+    """kind="ocr" + 마스크 키는 저장된 ocr_api_key를 복호화해 쓴다(llm 키 아님)."""
+    from apps.tenants.models import TenantConfig
+    from apps.tenants.crypto import encrypt_secret
+
+    tenant, _ = tenant_with_key
+    config = TenantConfig.objects.get(tenant=tenant)
+    config.ocr_api_key = encrypt_secret("ocr-stored-key")
+    config.save()
+
+    cap = {}
+    _patch_get(monkeypatch, {"data": [{"id": "m"}]}, capture=cap)
+    resp = client.post(
+        "/api/tenant/providers/models",
+        {"kind": "ocr", "type": "openai", "base_url": "https://x/v1", "api_key": "********"},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert resp.status_code == 200
+    assert cap["headers"]["Authorization"] == "Bearer ocr-stored-key"
+
+
+@pytest.mark.django_db
+def test_update_config_ocr_provider_roundtrip(client, tenant_agent_token, monkeypatch):
+    """OCR Provider 저장: 검증 통과 시 저장되고 GET은 키를 마스킹한다(키 미노출)."""
+    _patch_validate(monkeypatch, get_status=200, get_payload={"data": [{"id": "gpt-4o"}]})
+    resp = _patch_config(client, tenant_agent_token, {
+        "ocr_provider_type": "openai", "ocr_base_url": "https://x/v1",
+        "ocr_model": "gpt-4o", "ocr_api_key": "sk-ocr",
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ocr_provider_type"] == "openai"
+    assert body["ocr_model"] == "gpt-4o"
+    assert body["ocr_api_key"] == "********"  # 마스킹
+
+    g = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}").json()
+    assert g["ocr_provider_type"] == "openai"
+    assert "sk-ocr" not in str(g)  # 평문 키 미노출
+
+
+@pytest.mark.django_db
+def test_update_config_rejects_invalid_ocr_provider(client, tenant_agent_token, monkeypatch):
+    """OCR Provider 연결 실패 시 400 + 미저장(롤백)."""
+    _patch_validate(monkeypatch, get_status=401)
+    resp = _patch_config(client, tenant_agent_token, {
+        "ocr_provider_type": "openai", "ocr_base_url": "https://x/v1", "ocr_api_key": "bad",
+    })
+    assert resp.status_code == 400
+    g = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}").json()
+    assert g["ocr_provider_type"] == ""
