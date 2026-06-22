@@ -25,3 +25,12 @@ Accepted
 - OCR fallback 트리거가 넓어져, 텍스트 레이어가 멀쩡한데도 오탐으로 OCR을 타는 문서가 생길 수 있다(느림·OCR 오인식 위험). 임계값을 보수적으로 잡아 통제한다.
 - citation 원문성 원칙이 도메인 규약으로 확정됨: Text Unit은 추출 원문/OCR 재추출본만 담고 LLM 생성물을 담지 않는다(CONTEXT.md Text Unit·Garbled Extraction 항목).
 - 새 문서는 자동 보호되나, 이미 저장된 깨진 Text Unit/Entity는 재업로드 전까지 남는다.
+
+## Amendment (PRD-vision-ocr, ADR-0020)
+이 ADR이 기각한 것은 **"이미 깨진 텍스트 레이어(원문 정보가 0)를 LLM으로 정제·복원"** 하는 것이다. 입력에 원문 정보가 없으면 LLM의 "정제"는 창작이 되기 때문이다.
+
+**픽셀로부터의 vision OCR**(원본 이미지/렌더 페이지를 vision 모델이 읽어 전사)은 이 금지에 해당하지 않는다 — 입력이 원본 픽셀(정보 보존)이고, 기능적으로 Paddle 같은 OCR과 동일한 "재인식"이다. 따라서 OCR 엔진을 Paddle에서 per-Tenant vision 모델로 교체하는 것은 허용된다(ADR-0020). 단 vision 모델은 생성형이라 환각 위험이 있으므로 가드레일을 강제한다:
+- 전사 전용 프롬프트("보이는 텍스트만 그대로, 추론·번역·요약·교정 금지, 판독 불가 시 빈 출력") + temperature 0.
+- OCR 결과도 기존 `is_garbled` 사후 드롭을 그대로 통과(깨진 청크 미저장).
+
+즉 "Text Unit은 LLM 생성물을 담지 않는다"는 규약은 유지되되, **OCR 재추출본의 인식기**가 Paddle이든 vision 모델이든 무관하다로 범위가 명확해진다.

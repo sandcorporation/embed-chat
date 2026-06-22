@@ -135,27 +135,10 @@ services:
       redis:
         condition: service_healthy
 
-  paddle-ocr:
-    build:
-      context: ./paddle_service
-      dockerfile: Dockerfile
-    runtime: nvidia
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-    volumes:
-      - paddle_models:/root/.paddleocr
-    # ports:
-    #   - "18080:8080"
-    healthcheck:
-      test: [ "CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health').status==200 else 1)\"" ]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 300s
+  # OCR은 prod에서 per-Tenant Vision Provider로 수행한다(PRD-vision-ocr) — Paddle GPU 서비스는
+  # prod에서 제거됐다. dev/test는 결정적 로컬 OCR로 Paddle을 유지한다(docker-compose.dev/test.yml).
 
 volumes:
   postgres_data:
   redis_data:
-  paddle_models:
   neo4j_data:
