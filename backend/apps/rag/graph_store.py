@@ -405,6 +405,36 @@ class _Neo4jGraphStore:
             edges = [dict(rec) for rec in session.run(edges_q, tenant_id=self.tenant_id, name=name)]
         return {"nodes": nodes, "edges": edges}
 
+    # ── 데이터 이전용 export (임베딩 포함, issue 166) ─────────────────────────
+    def export_text_units(self) -> list:
+        q = (
+            "MATCH (t:TextUnit {tenant_id: $tenant_id}) RETURN t.unit_id AS unit_id, "
+            "t.content AS content, coalesce(t.source_document_id,'') AS source_document_id, "
+            "coalesce(t.chunk_index,0) AS chunk_index, t.embedding AS embedding"
+        )
+        with _get_driver().session() as session:
+            return [dict(r) for r in session.run(q, tenant_id=self.tenant_id)]
+
+    def export_mentions(self) -> list:
+        q = (
+            "MATCH (m:Mention {tenant_id: $tenant_id}) RETURN m.mention_id AS mention_id, "
+            "m.name AS name, coalesce(m.entity_type,'') AS entity_type, "
+            "coalesce(m.description,'') AS description, "
+            "coalesce(m.source_document_id,'') AS source_document_id, m.embedding AS embedding"
+        )
+        with _get_driver().session() as session:
+            return [dict(r) for r in session.run(q, tenant_id=self.tenant_id)]
+
+    def export_relations(self) -> list:
+        q = (
+            "MATCH (a:Mention {tenant_id: $tenant_id})-[r:RELATED {tenant_id: $tenant_id}]->"
+            "(b:Mention {tenant_id: $tenant_id}) RETURN a.mention_id AS source_id, "
+            "b.mention_id AS target_id, coalesce(r.description,'') AS description, "
+            "coalesce(r.source_document_id,'') AS source_document_id"
+        )
+        with _get_driver().session() as session:
+            return [dict(r) for r in session.run(q, tenant_id=self.tenant_id)]
+
 
 # ── Postgres + pgvector 백엔드 (PRD-pgvector-graphstore) ──────────────────────
 # 같은 deep module 인터페이스를 Postgres로 백킹한다. per-Tenant 임베딩 차원은 차원별 테이블
