@@ -37,19 +37,37 @@ def test_stale_session_expires(tenant_with_key):
     assert "s-stale" not in presence.active_sessions(str(tenant.id), now=later)
 
 
+def _consume_presence_for(bus, group, session_id, want_type, tries=10):
+    from apps.events.types import PRESENCE_TOPIC
+    for _ in range(tries):
+        for m in bus.consume(PRESENCE_TOPIC, group, "c", count=20, block_ms=200):
+            bus.ack(PRESENCE_TOPIC, group, m.msg_id)
+            if m.payload.get("type") == want_type and m.payload.get("aggregate_id") == session_id:
+                return True
+    return False
+
+
 @pytest.mark.django_db
-def test_sse_marks_presence_and_emits_connect_disconnect(tenant_with_key, redis_subscribe):
-    """SSE 시작 시 presence 표시 + session_connected, 종료 시 session_disconnected를 publish한다."""
+def test_sse_marks_presence_and_emits_visitor_events(tenant_with_key):
+    """SSE 시작 시 presence 직접 mark + VisitorConnected 이벤트, 종료 시 VisitorDisconnected를
+    EventBus presence 스트림에 발행한다(issue 150 — 직접 pub/sub 대신 이벤트화)."""
+    import uuid
     from apps.chat.sse import sse_event_stream
     from apps.chat import presence
+    from apps.events.bus import RedisStreamsBus
+    from apps.events.types import PRESENCE_TOPIC, VISITOR_CONNECTED, VISITOR_DISCONNECTED
+
     tenant, _ = tenant_with_key
-    pubsub = redis_subscribe(f"hitl:{tenant.id}")
+    sid = f"sess-{uuid.uuid4().hex}"
+    bus = RedisStreamsBus()
+    group = f"t-{uuid.uuid4().hex}"
+    bus.ensure_group(PRESENCE_TOPIC, group)  # 이후 발행분만 본다
 
-    gen = sse_event_stream("sess-1", tenant_id=str(tenant.id))
-    first = next(gen)  # connected 이벤트 yield + presence mark + connect publish
+    gen = sse_event_stream(sid, tenant_id=str(tenant.id))
+    first = next(gen)  # connected yield + 직접 mark_active + VisitorConnected 발행
     assert "event: connected" in first
-    assert "sess-1" in presence.active_sessions(str(tenant.id))
-    assert _read_event(pubsub, "session_connected")["session_id"] == "sess-1"
+    assert sid in presence.active_sessions(str(tenant.id))  # 하트비트(직접 ZADD) 유지
+    assert _consume_presence_for(bus, group, sid, VISITOR_CONNECTED)
 
-    gen.close()  # GeneratorExit → finally → disconnect publish
-    assert _read_event(pubsub, "session_disconnected")["session_id"] == "sess-1"
+    gen.close()  # finally → VisitorDisconnected 발행
+    assert _consume_presence_for(bus, group, sid, VISITOR_DISCONNECTED)

@@ -21,6 +21,36 @@ def celery_always_eager(settings):
     settings.CELERY_TASK_EAGER_PROPAGATES = False
 
 
+# ── Event pipeline test helpers (issues 142-151) ─────────────────────────────
+
+@pytest.fixture(autouse=True)
+def isolated_events_topic(settings):
+    """각 테스트가 유니크한 내구 스트림을 쓰게 해 Redis Streams 상태 교차오염을 막는다."""
+    import uuid as _uuid
+    settings.EVENTS_TOPIC = f"test.events.{_uuid.uuid4().hex}"
+
+
+@pytest.fixture
+def drain_events(settings):
+    """outbox를 드레인하고 내구 소비자(webhook·visitor-bridge·console-bridge)를 인프로세스로
+    1회 처리한다 — 컷오버 parity 테스트가 전이→이벤트→relay→소비자→부수효과 전 구간을 검증하게."""
+    def _drain():
+        import apps.events.handlers  # noqa: F401 — 핸들러 등록
+        from apps.events.bus import RedisStreamsBus
+        from apps.events.relay import drain_once
+        from apps.events.consumer import EventConsumer, get_handler
+
+        bus = RedisStreamsBus()
+        topic = settings.EVENTS_TOPIC
+        groups = ("webhook", "visitor-bridge", "console-bridge")
+        for g in groups:
+            bus.ensure_group(topic, g)  # 발행 전에 group 생성(이후 메시지를 보게)
+        drain_once(bus)
+        for g in groups:
+            EventConsumer(bus, topic, g, f"{g}-test", get_handler(g)).process_once(block_ms=100)
+    return _drain
+
+
 # ── LLM 경계 Fake ─────────────────────────────────────────────────────────────
 # LLM(OpenRouter)은 외부 API 경계이므로 단위/통합 테스트에서 결정적 Fake로 교체한다
 # (mocking.md: 외부 API는 mock 대상, 내부 협력자는 아님).

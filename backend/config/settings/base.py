@@ -18,6 +18,7 @@ INSTALLED_APPS = [
     "apps.memory",
     "apps.core",
     "apps.escalation",
+    "apps.events",
 ]
 
 MIDDLEWARE = [
@@ -67,6 +68,9 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 # Chat 레이트리밋 (공개 /chatbot/{slug}/ 남용·비용 고갈 가드)
 CHAT_RATE_LIMIT_PER_VISITOR = int(os.environ.get("CHAT_RATE_LIMIT_PER_VISITOR", "20"))
 CHAT_RATE_LIMIT_PER_TENANT = int(os.environ.get("CHAT_RATE_LIMIT_PER_TENANT", "300"))
+
+# Event pipeline (Transactional Outbox + EventBus). 단일 글로벌 내구 스트림(테스트는 격리).
+EVENTS_TOPIC = os.environ.get("EVENTS_TOPIC", "events.session")
 
 # Celery
 CELERY_BROKER_URL = REDIS_URL

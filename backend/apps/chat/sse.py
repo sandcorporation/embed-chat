@@ -55,6 +55,15 @@ def publish_visitor_message(tenant_id: str, session_id: str, content: str) -> No
     }))
 
 
+def publish_console_delta(tenant_id: str, delta_type: str, session_id: str) -> None:
+    """어드민 세션 콘솔의 라이브 갱신 델타를 발행한다(console-bridge 소비자용 — issue 148).
+
+    HitlTab이 이미 구독하는 hitl_new/hitl_claimed/hitl_resolved 형태라 목록을 재정렬·갱신한다.
+    """
+    r = get_redis_client()
+    r.publish(f"hitl:{tenant_id}", json.dumps({"type": delta_type, "session_id": session_id}))
+
+
 def publish_session_connected(tenant_id: str, session_id: str) -> None:
     """방문자 SSE 연결 시작을 어드민 콘솔에 알린다(presence 실시간 push — issue 138)."""
     r = get_redis_client()
@@ -73,10 +82,14 @@ def sse_event_stream(session_id: str, welcome_message: str = "", history=None, i
     r = get_redis_client()
     pubsub = r.pubsub()
     pubsub.subscribe(f"session:{session_id}")
-    # presence: 연결 시작을 표시·통지(tenant_id가 있을 때만 — 어드민 콘솔 활성 계층용, issue 138).
+    # presence: 연결 시작을 표시(직접 ZADD = 하트비트, 진실원천) + VisitorConnected 이벤트 발행
+    # (EventBus ephemeral → presence-bridge가 콘솔 델타로 — issue 150). 하트비트는 직접 유지.
     if tenant_id:
+        from apps.events.signals import publish_presence
+        from apps.events.types import VISITOR_CONNECTED
+
         presence.mark_active(tenant_id, session_id)
-        publish_session_connected(tenant_id, session_id)
+        publish_presence(VISITOR_CONNECTED, tenant_id, session_id)
     connected_payload = {"session_id": session_id}
     # 브랜드 텍스트는 신규/재연결 무관하게 항상 헤더에 표시한다.
     if brand_name:
@@ -109,4 +122,7 @@ def sse_event_stream(session_id: str, welcome_message: str = "", history=None, i
         pubsub.unsubscribe(f"session:{session_id}")
         pubsub.close()
         if tenant_id:
-            publish_session_disconnected(tenant_id, session_id)  # 연결 종료 통지(presence delta)
+            from apps.events.signals import publish_presence
+            from apps.events.types import VISITOR_DISCONNECTED
+
+            publish_presence(VISITOR_DISCONNECTED, tenant_id, session_id)  # 연결 종료 → 이벤트

@@ -1,0 +1,70 @@
+"""소비자 런타임 — 멱등·제한재시도·DLQ (issue 145). 실 Redis Streams + Postgres."""
+import uuid
+import pytest
+
+
+def _bus():
+    from apps.events.bus import RedisStreamsBus
+    return RedisStreamsBus()
+
+
+def _topic():
+    return f"test.consumer.{uuid.uuid4().hex}"
+
+
+def _publish(bus, topic, **payload):
+    payload.setdefault("event_id", str(uuid.uuid4()))
+    bus.publish(topic, key="s", payload=payload)
+    return payload["event_id"]
+
+
+@pytest.mark.django_db
+def test_success_acks_and_does_not_redeliver():
+    from apps.events.consumer import EventConsumer
+    bus, topic, group = _bus(), _topic(), "g"
+    bus.ensure_group(topic, group)
+    _publish(bus, topic, type="X")
+
+    seen = []
+    EventConsumer(bus, topic, group, "c", lambda env: seen.append(env["event_id"])).process_once(block_ms=200)
+
+    assert len(seen) == 1
+    assert bus.claim_stale(topic, group, "c2", min_idle_ms=0) == []  # acked → pending 없음
+
+
+@pytest.mark.django_db
+def test_duplicate_delivery_handled_once():
+    from apps.events.consumer import EventConsumer
+    bus, topic, group = _bus(), _topic(), "g"
+    bus.ensure_group(topic, group)
+    ev_id = _publish(bus, topic, type="X")
+
+    calls = []
+    ec = EventConsumer(bus, topic, group, "c", lambda env: calls.append(env["event_id"]))
+    ec.process_once(block_ms=200)
+    # 같은 event_id 재전달(중복) → 핸들러 재호출 없이 dedup
+    bus.publish(topic, key="s", payload={"event_id": ev_id, "type": "X"})
+    ec.process_once(block_ms=200)
+
+    assert calls.count(ev_id) == 1
+
+
+@pytest.mark.django_db
+def test_poison_message_dead_lettered_after_max_attempts():
+    from apps.events.consumer import EventConsumer
+    bus, topic, group = _bus(), _topic(), "g"
+    bus.ensure_group(topic, group)
+    ev_id = _publish(bus, topic, type="X")
+
+    calls = {"n": 0}
+    def boom(env):
+        calls["n"] += 1
+        raise RuntimeError("handler boom")
+
+    ec = EventConsumer(bus, topic, group, "c", boom, max_attempts=3)
+    ec.process_once(block_ms=200)  # 예외 전파 없이 처리
+
+    assert calls["n"] == 3                                    # 제한 횟수만 시도
+    items = bus.dead_letter_items(topic)
+    assert any(m.payload["event_id"] == ev_id for m in items)  # DLQ로 이동
+    assert bus.claim_stale(topic, group, "c2", min_idle_ms=0) == []  # 원 PEL ack(멈추지 않음)

@@ -44,33 +44,39 @@ def _build_generic_payload(esc, messages) -> dict:
     }
 
 
-def dispatch_webhook(escalation_id: str) -> None:
+def _build_payload(esc, messages, wtype: str) -> dict:
+    if wtype == "slack":
+        return _build_slack_payload(esc, messages)
+    if wtype == "discord":
+        return _build_discord_payload(esc, messages)
+    return _build_generic_payload(esc, messages)
+
+
+def send_webhook(escalation_id: str) -> None:
+    """webhook을 1회 전송한다. 실패(네트워크/비2xx) 시 예외를 올린다 — 재시도·DLQ는 소비자 런타임이
+    담당한다(issue 146). webhook 미설정 Tenant는 no-op."""
     from apps.escalation.models import Escalation
     from apps.tenants.models import TenantConfig
 
     esc = Escalation.objects.select_related("session").get(id=escalation_id)
     config = TenantConfig.objects.get(tenant_id=esc.session.tenant_id)
-
     if not config.webhook_url or not config.webhook_type:
         return
 
-    recent = list(
-        esc.session.messages.order_by("-created_at")[:5]
-    )
+    recent = list(esc.session.messages.order_by("-created_at")[:5])
     recent.reverse()
     messages = [{"role": m.role, "content": m.content} for m in recent]
+    payload = _build_payload(esc, messages, config.webhook_type)
 
-    wtype = config.webhook_type
-    if wtype == "slack":
-        payload = _build_slack_payload(esc, messages)
-    elif wtype == "discord":
-        payload = _build_discord_payload(esc, messages)
-    else:
-        payload = _build_generic_payload(esc, messages)
+    resp = requests.post(config.webhook_url, json=payload, timeout=10)
+    resp.raise_for_status()
 
+
+def dispatch_webhook(escalation_id: str) -> None:
+    """레거시 Celery 경로(best-effort, 실패 삼킴). 컷오버(151)에서 제거 예정."""
     for attempt in range(3):
         try:
-            requests.post(config.webhook_url, json=payload, timeout=10)
+            send_webhook(escalation_id)
             return
         except Exception:
             if attempt == 2:
