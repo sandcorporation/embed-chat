@@ -37,19 +37,33 @@ export function clearAccess(kind: AuthKind): void {
   sessionStorage.removeItem(ACCESS_KEY[kind])
 }
 
-export async function refresh(kind: AuthKind): Promise<boolean> {
-  const res = await fetch(`${BASE}${REFRESH_PATH[kind]}`, {
-    method: 'POST',
-    credentials: 'include', // refresh 쿠키 동봉
-  })
-  if (!res.ok) {
-    clearAccess(kind)
-    return false
-  }
-  const { access_token } = await res.json()
-  setAccess(kind, access_token)
-  notifyAccessChange(kind) // 새 토큰으로 갱신됨 → 구독자(SSE 등)에 통지
-  return true
+// 진행 중인 refresh를 kind별로 공유한다(single-flight). 같은 access 만료 시점에 여러 요청이
+// 동시에 401→refresh를 부르면, single-flight가 없을 경우 같은 refresh 쿠키로 여러 번 회전해
+// 서버의 재사용 탐지가 Session Family를 폐기(=로그아웃)한다. 동시 호출은 한 번의 회전을 공유한다.
+const inflightRefresh: Record<AuthKind, Promise<boolean> | null> = { operator: null, agent: null }
+
+export function refresh(kind: AuthKind): Promise<boolean> {
+  if (inflightRefresh[kind]) return inflightRefresh[kind]!
+  const p = (async () => {
+    try {
+      const res = await fetch(`${BASE}${REFRESH_PATH[kind]}`, {
+        method: 'POST',
+        credentials: 'include', // refresh 쿠키 동봉
+      })
+      if (!res.ok) {
+        clearAccess(kind)
+        return false
+      }
+      const { access_token } = await res.json()
+      setAccess(kind, access_token)
+      notifyAccessChange(kind) // 새 토큰으로 갱신됨 → 구독자(SSE 등)에 통지
+      return true
+    } finally {
+      inflightRefresh[kind] = null
+    }
+  })()
+  inflightRefresh[kind] = p
+  return p
 }
 
 export async function authFetch(kind: AuthKind, path: string, opts: RequestInit = {}): Promise<Response> {

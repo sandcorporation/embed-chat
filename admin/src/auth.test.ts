@@ -43,6 +43,25 @@ describe('bootSilentRefresh', () => {
   })
 })
 
+describe('refresh — single-flight (동시 401 경쟁 방지)', () => {
+  it('동시 refresh 호출은 refresh 엔드포인트를 한 번만 치고 결과를 공유한다', async () => {
+    clearAccess('agent')
+    let calls = 0
+    globalThis.fetch = vi.fn().mockImplementation(async () => {
+      calls++
+      await new Promise(r => setTimeout(r, 10)) // 회전 지연 — 동시 호출이 in-flight를 공유해야 함
+      return { ok: true, status: 200, json: async () => ({ access_token: 'shared-access' }) }
+    })
+
+    const [a, b, c] = await Promise.all([refresh('agent'), refresh('agent'), refresh('agent')])
+
+    expect(a && b && c).toBe(true)
+    // single-flight 없으면 같은 refresh 쿠키로 3번 회전 → 서버 reuse 탐지가 family를 폐기(로그아웃).
+    expect(calls).toBe(1)
+    expect(getAccess('agent')).toBe('shared-access')
+  })
+})
+
 describe('refresh 실패', () => {
   it('refresh가 401이면 access를 제거하고 false를 반환한다', async () => {
     setAccess('operator', 'stale')
