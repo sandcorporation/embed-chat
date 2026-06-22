@@ -11,6 +11,7 @@ def tenant_ids():
     return str(uuid.uuid4()), str(uuid.uuid4())
 
 
+@pytest.mark.django_db
 def test_graphstore_upserts_and_queries_mention_for_tenant(tenant_ids):
     """GraphStore로 Mention을 upsert하면 같은 tenant로 조회 시 반환된다."""
     from apps.rag.graph_store import GraphStore
@@ -26,6 +27,7 @@ def test_graphstore_upserts_and_queries_mention_for_tenant(tenant_ids):
     assert "ZX900PRO" in names
 
 
+@pytest.mark.django_db
 def test_graphstore_isolates_mentions_by_tenant(tenant_ids):
     """한 tenant의 Mention은 다른 tenant 조회에 절대 나타나지 않는다 (격리)."""
     from apps.rag.graph_store import GraphStore

@@ -72,19 +72,7 @@ services:
       retries: 30
       start_period: 300s
 
-  # ── Neo4j (GraphRAG 지식그래프, 테스트용) ───────────────────────────────────
-  neo4j-test:
-    image: neo4j:5.24-community
-    environment:
-      NEO4J_AUTH: neo4j/neo4j-test-password
-      NEO4J_PLUGINS: '["apoc"]'
-    tmpfs:
-      - /data
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
+  # Neo4j는 제거됨(ADR-0021) — GraphRAG는 Postgres+pgvector(db-test)로 흡수.
 
   # ── E2E용 결정적 Fake LLM (OpenAI 호환) ─────────────────────────────────────
   fake-llm:
@@ -128,8 +116,6 @@ services:
         condition: service_completed_successfully
       paddle-ocr-test:
         condition: service_healthy
-      neo4j-test:
-        condition: service_healthy
 
   # ── E2E용 Django API ─────────────────────────────────────────────────────
   api-e2e:
@@ -169,8 +155,6 @@ services:
       paddle-ocr-test:
         condition: service_healthy
       fake-llm:
-        condition: service_healthy
-      neo4j-test:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8000/api/operator/auth/login || true"]
@@ -236,8 +220,6 @@ services:
       api-e2e:
         condition: service_healthy
       fake-llm:
-        condition: service_healthy
-      neo4j-test:
         condition: service_healthy
 
   # ── E2E용 Event pipeline (relay + 소비자) ────────────────────────────────

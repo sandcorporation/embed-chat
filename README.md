@@ -14,7 +14,7 @@ Embed Chat는 타사 웹사이트에 iframe으로 삽입하는 챗봇을 제공�
 | **Celery Worker** (배치) | 문서 인제스션(그래프 구축), 엔티티 해소(SAME_AS) 재구축, 재임베딩, 메모리 추출 |
 | **Celery worker-chat** (chat 전용 큐) | Visitor chat 1턴 실행 — gevent web 워커에서 분리·격리(배치가 chat을 굶기지 않게) |
 | **relay + 이벤트 소비자** (Event 파이프라인) | HITL/세션 라이프사이클의 **Transactional Outbox** 발행(relay 싱글톤) + 디커플링된 소비자(webhook·visitor-bridge·console-bridge·presence-bridge). → [event-driven-architecture.md](./docs/event-driven-architecture.md) |
-| **Neo4j** (Community) | **Knowledge Graph**(Entity Mention·관계) + **per-Tenant 가변차원 벡터 인덱스**(Text Unit/Mention 임베딩) |
+| **Knowledge Graph** | **Postgres + pgvector**에 흡수 — Entity Mention·관계(메타데이터) + **per-Tenant 가변차원 HNSW**(Text Unit/Mention 임베딩, 차원별 vec 테이블). 과거 Neo4j에서 이전([ADR-0021](./docs/adr/0021-graphstore-pgvector-replaces-neo4j.md)) |
 | **PostgreSQL** | Django 모델(Tenant·Document·ChatMessage 등) + **LangGraph Checkpoint**(대화 state) |
 | **Ollama** | dev 기본 임베딩 `bge-m3`(다국어, 1024차원). prod에선 Tenant Embedding Provider가 대체 |
 | **OCR** | 이미지/스캔 PDF의 텍스트 추출 — prod은 **per-Tenant Vision Provider**(GPT-4o·Claude·Gemini 등), dev/test는 **PaddleOCR**(GPU) 폴백 ([ADR-0020](./docs/adr/0020-vision-ocr-replaces-paddle.md)) |
@@ -23,7 +23,7 @@ Embed Chat는 타사 웹사이트에 iframe으로 삽입하는 챗봇을 제공�
 | **Admin UI** (`/admin-ui/`) | Operator·Tenant 관리 화면 (React + Tailwind/shadcn) — **좌측 사이드바 내비 + 자원별 URL 라우트**(ADR-0017). 문서·**지식그래프 인스펙터**·Visitors·설정(Provider 포함)·팀원·HITL 섹션 |
 | **Nginx** | 리버스 프록시, 정적 파일 서빙 |
 
-> **저장소 역할 분담**: PostgreSQL은 관계형 데이터 + LangGraph 대화 체크포인트, **Neo4j는 RAG 지식그래프와 모든 RAG 임베딩**을 담당합니다. (과거 pgvector 기반 벡터 RAG는 GraphRAG로 대체됨 — [ADR-0007](./docs/adr/0007-graphrag-neo4j-replaces-2step-vector-rag.md).)
+> **저장소 역할 분담**: **PostgreSQL이 관계형 데이터 + LangGraph 대화 체크포인트 + RAG 지식그래프·임베딩(pgvector)** 을 모두 담당합니다. GraphRAG의 엔티티/관계 모델은 그대로이며 저장 엔진만 Neo4j→pgvector로 이전했습니다([ADR-0021](./docs/adr/0021-graphstore-pgvector-replaces-neo4j.md)) — 단일 DB로 통합해 박스 부담을 줄이고 관리형 Postgres 이식을 단순화. (GraphRAG 채택 자체는 [ADR-0007](./docs/adr/0007-graphrag-neo4j-replaces-2step-vector-rag.md).)
 
 ---
 
@@ -140,7 +140,7 @@ START → local_search → call_llm ─(context_sufficient=False)─→ source_s
 | LLM 오케스트레이션 | LangChain + LangGraph (PostgresSaver 체크포인트) |
 | LLM Provider | **per-Tenant** — OpenAI / Claude(Anthropic 네이티브) / Custom(OpenAI-호환). 미설정 시 플랫폼 기본(OpenRouter). 챗·추출 공용, 키 암호화 저장 |
 | Embedding Provider | **per-Tenant**(LLM과 독립) — OpenAI/Custom, OpenAI-호환 `/v1/embeddings`. dev 기본 `bge-m3`(Ollama, 1024차원) |
-| Knowledge Graph | Neo4j 5.x Community + **per-Tenant 가변차원** 네이티브 벡터 인덱스 |
+| Knowledge Graph | **Postgres + pgvector**(차원별 HNSW, **per-Tenant 가변차원**) — 메타데이터와 임베딩 분리 |
 | OCR | prod=per-Tenant Vision LLM(GPT-4o·Claude·Gemini 등), dev/test=PaddleOCR(PP-OCRv5) — 이미지/스캔 PDF·깨진 추출 |
 | 관계형 DB | PostgreSQL 16 (Django 모델 + LangGraph 체크포인트) |
 | 메시징 | Redis 7 (SSE pub/sub + Celery 브로커 + 레이트리밋·세션 락) |
@@ -263,6 +263,7 @@ docker compose exec api python manage.py createsuperuser
 - `0003` iframe 임베드 / ~~`0004` 서버사이드 EmbedToken~~ (0011로 supersede)
 - `0005` Docker Compose 인프라
 - **`0007` GraphRAG(Neo4j)가 2-step 벡터 RAG를 대체** (pgvector ADR-0002 supersede)
+- **`0021` GraphStore 저장 엔진을 Neo4j→Postgres+pgvector로 이전** (그래프 모델 보존, 박스 부담↓·관리형 이식)
 - **`0008` 증분 인제스션 + 배치 Community 재구축**
 - **`0009` 깨진 추출(Garbled)은 LLM 정제가 아니라 OCR 재추출** (+ Amendment: 픽셀 vision OCR 허용)
 - **`0020` OCR을 per-Tenant Vision Provider로 (Paddle는 dev/test 격하)**

@@ -14,7 +14,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 COMPOSE_FILE="docker-compose.test.yml"
-INFRA=(test db-test redis-test neo4j-test paddle-ocr-test ollama-test ollama-test-init)
+INFRA=(test db-test redis-test paddle-ocr-test ollama-test ollama-test-init)
 TARGET=("${@:-tests/}")
 
 # Git Bash(MSYS)에서 '/app' 인자와 -v 경로가 호스트 경로로 변환되는 것을 막는다.

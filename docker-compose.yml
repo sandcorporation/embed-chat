@@ -23,46 +23,27 @@ services:
       timeout: 3s
       retries: 5
 
-  neo4j:
-    image: neo4j:5.24-community
-    environment:
-      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-neo4j-test-password}
-      NEO4J_PLUGINS: '["apoc"]'
-    volumes:
-      - neo4j_data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 30s
+  # Neo4j는 제거됨(ADR-0021) — GraphRAG는 Postgres+pgvector로 흡수. 일회성 데이터 이전 시에는
+  # NEO4J_URI 환경변수로 옛 Neo4j를 가리켜 migrate_graph_to_pg를 돌린다(드라이버는 보존).
 
   api:
     build: ./backend
     command: gunicorn config.wsgi:application --worker-class=gevent --workers=4 --bind 0.0.0.0:8000
     env_file: .env
-    environment:
-      NEO4J_URI: bolt://neo4j:7687
     depends_on:
       db:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      neo4j:
         condition: service_healthy
 
   worker:
     build: ./backend
     command: celery -A config.celery worker --loglevel=info
     env_file: .env
-    environment:
-      NEO4J_URI: bolt://neo4j:7687
     depends_on:
       db:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      neo4j:
         condition: service_healthy
 
   # 인터랙티브 chat 전용 워커 — 'chat' 큐만 소비해 무거운 배치(worker)에 굶지 않는다.
@@ -72,14 +53,10 @@ services:
     build: ./backend
     command: celery -A config.celery worker -Q chat --concurrency=4 --prefetch-multiplier=1 --loglevel=info
     env_file: .env
-    environment:
-      NEO4J_URI: bolt://neo4j:7687
     depends_on:
       db:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      neo4j:
         condition: service_healthy
 
   # ── Event pipeline (Transactional Outbox + EventBus) ─────────────────────────
@@ -141,4 +118,3 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  neo4j_data:

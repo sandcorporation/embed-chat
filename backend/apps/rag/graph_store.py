@@ -468,11 +468,31 @@ class _PgGraphStore:
         self._ensured = set()  # 이 인스턴스에서 DDL 보장한 vec 테이블(중복 DDL 회피)
 
     def _dim(self) -> int:
+        """테넌트의 현 임베딩 차원. 데이터에 기록된 값(kg_graph_meta.embed_dim)을 우선하고,
+        없으면 config, 없으면 1024. 임베딩 없는 read가 올바른 vec 테이블을 찾게 한다."""
         if self._dim_cache is None:
-            from apps.tenants.models import TenantConfig
-            cfg = TenantConfig.objects.filter(tenant_id=self.tenant_id).first()
-            self._dim_cache = cfg.embed_dim if cfg else 1024
+            from django.db import connection
+            with connection.cursor() as cur:
+                cur.execute("SELECT embed_dim FROM kg_graph_meta WHERE tenant_id=%s", [self.tenant_id])
+                row = cur.fetchone()
+            if row and row[0]:
+                self._dim_cache = row[0]
+            else:
+                from apps.tenants.models import TenantConfig
+                cfg = TenantConfig.objects.filter(tenant_id=self.tenant_id).first()
+                self._dim_cache = cfg.embed_dim if cfg else 1024
         return self._dim_cache
+
+    def _record_dim(self, dim: int) -> None:
+        """이 테넌트의 임베딩 차원을 데이터에 기록한다(임베딩 길이로 라우팅하므로 데이터가 진실)."""
+        from django.db import connection
+        with connection.cursor() as cur:
+            cur.execute(
+                "INSERT INTO kg_graph_meta (tenant_id, embed_dim) VALUES (%s, %s) "
+                "ON CONFLICT (tenant_id) DO UPDATE SET embed_dim=EXCLUDED.embed_dim",
+                [self.tenant_id, dim],
+            )
+        self._dim_cache = dim
 
     def _tu_vec(self) -> str:
         return f"kg_text_unit_vec_d{self._dim()}"
@@ -507,14 +527,18 @@ class _PgGraphStore:
 
     def ensure_vector_index(self, dimensions: int = 1024) -> None:
         self._ensure_vec("text_unit", dimensions)
+        self._record_dim(dimensions)
 
     def ensure_mention_vector_index(self, dimensions: int = 1024) -> None:
         self._ensure_vec("mention", dimensions)
+        self._record_dim(dimensions)
 
     # ── Text Unit (메타데이터 kg_text_unit + 임베딩 kg_text_unit_vec_d{dim}) ──
     def upsert_text_unit(self, unit_id, content, embedding, source_document_id="", chunk_index=0) -> None:
         from django.db import connection
-        self._ensure_vec("text_unit", self._dim())
+        dim = len(embedding)  # 임베딩 길이로 vec 테이블 라우팅(데이터가 진실)
+        self._ensure_vec("text_unit", dim)
+        self._record_dim(dim)
         with connection.cursor() as cur:
             cur.execute(
                 "INSERT INTO kg_text_unit (tenant_id, unit_id, content, source_document_id, chunk_index) "
@@ -524,7 +548,7 @@ class _PgGraphStore:
                 [self.tenant_id, unit_id, content, source_document_id, chunk_index],
             )
             cur.execute(
-                f"INSERT INTO {self._tu_vec()} (tenant_id, unit_id, embedding) VALUES (%s, %s, %s::vector) "
+                f"INSERT INTO kg_text_unit_vec_d{dim} (tenant_id, unit_id, embedding) VALUES (%s, %s, %s::vector) "
                 "ON CONFLICT (tenant_id, unit_id) DO UPDATE SET embedding=EXCLUDED.embedding",
                 [self.tenant_id, unit_id, _vec_literal(embedding)],
             )
@@ -547,10 +571,12 @@ class _PgGraphStore:
 
     def set_text_unit_embedding(self, unit_id: str, embedding: list) -> None:
         from django.db import connection
-        self._ensure_vec("text_unit", self._dim())
+        dim = len(embedding)
+        self._ensure_vec("text_unit", dim)
+        self._record_dim(dim)
         with connection.cursor() as cur:
             cur.execute(
-                f"INSERT INTO {self._tu_vec()} (tenant_id, unit_id, embedding) VALUES (%s, %s, %s::vector) "
+                f"INSERT INTO kg_text_unit_vec_d{dim} (tenant_id, unit_id, embedding) VALUES (%s, %s, %s::vector) "
                 "ON CONFLICT (tenant_id, unit_id) DO UPDATE SET embedding=EXCLUDED.embedding",
                 [self.tenant_id, unit_id, _vec_literal(embedding)],
             )
@@ -558,12 +584,13 @@ class _PgGraphStore:
     def vector_search(self, query_embedding: list, top_k: int = 5) -> list:
         from django.db import connection, transaction
         lit = _vec_literal(query_embedding)
+        tbl = f"kg_text_unit_vec_d{len(query_embedding)}"  # 질의 임베딩 길이로 라우팅
         try:
             # savepoint로 격리 — vec 테이블 부재/차원불일치 시 바깥 트랜잭션을 오염시키지 않는다.
             with transaction.atomic(), connection.cursor() as cur:
                 cur.execute(
                     f"SELECT tu.content, tu.source_document_id, 1 - (v.embedding <=> %s::vector) AS score "
-                    f"FROM {self._tu_vec()} v JOIN kg_text_unit tu "
+                    f"FROM {tbl} v JOIN kg_text_unit tu "
                     "ON tu.tenant_id=v.tenant_id AND tu.unit_id=v.unit_id "
                     "WHERE v.tenant_id=%s ORDER BY v.embedding <=> %s::vector LIMIT %s",
                     [lit, self.tenant_id, lit, top_k],
@@ -604,9 +631,11 @@ class _PgGraphStore:
                 [self.tenant_id, mention_id, name, entity_type, description, source_document_id],
             )
             if embedding is not None:
-                self._ensure_vec("mention", self._dim())
+                dim = len(embedding)
+                self._ensure_vec("mention", dim)
+                self._record_dim(dim)
                 cur.execute(
-                    f"INSERT INTO {self._m_vec()} (tenant_id, mention_id, embedding) "
+                    f"INSERT INTO kg_mention_vec_d{dim} (tenant_id, mention_id, embedding) "
                     "VALUES (%s, %s, %s::vector) ON CONFLICT (tenant_id, mention_id) "
                     "DO UPDATE SET embedding=EXCLUDED.embedding",
                     [self.tenant_id, mention_id, _vec_literal(embedding)],
@@ -654,10 +683,12 @@ class _PgGraphStore:
 
     def set_mention_embedding(self, mention_id: str, embedding: list) -> None:
         from django.db import connection
-        self._ensure_vec("mention", self._dim())
+        dim = len(embedding)
+        self._ensure_vec("mention", dim)
+        self._record_dim(dim)
         with connection.cursor() as cur:
             cur.execute(
-                f"INSERT INTO {self._m_vec()} (tenant_id, mention_id, embedding) VALUES (%s, %s, %s::vector) "
+                f"INSERT INTO kg_mention_vec_d{dim} (tenant_id, mention_id, embedding) VALUES (%s, %s, %s::vector) "
                 "ON CONFLICT (tenant_id, mention_id) DO UPDATE SET embedding=EXCLUDED.embedding",
                 [self.tenant_id, mention_id, _vec_literal(embedding)],
             )
@@ -696,11 +727,13 @@ class _PgGraphStore:
         try:
             from django.db import transaction
             from apps.rag.ingesters import get_embeddings
-            q = _vec_literal(get_embeddings([term], provider=self._embedding_provider())[0])
+            qe = get_embeddings([term], provider=self._embedding_provider())[0]
+            q = _vec_literal(qe)
+            mvec = f"kg_mention_vec_d{len(qe)}"  # 질의 임베딩 길이로 라우팅
             with transaction.atomic(), connection.cursor() as cur:
                 cur.execute(
                     "SELECT m.mention_id, m.name, m.entity_type, m.description, m.source_document_id "
-                    f"FROM {self._m_vec()} v JOIN kg_mention m "
+                    f"FROM {mvec} v JOIN kg_mention m "
                     "ON m.tenant_id=v.tenant_id AND m.mention_id=v.mention_id "
                     "WHERE v.tenant_id=%s ORDER BY v.embedding <=> %s::vector LIMIT %s",
                     [self.tenant_id, q, top_k],
@@ -839,6 +872,7 @@ class _PgGraphStore:
         from django.db import connection
         self._ensure_vec("text_unit", dimensions)
         self._ensure_vec("mention", dimensions)
+        self._record_dim(dimensions)
         with connection.cursor() as cur:
             cur.execute(f"DELETE FROM kg_text_unit_vec_d{dimensions} WHERE tenant_id=%s", [self.tenant_id])
             cur.execute(f"DELETE FROM kg_mention_vec_d{dimensions} WHERE tenant_id=%s", [self.tenant_id])
