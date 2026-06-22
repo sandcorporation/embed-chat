@@ -5,8 +5,11 @@ processed_events로 중복(at-least-once 재전달)을 막고, 핸들러가 제�
 보낸다. 코드는 하나이며 group 이름만 파라미터로 다르다(--group=<name>은 management command).
 """
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+CONSUMER_BACKOFF_SECONDS = 2.0  # 루프 오류(인프라 블립·DB 단절 등) 후 재시도 간격
 
 # group 이름 → handler(envelope) 레지스트리. 각 소비자 슬라이스(146~150)가 등록한다.
 _HANDLERS = {}
@@ -77,11 +80,27 @@ class EventConsumer:
 
 
 def run_consumer(group: str, bus=None, topic=None, consumer=None, stop=None) -> None:
-    """management command 진입점 — 등록된 핸들러로 group 소비 루프를 돈다(149)."""
+    """management command 진입점 — 등록된 핸들러로 group 소비 루프를 돈다(149).
+
+    supervisor 루프: 한 반복에서 인프라 오류(Redis/DB 단절 등)가 나도 프로세스를 죽이지 않고
+    로그 + backoff 후 재구성(ensure_group 포함)해 재시도한다. 컨테이너가 크래시루프에 빠지지
+    않고, 의존성이 복구되면 재시작 없이 스스로 회복한다. (핸들러 실패는 _handle이 재시도/DLQ로
+    별도 처리 — 여기 가드는 인프라/비핸들러 오류용.)
+    """
     from apps.events.bus import RedisStreamsBus
     from apps.events.store import default_topic
 
     bus = bus or RedisStreamsBus()
-    ec = EventConsumer(bus, topic or default_topic(), group, consumer or f"{group}-1", get_handler(group))
+    topic = topic or default_topic()
+    consumer = consumer or f"{group}-1"
+    handler = get_handler(group)
+    ec = None
     while stop is None or not stop():
-        ec.process_once()
+        try:
+            if ec is None:  # (재)구성 — ensure_group으로 재연결
+                ec = EventConsumer(bus, topic, group, consumer, handler)
+            ec.process_once()
+        except Exception:  # noqa: BLE001 — 루프를 살려둔다(컨테이너 생존)
+            logger.exception("[consumer] group=%s 루프 오류 — %.1fs 후 재시도", group, CONSUMER_BACKOFF_SECONDS)
+            ec = None
+            time.sleep(CONSUMER_BACKOFF_SECONDS)

@@ -34,6 +34,18 @@ worker-presence-bridge    # consume_events --group=presence-bridge --topic=signa
 
 prod=`docker-compose.yml`, dev=`docker-compose.dev.yml`, e2e=`docker-compose.test.yml`.
 
+## 복원력 (컨테이너 생존 · 자가 회복)
+
+relay·소비자 루프는 **supervisor 패턴**이다 — 한 반복에서 인프라 오류(Redis/DB 단절, 발행 실패,
+부팅 시 마이그레이션 미적용 등)가 나도 프로세스를 죽이지 않고 `logger.exception` + backoff
+(`RELAY_BACKOFF_SECONDS`/`CONSUMER_BACKOFF_SECONDS`) 후 재구성(relay는 재구독+catch-up sweep,
+소비자는 `ensure_group` 재실행)해 재시도한다. 의존성이 복구되면 **컨테이너 재시작 없이 스스로
+회복**한다. (핸들러 자체 실패는 별도로 멱등 재시도→DLQ로 처리 — 아래.)
+
+> 다른 프로세스: **api**(gunicorn/runserver)는 요청 예외가 500일 뿐 서버는 생존하고, **celery
+> worker/worker-chat**는 태스크 예외에 죽지 않고 브로커를 재연결한다. 즉 무한 루프를 직접 도는
+> relay·consume_events만 이 가드가 필요하다.
+
 ## 운영: dead-letter 처리
 
 소비자가 제한 횟수(`max_attempts`) 실패하면 이벤트는 `{topic}.dlq` 스트림으로 이동하고 경고

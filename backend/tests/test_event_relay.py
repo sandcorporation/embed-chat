@@ -113,3 +113,25 @@ def test_run_relay_boot_sweep_drains_and_respects_stop():
     run_relay(bus=bus, idle_drain=0.1, stop=lambda: True)  # 부팅 sweep 후 즉시 중단
 
     assert Outbox.objects.filter(published_at__isnull=True).count() == 0
+
+
+@pytest.mark.django_db
+def test_run_relay_survives_transient_error(monkeypatch):
+    """relay 루프(부팅 sweep 포함)는 일시 오류에 죽지 않고 로그+재시도로 계속 돈다.
+
+    가드가 없으면 부팅 sweep의 drain_once 예외가 run_relay를 종료시켜 컨테이너가 크래시한다.
+    """
+    from apps.events import relay as rmod
+
+    calls = {"n": 0}
+    def flaky_drain(bus, batch=200):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient blip")  # 부팅 sweep에서 터진다
+        return 0
+    monkeypatch.setattr(rmod, "drain_once", flaky_drain)
+    monkeypatch.setattr(rmod, "RELAY_BACKOFF_SECONDS", 0)  # 테스트 속도
+
+    rmod.run_relay(bus=object(), idle_drain=0.01, stop=lambda: calls["n"] >= 3)
+
+    assert calls["n"] >= 3  # 부팅 sweep 예외에도 죽지 않고 루프 지속

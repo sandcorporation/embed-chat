@@ -67,6 +67,31 @@ def test_consumer_logs_each_handled_event(caplog):
 
 
 @pytest.mark.django_db
+def test_run_consumer_survives_transient_loop_error(monkeypatch):
+    """소비자 루프는 일시 인프라 오류(Redis/DB 블립)에 죽지 않고 로그+재시도로 계속 돈다.
+
+    가드가 없으면 process_once의 예외가 run_consumer를 종료시켜 컨테이너가 크래시루프에 빠진다.
+    """
+    from apps.events import consumer as cmod
+
+    calls = {"n": 0}
+    def flaky_process_once(self, *a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient redis blip")
+        return 0
+    monkeypatch.setattr(cmod.EventConsumer, "process_once", flaky_process_once)
+    monkeypatch.setattr(cmod, "CONSUMER_BACKOFF_SECONDS", 0)  # 테스트 속도(실sleep 없음)
+    cmod.register_handler("resilient-g", lambda env: None)
+
+    # 1회째 예외 후에도 루프가 살아 process_once를 다시 부른다 → 3회 이후 stop.
+    cmod.run_consumer("resilient-g", topic=f"test.resilient.{uuid.uuid4().hex}",
+                      stop=lambda: calls["n"] >= 3)
+
+    assert calls["n"] >= 3  # 예외 한 번에 죽지 않고 계속 처리
+
+
+@pytest.mark.django_db
 def test_poison_message_dead_lettered_after_max_attempts():
     from apps.events.consumer import EventConsumer
     bus, topic, group = _bus(), _topic(), "g"
