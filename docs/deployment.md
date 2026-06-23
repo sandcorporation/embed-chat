@@ -18,7 +18,7 @@ git push main
 [Jenkins on A1]  Execute shell → scripts/deploy.sh <sha>
    │
    ▼  pull → migrate → 정적 init swap → docker rollout(api·worker·worker-chat)
-[NPM] 공개 443/TLS → proxy 네트워크 → 우리 nginx(embed-chat-web:80) → api / SPA
+[NPM] 공개 443/TLS → <A1 호스트>:${NGINX_PORT} → 우리 nginx → api / SPA
 ```
 
 - **빌드(sub)와 런타임(A1)을 완전 분리** — A1은 pull만, 빌드 절대 안 함.
@@ -40,7 +40,7 @@ git push main
 | 파일 | 역할 |
 |---|---|
 | [.github/workflows/build-images.yml](../.github/workflows/build-images.yml) | build(arm64→GHCR) + release(release 브랜치 갱신) |
-| [docker-compose.prod.oracle.yml](../docker-compose.prod.oracle.yml) | A1 스택 — GHCR 이미지, `${IMAGE_TAG}` 핀, healthcheck·stop_grace·메모리 limit, NPM용 `proxy` 네트워크 |
+| [docker-compose.prod.oracle.yml](../docker-compose.prod.oracle.yml) | A1 스택 — GHCR 이미지, `${IMAGE_TAG}` 핀, healthcheck·stop_grace·메모리 limit, nginx를 `${NGINX_PORT}`로 노출(NPM 연결용) |
 | [backend/nginx/nginx.oracle.conf](../backend/nginx/nginx.oracle.conf) | 동적 resolver + SSE + SPA 서빙, NPM의 `X-Forwarded-Proto` 보존 |
 | [scripts/deploy.sh](../scripts/deploy.sh) | A1에서 pull→migrate→init swap→rollout→스모크 |
 
@@ -48,16 +48,14 @@ git push main
 
 ### A1 호스트
 ```bash
-# 1) NPM과 공유하는 외부 네트워크
-docker network create proxy            # NPM 컨테이너도 이 네트워크에 연결할 것
-
-# 2) 배포 디렉토리(.env·media·release fetch가 여기 산다)
+# 1) 배포 디렉토리(.env·media·release fetch가 여기 산다)
 git clone git@github.com:sandcorporation/embed-chat.git /opt/embed-chat
 
-# 3) .env 작성 — 템플릿 복사 후 채운다 (아래 "환경변수" 참조). 이미지·git에 절대 포함 금지
+# 2) .env 작성 — 템플릿 복사 후 채운다 (아래 "환경변수" 참조). 이미지·git에 절대 포함 금지
 cp /opt/embed-chat/.env.prod.example /opt/embed-chat/.env && vi /opt/embed-chat/.env
+#    NGINX_PORT(기본 8080)를 정한다. NPM이 이 포트로 붙는다. Oracle 보안목록엔 열지 말 것.
 
-# 4) GHCR pull 인증 (classic PAT, read:packages, org면 SSO authorize)
+# 3) GHCR pull 인증 (classic PAT, read:packages, org면 SSO authorize)
 echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
 ```
 
@@ -71,7 +69,6 @@ echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
     ```bash
     set -euo pipefail
     DEPLOY_DIR=/opt/embed-chat
-    docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
     cd "$DEPLOY_DIR"
     git fetch --quiet origin release
     git reset --hard --quiet FETCH_HEAD     # untracked .env·media 보존
@@ -83,8 +80,8 @@ echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
   shell 맨 앞에서 Credential로 매번 login하는 게 견고: `echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin`.
 
 ### NPM (Nginx Proxy Manager)
-- NPM 컨테이너를 **`proxy` 네트워크에 연결**.
-- **Proxy Host** 추가: Domain = 서비스 도메인, Forward → **`embed-chat-web`** : **80**.
+- **Proxy Host** 추가: Domain = 서비스 도메인, Forward → **`<A1 호스트 IP>`** : **`${NGINX_PORT}`**(기본 8080).
+  - NPM이 컨테이너면 호스트 도달에 호스트 LAN IP를 쓰거나 `host.docker.internal`(NPM에 `extra_hosts: host-gateway`) 사용.
 - ☑ **Websockets Support**, **SSL**(Let's Encrypt 발급).
 - **Advanced**(SSE 버퍼링 방지):
   ```nginx
@@ -124,7 +121,7 @@ echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
 ## 트러블슈팅
 
 - **무한 리다이렉트(NPM 뒤)**: `SECURE_PROXY_SSL_HEADER`(prod.py) + nginx가 NPM의 `X-Forwarded-Proto` 전달(둘 다 적용됨). NPM이 https 종단하는지 확인.
-- **`network proxy ... could not be found`**: `docker network create proxy` 누락. Execute shell이 보장하지만 NPM 연결도 확인.
+- **NPM이 502/연결 안 됨**: NPM Forward가 `<A1 호스트 IP>:${NGINX_PORT}`인지 확인(컨테이너 NPM이면 host-gateway). nginx 컨테이너가 그 포트로 `up` 됐는지(`docker compose ... ps nginx`)도 확인.
 - **rollout이 안 먹음/명령 없음**: Jenkins 컨테이너에 `docker rollout` 플러그인 미설치. 전역 cli-plugins 경로 확인.
 - **GHCR pull 403/denied**: A1 `docker login` 만료 또는 PAT 권한/ SSO. classic `read:packages` + org authorize.
 - **첫 배포 `migrate` 실패**: `.env`의 `DJANGO_SETTINGS_MODULE`·DB 변수 확인. db 컨테이너 healthy 대기 후 migrate(deploy.sh가 처리).

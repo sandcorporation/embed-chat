@@ -149,6 +149,10 @@ services:
 
   nginx:
     image: nginx:1.25-alpine
+    # 호스트 포트로 노출 → NPM이 <A1 호스트>:${NGINX_PORT}로 포워딩한다(공유 네트워크 불필요).
+    # 이 포트는 Oracle 보안목록에 열지 말 것 — 같은 호스트의 NPM만 접근한다.
+    ports:
+      - "${NGINX_PORT:-8080}:80"
     volumes:
       - ./backend/nginx/nginx.oracle.conf:/etc/nginx/nginx.conf:ro
       - widget_dist:/app/widget:ro
@@ -161,11 +165,6 @@ services:
       api:
         condition: service_started
     restart: unless-stopped
-    networks:
-      default: {}
-      proxy:
-        aliases:
-          - embed-chat-web   # NPM이 이 이름:80으로 포워딩
     deploy:
       resources:
         limits:
@@ -177,8 +176,3 @@ volumes:
   widget_dist:
   admin_dist:
   media:
-
-networks:
-  # 앱 내부 통신은 기본 네트워크. nginx만 NPM과 공유하는 외부 proxy 네트워크에도 붙는다.
-  proxy:
-    external: true
