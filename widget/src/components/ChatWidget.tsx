@@ -38,7 +38,7 @@ const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function ChatWi
   const [brandName, setBrandName] = useState('')
   const [typingActor, setTypingActor] = useState<TypingActor>(null)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const messagesRef = useRef<HTMLDivElement | null>(null)
   const eventSourceRef = useRef<EventSourceLike | null>(null)
 
   useEffect(() => {
@@ -128,7 +128,10 @@ const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function ChatWi
   }, [slug, visitorId, hash, transport])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // 위젯 내부 메시지 영역만 맨 아래로 — scrollIntoView는 임베드 시 호스트 페이지까지 스크롤해
+    // 화면이 튀므로(랜딩 데모에서 입력창이 sticky처럼 보이는 문제) 컨테이너 scrollTop만 조정한다.
+    const el = messagesRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [messages, streamingText])
 
   const sendMessage = useCallback(async (explicitText?: string) => {
@@ -170,7 +173,7 @@ const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function ChatWi
         )}
       </div>
 
-      <div style={styles.messages}>
+      <div style={styles.messages} ref={messagesRef}>
         {messages.map((msg, i) => (
           <div key={i} style={styles.message(msg.role)}>
             {msg.role === 'human_agent' && (
@@ -199,7 +202,6 @@ const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function ChatWi
             </div>
           </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       <div style={styles.inputArea}>
