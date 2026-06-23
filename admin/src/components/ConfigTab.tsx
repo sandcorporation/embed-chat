@@ -185,12 +185,12 @@ export default function ConfigTab() {
               <Label>LLM Provider 타입</Label>
               <Select aria-label="LLM Provider 타입" value={config.llm_provider_type || ''}
                 onChange={e => { const v = e.target.value; setConfig(c => ({ ...c, llm_provider_type: v, llm_base_url: v === 'custom' ? c.llm_base_url : '' })) }}>
-                {config.platform_default_providers_enabled && <option value="">기본 (OpenRouter)</option>}
+                {config.platform_default_providers_enabled && <option value="">기본 (dev: OpenRouter)</option>}
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Claude (Anthropic)</option>
                 <option value="custom">Custom (OpenAI-호환)</option>
               </Select>
-              <p className={hint}>어떤 AI 회사 서비스를 쓸지 골라요(OpenAI·Claude 등). "기본"은 플랫폼이 제공하는 모델이에요.</p>
+              <p className={hint}>어떤 AI 회사 서비스를 쓸지 골라요(OpenAI·Claude 등). "기본"은 개발 환경이 제공하는 모델이에요.</p>
             </div>
             {config.llm_provider_type === 'custom' && (
               <div className="space-y-2">
@@ -242,7 +242,7 @@ export default function ConfigTab() {
           <div className="space-y-4 border-t border-border pt-6">
             <div>
               <h3 className="text-sm font-semibold">Embedding Provider</h3>
-              <p className="text-xs text-muted-foreground">올린 문서를 AI가 검색하도록 "숫자 지문"으로 바꾸는 엔진이에요. 보통 LLM과 같은 회사 걸 쓰면 됩니다. 프로덕션에선 설정 필수.</p>
+              <p className="text-xs text-muted-foreground">올린 문서를 AI가 검색하도록 "숫자 지문"으로 바꾸는 엔진이에요. 보통 LLM과 같은 회사 걸 쓰면 됩니다. {config.platform_default_providers_enabled ? '미설정 시 플랫폼 기본(ollama)을 씁니다.' : '프로덕션에선 Embedding Provider 설정이 필수입니다.'}</p>
             </div>
             <div className="space-y-2">
               <Label>Embedding Provider 타입</Label>
@@ -252,6 +252,7 @@ export default function ConfigTab() {
                 <option value="openai">OpenAI</option>
                 <option value="custom">Custom (OpenAI-호환)</option>
               </Select>
+              <p className={hint}>문서 검색용 임베딩 엔진을 골라요. "기본"은 개발 환경이 제공하는 모델이에요.</p>
             </div>
             {config.embed_provider_type === 'custom' && (
               <div className="space-y-2">
@@ -290,17 +291,18 @@ export default function ConfigTab() {
           <div className="space-y-4 border-t border-border pt-6">
             <div>
               <h3 className="text-sm font-semibold">OCR(Vision) Provider</h3>
-              <p className="text-xs text-muted-foreground">이미지·스캔 PDF의 글자를 읽어들이는 vision 모델이에요(예: GPT-4o, Claude, Gemini). 미설정 시 개발 환경은 Paddle로 대체하고, 프로덕션에선 설정해야 이미지·스캔 문서를 올릴 수 있어요.</p>
+              <p className="text-xs text-muted-foreground">이미지·스캔 PDF의 글자를 읽어들이는 vision 모델이에요(예: GPT-4o, Claude, Gemini). {config.platform_default_providers_enabled ? '미설정 시 개발 환경은 PaddleOCR로 대체합니다.' : '미설정 시 이미지·스캔 문서 업로드는 막힙니다(이미지를 쓰면 설정 필요).'}</p>
             </div>
             <div className="space-y-2">
               <Label>OCR Provider 타입</Label>
               <Select aria-label="OCR Provider 타입" value={config.ocr_provider_type || ''}
                 onChange={e => { const v = e.target.value; setConfig(c => ({ ...c, ocr_provider_type: v, ocr_base_url: v === 'custom' ? c.ocr_base_url : '' })) }}>
-                <option value="">(미설정)</option>
+                <option value="">{config.platform_default_providers_enabled ? '기본 (dev: PaddleOCR)' : '(미설정)'}</option>
                 <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="anthropic">Claude (Anthropic)</option>
                 <option value="custom">Custom (OpenAI-호환)</option>
               </Select>
+              <p className={hint}>이미지 OCR에 쓸 vision 모델을 골라요. "기본"은 개발 환경이 제공하는 모델이에요.</p>
             </div>
             {config.ocr_provider_type === 'custom' && (
               <div className="space-y-2">

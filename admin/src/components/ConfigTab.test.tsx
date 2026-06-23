@@ -267,7 +267,7 @@ describe('ConfigTab — 플랫폼 기본 Provider 게이팅', () => {
     mockConfig({ platform_default_providers_enabled: false })
     renderConfig('ai')
     await screen.findByLabelText('LLM Provider 타입')
-    expect(screen.queryByRole('option', { name: /기본 \(OpenRouter\)/ })).toBeNull()
+    expect(screen.queryByRole('option', { name: /기본 \(dev: OpenRouter\)/})).toBeNull()
     expect(screen.queryByRole('option', { name: /기본.*ollama/ })).toBeNull()
   })
 
@@ -275,7 +275,7 @@ describe('ConfigTab — 플랫폼 기본 Provider 게이팅', () => {
     mockConfig({ platform_default_providers_enabled: true })
     renderConfig('ai')
     await screen.findByLabelText('LLM Provider 타입')
-    expect(screen.queryByRole('option', { name: /기본 \(OpenRouter\)/ })).not.toBeNull()
+    expect(screen.queryByRole('option', { name: /기본 \(dev: OpenRouter\)/})).not.toBeNull()
   })
 
   it('LLM Provider 안내 문구도 게이팅된다 — prod면 OpenRouter 폴백 문구 대신 "설정 필수"를 보인다', async () => {
