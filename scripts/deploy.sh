@@ -35,8 +35,14 @@ $COMPOSE up -d --no-deps widget-init admin-init
 
 # --no-deps: depends_on로 api가 딸려 재생성돼 다운타임 나는 것을 막는다(api는 아래서 롤링).
 echo "▶ 인프라·이벤트 소비자 기동/갱신"
-$COMPOSE up -d --no-deps nginx relay \
+$COMPOSE up -d --no-deps relay \
   worker-webhook worker-visitor-bridge worker-console-bridge worker-presence-bridge
+
+# nginx 설정은 bind mount라 파일 내용만 바뀌면 compose가 재생성하지 않는다(게다가 git 파일 교체로
+# 옛 inode를 물 수 있어 reload도 불확실). 매 배포마다 강제 재생성해 현재 nginx.oracle.conf를 다시
+# 읽게 한다 — nginx는 싱글톤이라 ~1s 블립(NPM의 proxy_next_upstream/재시도로 흡수).
+echo "▶ nginx 재생성(설정 반영)"
+$COMPOSE up -d --no-deps --force-recreate nginx
 
 echo "▶ 무중단 롤링(start-first → /api/health 통과 → 옛 컨테이너 드레인)"
 for svc in api worker worker-chat; do
