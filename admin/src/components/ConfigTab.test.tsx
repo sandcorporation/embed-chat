@@ -185,7 +185,7 @@ describe('ConfigTab — 고급 설정(자료 정리 모델)', () => {
   it('고급 설정을 펼쳐 자료 정리 모델을 지정하면 extraction_model로 저장한다', async () => {
     renderConfig('ai')
     await screen.findByLabelText('AI 모델')
-    await userEvent.click(screen.getByRole('button', { name: /고급 설정/ }))
+    await userEvent.click(screen.getByRole('button', { name: /자료 정리 모델/ }))
     await userEvent.type(screen.getByLabelText('자료 정리 모델 직접 입력'), 'extract-model')
     await save()
     await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
@@ -329,6 +329,38 @@ describe('ConfigTab — 모델 불러오기', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Embedding 모델 불러오기' }))
     await waitFor(() => expect(screen.getByText(/Embedding 모델 조회 실패/)).toBeInTheDocument())
     expect(screen.queryByText(/LLM 모델 조회 실패/)).toBeNull()
+  })
+})
+
+describe('ConfigTab — OpenAI 한방 설정', () => {
+  it('미설정(LLM 빈값)이면 한방 카드가 보이고, 키 입력→시작하기가 quickSetupOpenAI를 호출한다', async () => {
+    vi.mocked(api.quickSetupOpenAI).mockResolvedValue({
+      ...baseConfig, llm_provider_type: 'openai', model_id: 'gpt-4o-mini',
+      embed_provider_type: 'openai', ocr_provider_type: 'openai',
+    } as any)
+    renderConfig('ai')
+    await userEvent.type(await screen.findByLabelText('OpenAI API Key'), 'sk-abc')
+    await userEvent.click(screen.getByRole('button', { name: '시작하기' }))
+    await waitFor(() => expect(api.quickSetupOpenAI).toHaveBeenCalledWith('sk-abc'))
+  })
+
+  it('3종이 같은 provider면 컴팩트 요약 카드를 보이고 한방 카드는 숨긴다', async () => {
+    mockConfig({
+      llm_provider_type: 'openai', model_id: 'gpt-4o-mini',
+      embed_provider_type: 'openai', embed_model: 'text-embedding-3-small',
+      ocr_provider_type: 'openai', ocr_model: 'gpt-4o-mini',
+    })
+    renderConfig('ai')
+    expect(await screen.findByText(/AI 제공자: OpenAI/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('OpenAI API Key')).toBeNull()
+  })
+
+  it('provider가 섞이면 요약·한방 없이 상세 Provider 설정이 보인다', async () => {
+    mockConfig({ llm_provider_type: 'openai', embed_provider_type: 'custom', ocr_provider_type: 'anthropic' })
+    renderConfig('ai')
+    expect(await screen.findByLabelText('LLM Provider 타입')).toBeInTheDocument()
+    expect(screen.queryByText(/AI 제공자:/)).toBeNull()
+    expect(screen.queryByLabelText('OpenAI API Key')).toBeNull()
   })
 })
 

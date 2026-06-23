@@ -19,6 +19,7 @@ import {
   appsTenantsApiResetTenantKey,
   appsTenantsApiUpdateSlug,
   appsTenantsApiProviderModels,
+  appsTenantsApiProviderQuickSetup,
 } from './generated/endpoints/tenant/tenant'
 import {
   appsTenantsApiAgentLogin,
@@ -131,6 +132,10 @@ export async function getTenantConfig() {
 }
 export async function updateTenantConfig(data: any) {
   return (await appsTenantsApiUpdateConfig(data)).data
+}
+// OpenAI 키 1개로 LLM·Embedding·OCR 3종을 기본값으로 한 번에 설정한다(한방). 실패 시 throw.
+export async function quickSetupOpenAI(apiKey: string) {
+  return (await appsTenantsApiProviderQuickSetup({ api_key: apiKey })).data
 }
 export async function updateTenantSlug(slug: string) {
   try {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { getTenantConfig, updateTenantConfig, resetTenantKey, updateTenantSlug, fetchProviderModels } from '../api'
+import { getTenantConfig, updateTenantConfig, resetTenantKey, updateTenantSlug, fetchProviderModels, quickSetupOpenAI } from '../api'
 import type { TenantConfigOut } from '../generated/model'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -60,6 +60,11 @@ export default function ConfigTab() {
   const [llmModelError, setLlmModelError] = useState('')
   const [embedModelError, setEmbedModelError] = useState('')
   const [ocrModelError, setOcrModelError] = useState('')
+  // OpenAI 한방 + Provider 상세(고급) collapse 상태
+  const [oneShotKey, setOneShotKey] = useState('')
+  const [oneShotError, setOneShotError] = useState('')
+  const [oneShotBusy, setOneShotBusy] = useState(false)
+  const [showProviderAdvanced, setShowProviderAdvanced] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [holidayInput, setHolidayInput] = useState('')
@@ -95,6 +100,16 @@ export default function ConfigTab() {
       setOcrModels(await fetchProviderModels('ocr', config.ocr_provider_type, config.ocr_base_url, config.ocr_api_key, config.ocr_model))
     } catch { setOcrModelError('OCR 모델 조회 실패 — Base URL / API Key를 확인하세요') }
   }
+  // OpenAI 키 1개로 3종(LLM·Embedding·OCR)을 기본값으로 한 번에 설정한다(한방).
+  const handleQuickSetup = async () => {
+    setOneShotError(''); setOneShotBusy(true)
+    try {
+      const updated = await quickSetupOpenAI(oneShotKey.trim())
+      setConfig(updated as TenantConfigOut)   // 3종이 openai가 됨 → 요약 카드로 전환
+      setOneShotKey('')
+    } catch { setOneShotError('설정 실패 — OpenAI API 키를 확인하세요.') }
+    finally { setOneShotBusy(false) }
+  }
   const handleSaveSlug = async () => {
     try {
       await updateTenantSlug(slug)
@@ -127,6 +142,14 @@ export default function ConfigTab() {
   if (loading) return <p className="text-sm text-muted-foreground">로딩 중...</p>
 
   const intro = SECTIONS.find(s => s.id === section)?.intro
+
+  // Provider 상태: 미설정(LLM 빈값) / 3종 동일 타입 / 섞임. 상단 카드·고급 collapse 결정.
+  const llmType = config.llm_provider_type || ''
+  const isUnset = llmType === ''
+  const allSameProvider = !isUnset && llmType === (config.embed_provider_type || '') && llmType === (config.ocr_provider_type || '')
+  const isMixedProvider = !isUnset && !allSameProvider
+  const providerAdvancedOpen = isMixedProvider || showProviderAdvanced
+  const providerLabel = (t: string) => ({ openai: 'OpenAI', anthropic: 'Claude', custom: 'Custom' } as Record<string, string>)[t] || '기본'
 
   return (
     <div className="max-w-3xl">
@@ -176,6 +199,35 @@ export default function ConfigTab() {
       {/* ── AI 모델 ───────────────────────────────────────── */}
       {section === 'ai' && (
         <div className="space-y-6">
+          {/* 미설정 → OpenAI 한방 카드 */}
+          {isUnset && (
+            <div className="space-y-3 rounded-lg border border-primary/40 bg-primary/5 p-4">
+              <div>
+                <h3 className="text-sm font-semibold">빠른 시작 — OpenAI 키로 한 번에 설정</h3>
+                <p className="text-xs text-muted-foreground">OpenAI API 키 하나면 챗·문서검색·이미지OCR이 모두 켜집니다. {config.platform_default_providers_enabled ? '개발 환경은 키 없이 아래 고급에서 기본 제공자로도 됩니다.' : '시작하려면 키가 필요합니다.'}</p>
+              </div>
+              <Input type="password" aria-label="OpenAI API Key" value={oneShotKey}
+                onChange={e => setOneShotKey(e.target.value)} placeholder="sk-..." />
+              {oneShotError && <p className={errorCls}>{oneShotError}</p>}
+              <Button type="button" disabled={oneShotBusy || !oneShotKey.trim()} onClick={handleQuickSetup}>
+                {oneShotBusy ? '설정 중…' : '시작하기'}
+              </Button>
+            </div>
+          )}
+          {/* 3종 동일 → 컴팩트 요약 카드 */}
+          {allSameProvider && (
+            <div className="rounded-lg border border-border bg-card p-4 text-sm">
+              <span className="font-medium">AI 제공자: {providerLabel(llmType)}</span>
+              <span className="ml-2 text-muted-foreground">· 챗 {config.model_id} · 임베딩 {config.embed_model || '(미설정)'} · OCR {config.ocr_model || '(미설정)'}</span>
+            </div>
+          )}
+          {/* 고급 설정 토글(섞임이면 항상 펼침이라 토글 숨김) */}
+          {!isMixedProvider && (
+            <Button type="button" variant="ghost" size="sm" className="px-0 text-muted-foreground hover:bg-transparent"
+              onClick={() => setShowProviderAdvanced(v => !v)}>{providerAdvancedOpen ? '▾' : '▸'} 고급 설정 (Provider 상세)</Button>
+          )}
+
+          <div className={providerAdvancedOpen ? 'space-y-6' : 'hidden'}>
           <div className="space-y-4">
             <div>
               <h3 className="text-sm font-semibold">LLM Provider (비용 부담)</h3>
@@ -223,7 +275,7 @@ export default function ConfigTab() {
               <p className={hint}>손님과 대화하고, 올린 자료도 이 AI가 정리합니다.</p>
             </div>
             <Button type="button" variant="ghost" size="sm" className="px-0 text-muted-foreground hover:bg-transparent"
-              onClick={() => setShowAdvanced(v => !v)}>{showAdvanced ? '▾' : '▸'} 고급 설정</Button>
+              onClick={() => setShowAdvanced(v => !v)}>{showAdvanced ? '▾' : '▸'} 자료 정리 모델</Button>
             {showAdvanced && (
               <div className="space-y-2 border-l-2 border-border pl-3">
                 <Label>자료 정리 모델</Label>
@@ -330,6 +382,7 @@ export default function ConfigTab() {
               <Input aria-label="OCR 모델 직접 입력" className="text-xs" value={config.ocr_model || ''}
                 onChange={e => setConfig(c => ({ ...c, ocr_model: e.target.value }))} placeholder="직접 입력(vision 가능 모델)" />
             </div>
+          </div>
           </div>
         </div>
       )}
