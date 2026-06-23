@@ -202,12 +202,16 @@ docker compose exec api python manage.py createsuperuser
 
 ## 프로덕션 배포
 
-```bash
-cp .env.example .env   # DB_HOST=db, REDIS_URL=redis://redis:6379/0, NEO4J_URI=bolt://neo4j:7687 등
-docker compose -f docker-compose.prod.yml up --build -d --force-recreate
-docker compose exec api python manage.py migrate
-docker compose exec api python manage.py createsuperuser
-```
+실서버(**oracle A1**, arm64·CPU 전용)는 **무중단 롤링**으로 배포한다 — sub에서 GitHub Actions가
+arm64 이미지를 빌드해 GHCR에 올리면, A1의 Jenkins가 `release` 브랜치 웹훅을 받아 `docker rollout`으로
+교체한다. NPM(Nginx Proxy Manager)이 공개 TLS를 종단한다.
+
+전체 흐름·1회 설정·환경변수·롤백·트러블슈팅은 **[docs/deployment.md](docs/deployment.md)** 참조
+(설계 근거: [ADR-0015](docs/adr/0015-oracle-zero-downtime-rolling-deploy.md)).
+
+> ⚠️ prod `SECRET_KEY`는 테넌트 provider 키 암호화 키의 파생원이라 **로테이트 금지**(바꾸면 저장된
+> 키 복호화 불가). prod는 `PLATFORM_DEFAULT_PROVIDERS_ENABLED=False`라 테넌트가 자기 Provider를
+> 설정해야 한다.
 
 ---
 
