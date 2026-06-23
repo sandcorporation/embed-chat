@@ -28,6 +28,7 @@ export default function Landing() {
 
       <section className="container section">
         <h2>핵심 기능</h2>
+        <p className="sub">문서를 올리면 챗봇이 됩니다.</p>
         <div className="features">
           {FEATURES.map(f => (
             <div className="feature" key={f.title}>
@@ -40,14 +41,22 @@ export default function Landing() {
 
       <section className="container section">
         <h2>지식그래프</h2>
+        <p className="sub">문서에서 추출한 Entity·관계를 시각화합니다. 노드를 눌러 펼쳐보세요.</p>
         <KGDemo />
       </section>
 
       <section className="container section">
         <h2>문의</h2>
+        <p className="sub">도입·요금이 궁금하면 편하게 연락 주세요.</p>
         <div className="contact">
-          <a href="mailto:gksdjf1690@gmail.com">gksdjf1690@gmail.com</a>
-          <a href="tel:01024831690">010-2483-1690</a>
+          <div className="contact-item">
+            <span className="contact-label">이메일</span>
+            <a className="contact-value" href="mailto:gksdjf1690@gmail.com">gksdjf1690@gmail.com</a>
+          </div>
+          <div className="contact-item">
+            <span className="contact-label">전화</span>
+            <a className="contact-value" href="tel:01024831690">010-2483-1690</a>
+          </div>
         </div>
       </section>
 

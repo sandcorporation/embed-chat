@@ -16,7 +16,7 @@ function safeUrl(url: string): string {
 }
 
 const S: Record<string, CSSProperties> = {
-  a: { color: '#3182ce', textDecoration: 'underline', wordBreak: 'break-word' },
+  a: { color: '#4f46e5', textDecoration: 'none', fontWeight: 500, wordBreak: 'break-word' },
   p: { margin: '0 0 8px' },
   ul: { margin: '4px 0', paddingLeft: 18 },
   ol: { margin: '4px 0', paddingLeft: 18 },

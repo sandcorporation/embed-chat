@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
+import { forwardRef } from 'react'
 import { render, screen } from '@testing-library/react'
 import Landing from './Landing'
 
-// react-force-graph는 canvas라 jsdom에서 렌더 못 함 → KGDemo의 viz는 스텁(데이터/리스트만 검증).
-vi.mock('react-force-graph-2d', () => ({ default: () => null }))
+// react-force-graph는 canvas라 jsdom에서 렌더 못 함 → KGDemo의 viz는 스텁(ref도 받게 forwardRef).
+vi.mock('react-force-graph-2d', () => ({ default: forwardRef(() => null) }))
 
 describe('Landing (공개 랜딩)', () => {
   it('핵심 기능 카드 4개를 렌더한다', () => {
