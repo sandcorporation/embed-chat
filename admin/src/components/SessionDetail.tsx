@@ -3,6 +3,7 @@ import { getSessionMessages, getSessionCheckpoint } from '../api'
 import type { SessionMessageOut } from '../generated/model'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import Markdown from './Markdown'
 
 const ROLE_LABEL: Record<string, string> = { user: 'Visitor', assistant: 'AI', human_agent: '상담원' }
 const ROLE_BUBBLE: Record<string, string> = {
@@ -11,7 +12,7 @@ const ROLE_BUBBLE: Record<string, string> = {
   human_agent: 'self-start bg-violet-500 text-white',
 }
 
-function ChatHistory({ messages }: { messages: SessionMessageOut[] }) {
+export function ChatHistory({ messages }: { messages: SessionMessageOut[] }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
@@ -22,8 +23,8 @@ function ChatHistory({ messages }: { messages: SessionMessageOut[] }) {
       {messages.map((m, i) => (
         <div key={m.id || i} className={cn('flex flex-col', m.role === 'user' ? 'items-end' : 'items-start')}>
           <span className="mb-0.5 text-[10px] text-muted-foreground">{ROLE_LABEL[m.role] || m.role}</span>
-          <div className={cn('max-w-[75%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm leading-relaxed', ROLE_BUBBLE[m.role] || 'self-start bg-muted')}>
-            {m.content}
+          <div className={cn('max-w-[75%] rounded-lg px-3 py-2 text-sm leading-relaxed', m.role === 'assistant' ? '' : 'whitespace-pre-wrap', ROLE_BUBBLE[m.role] || 'self-start bg-muted')}>
+            {m.role === 'assistant' ? <Markdown>{m.content}</Markdown> : m.content}
           </div>
           {m.created_at && <span className="mt-0.5 text-[10px] text-muted-foreground">{new Date(m.created_at).toLocaleString()}</span>}
         </div>

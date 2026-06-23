@@ -5,6 +5,11 @@ export default defineConfig({
   plugins: [react()],
   base: '/embed/',
   build: { outDir: 'dist' },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: './src/setupTests.js',
+  },
   server: {
     port: 5173,
     host: '0.0.0.0',

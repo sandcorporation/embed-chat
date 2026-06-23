@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+import Markdown from './Markdown'
 
 const STATUS_LABEL: Record<string, string> = { pending: '대기 중', claimed: '진행 중', resolved: '완료' }
 const STATUS_VARIANT: Record<string, 'destructive' | 'default' | 'success'> = { pending: 'destructive', claimed: 'default', resolved: 'success' }
@@ -27,7 +28,7 @@ function ChatHistory({ messages }: { messages: ChatMsg[] }) {
       {messages.map(m => (
         <div key={m.id || `${m.role}-${m.created_at}`} className={cn('flex flex-col', m.role === 'user' ? 'items-start' : 'items-end')}>
           <span className="mb-0.5 text-[10px] text-muted-foreground">{ROLE_LABEL[m.role] || m.role}</span>
-          <div className={cn('max-w-[80%] rounded-lg px-2.5 py-1.5 text-sm leading-relaxed', ROLE_BUBBLE[m.role] || 'self-start bg-muted')}>{m.content}</div>
+          <div className={cn('max-w-[80%] rounded-lg px-2.5 py-1.5 text-sm leading-relaxed', ROLE_BUBBLE[m.role] || 'self-start bg-muted')}>{m.role === 'assistant' ? <Markdown>{m.content}</Markdown> : m.content}</div>
         </div>
       ))}
       <div ref={bottomRef} />

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import Markdown from './Markdown'
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
@@ -154,13 +155,15 @@ export default function ChatWidget({ slug, visitorId, hash = '' }) {
             {msg.role === 'human_agent' && (
               <div style={styles.agentName}>{msg.agentName}</div>
             )}
-            <div data-role={msg.role} style={styles.bubble(msg.role)}>{msg.content}</div>
+            <div data-role={msg.role} style={styles.bubble(msg.role)}>
+              {msg.role === 'assistant' ? <Markdown>{msg.content}</Markdown> : msg.content}
+            </div>
           </div>
         ))}
         {streamingText && (
           <div style={styles.message('assistant')}>
             <div style={styles.bubble('assistant')}>
-              {streamingText}
+              <Markdown>{streamingText}</Markdown>
               <span style={styles.cursor}>▌</span>
             </div>
           </div>
