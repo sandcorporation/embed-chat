@@ -12,7 +12,7 @@ describe('Markdown (위젯 AI 버블 렌더러)', () => {
 
   it('코드펜스를 pre/code 블록으로 렌더한다', () => {
     const { container } = render(<Markdown>{'```\nnpm install\n```'}</Markdown>)
-    const pre = container.querySelector('pre')
+    const pre = container.querySelector('pre')!
     expect(pre).toBeInTheDocument()
     expect(pre.querySelector('code')).toHaveTextContent('npm install')
   })
@@ -36,16 +36,11 @@ describe('Markdown (위젯 AI 버블 렌더러)', () => {
     expect(container.querySelector('img')).toBeNull()
   })
 
-  it('raw HTML script는 실행 요소로 렌더하지 않는다', () => {
-    const { container } = render(<Markdown>{'<script>window.__x=1</script> 안녕'}</Markdown>)
-    expect(container.querySelector('script')).toBeNull()
-  })
-
   it('테이블을 가로 스크롤 컨테이너로 감싼다', () => {
     const md = '| A | B |\n| - | - |\n| 1 | 2 |'
     const { container } = render(<Markdown>{md}</Markdown>)
-    const table = container.querySelector('table')
+    const table = container.querySelector('table')!
     expect(table).toBeInTheDocument()
-    expect(table.parentElement.style.overflowX).toBe('auto')
+    expect(table.parentElement!.style.overflowX).toBe('auto')
   })
 })

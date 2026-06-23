@@ -1,23 +1,41 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import type { CSSProperties } from 'react'
 import Markdown from './Markdown'
+import { realTransport, API_BASE } from '../transport'
+import type { ChatTransport, EventSourceLike } from '../transport'
 
-const API_BASE = import.meta.env.VITE_API_BASE || ''
+interface ChatMessage {
+  role: string
+  content: string
+  agentName?: string
+}
 
-export default function ChatWidget({ slug, visitorId, hash = '' }) {
-  const [messages, setMessages] = useState([])
+type TypingActor = null | 'ai' | 'human_agent'
+type Status = 'connecting' | 'ready' | 'streaming' | 'error'
+
+interface ChatWidgetProps {
+  slug: string
+  visitorId: string
+  hash?: string
+  /** 주입 가능한 트랜스포트(기본=실제 백엔드). 랜딩 데모는 mock으로 토큰 스트리밍을 연출한다. */
+  transport?: ChatTransport
+}
+
+export default function ChatWidget({ slug, visitorId, hash = '', transport = realTransport }: ChatWidgetProps) {
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
-  const [sessionId, setSessionId] = useState(null)
-  const [status, setStatus] = useState('connecting') // connecting | ready | streaming | error
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [status, setStatus] = useState<Status>('connecting')
   const [streamingText, setStreamingText] = useState('')
   const [isHitl, setIsHitl] = useState(false)
   const [brandName, setBrandName] = useState('')
-  const [typingActor, setTypingActor] = useState(null) // null | 'ai' | 'human_agent'
-  const typingTimerRef = useRef(null)
-  const bottomRef = useRef(null)
-  const eventSourceRef = useRef(null)
+  const [typingActor, setTypingActor] = useState<TypingActor>(null)
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const eventSourceRef = useRef<EventSourceLike | null>(null)
 
   useEffect(() => {
-    const es = new EventSource(
+    const es = transport.createEventSource(
       `${API_BASE}/api/chat/stream?slug=${encodeURIComponent(slug)}&visitor_id=${encodeURIComponent(visitorId)}&hash=${encodeURIComponent(hash)}`
     )
     eventSourceRef.current = es
@@ -100,7 +118,7 @@ export default function ChatWidget({ slug, visitorId, hash = '' }) {
       es.close()
       clearTimeout(typingTimerRef.current)
     }
-  }, [slug, visitorId, hash])
+  }, [slug, visitorId, hash, transport])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -115,20 +133,14 @@ export default function ChatWidget({ slug, visitorId, hash = '' }) {
     if (!isHitl) setStatus('streaming')
 
     try {
-      const res = await fetch(`${API_BASE}/api/chat/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, content: userMsg }),
-      })
-      if (res.ok && !isHitl) {
-        setTypingActor('ai')
-      }
+      await transport.postMessage(sessionId, userMsg)
+      if (!isHitl) setTypingActor('ai')
     } catch {
       setStatus('error')
     }
-  }, [input, sessionId, status, isHitl])
+  }, [input, sessionId, status, isHitl, transport])
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       sendMessage()
@@ -209,7 +221,7 @@ const styles = {
     flexDirection: 'column',
     height: '100vh',
     background: '#fff',
-  },
+  } as CSSProperties,
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -218,8 +230,8 @@ const styles = {
     borderBottom: '1px solid #e2e8f0',
     fontWeight: 600,
     fontSize: '15px',
-  },
-  headerDot: (status) => ({
+  } as CSSProperties,
+  headerDot: (status: Status): CSSProperties => ({
     width: '8px',
     height: '8px',
     borderRadius: '50%',
@@ -229,16 +241,16 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     lineHeight: 1.2,
-  },
+  } as CSSProperties,
   brandTitle: {
     fontWeight: 600,
     fontSize: '15px',
-  },
+  } as CSSProperties,
   statusSub: {
     fontWeight: 400,
     fontSize: '11px',
     color: '#718096',
-  },
+  } as CSSProperties,
   messages: {
     flex: 1,
     overflowY: 'auto',
@@ -246,8 +258,8 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '8px',
-  },
-  message: (role) => ({
+  } as CSSProperties,
+  message: (role: string): CSSProperties => ({
     display: 'flex',
     flexDirection: 'column',
     alignItems: role === 'user' ? 'flex-end'
@@ -259,8 +271,8 @@ const styles = {
     color: '#718096',
     marginBottom: 2,
     paddingLeft: 4,
-  },
-  bubble: (role) => ({
+  } as CSSProperties,
+  bubble: (role: string): CSSProperties => ({
     maxWidth: role === 'system' ? '90%' : '75%',
     padding: role === 'system' ? '6px 12px' : '10px 14px',
     borderRadius: role === 'user' ? '18px 18px 4px 18px'
@@ -282,23 +294,23 @@ const styles = {
   cursor: {
     animation: 'blink 1s step-end infinite',
     opacity: 0.7,
-  },
+  } as CSSProperties,
   typingDots: {
     display: 'flex',
     alignItems: 'center',
     gap: 4,
     fontSize: 13,
-  },
+  } as CSSProperties,
   dots: {
     animation: 'blink 1.2s step-end infinite',
     letterSpacing: 2,
-  },
+  } as CSSProperties,
   inputArea: {
     display: 'flex',
     gap: '8px',
     padding: '12px 16px',
     borderTop: '1px solid #e2e8f0',
-  },
+  } as CSSProperties,
   textarea: {
     flex: 1,
     resize: 'none',
@@ -308,8 +320,8 @@ const styles = {
     fontSize: '14px',
     outline: 'none',
     fontFamily: 'inherit',
-  },
-  sendBtn: (enabled) => ({
+  } as CSSProperties,
+  sendBtn: (enabled: boolean): CSSProperties => ({
     padding: '0 20px',
     borderRadius: '8px',
     border: 'none',

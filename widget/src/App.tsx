@@ -2,14 +2,14 @@ import { useMemo } from 'react'
 import ChatWidget from './components/ChatWidget'
 
 // /chatbot/{slug}/ 경로에서 Tenant Slug를 추출한다 (EmbedToken 폐지, issue 85).
-function resolveSlug() {
+function resolveSlug(): string {
   const m = window.location.pathname.match(/\/chatbot\/([^/?#]+)/)
   return m ? decodeURIComponent(m[1]) : ''
 }
 
 // Visitor 식별: ?visitor_id= 명시값 우선, 없으면 위젯이 생성·localStorage에 지속하는
 // Anonymous Visitor ID를 사용한다(세션을 넘어 이력·기억이 같은 브라우저에서 축적).
-function resolveVisitorId() {
+function resolveVisitorId(): string {
   const explicit = new URLSearchParams(window.location.search).get('visitor_id')
   if (explicit) return explicit
 
