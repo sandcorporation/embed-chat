@@ -1,7 +1,9 @@
 from .base import *
 
 DEBUG = False
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",")
+# 운영자는 .env에 도메인만 넣으면 된다 — 컨테이너 내부 healthcheck·배포 스모크가 127.0.0.1로
+# /api/health를 치므로 127.0.0.1·localhost를 항상 추가한다(빠지면 DisallowedHost 400).
+ALLOWED_HOSTS = [h for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h] + ["127.0.0.1", "localhost"]
 
 # NPM(Nginx Proxy Manager)이 TLS를 종단하고 http로 우리 nginx→api에 포워딩한다. 원 요청이
 # https였음을 X-Forwarded-Proto로 신뢰해야 한다 — 없으면 SECURE_SSL_REDIRECT가 (api는 http로
