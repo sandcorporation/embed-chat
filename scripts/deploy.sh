@@ -27,9 +27,8 @@ $COMPOSE pull
 echo "▶ 데이터스토어 기동(마이그레이션 전제)"
 $COMPOSE up -d db redis
 
-echo "▶ migrate + collectstatic (롤아웃 전 — expand/contract)"
+echo "▶ migrate (롤아웃 전 — expand/contract). collectstatic은 STATIC_ROOT 미사용으로 불필요."
 $COMPOSE run --rm api python manage.py migrate --noinput
-$COMPOSE run --rm api python manage.py collectstatic --noinput
 
 echo "▶ 정적 SPA 갱신(init이 dist를 볼륨에 복사 후 종료)"
 $COMPOSE up -d --no-deps widget-init admin-init
@@ -44,5 +43,7 @@ for svc in api worker worker-chat; do
   docker rollout -f "$COMPOSE_FILE" "$svc"
 done
 
-echo "▶ 스모크"
-curl -fsS http://localhost/api/health >/dev/null && echo "✔ deploy OK: $IMAGE_TAG"
+# 우리 nginx는 호스트 포트를 안 열고 NPM 뒤에 있으므로, api 컨테이너 내부에서 health를 친다.
+echo "▶ 스모크(api health)"
+$COMPOSE exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')" \
+  && echo "✔ deploy OK: $IMAGE_TAG"

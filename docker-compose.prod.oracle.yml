@@ -1,0 +1,184 @@
+# oracle(Ampere A1, arm64, GPU 없음) prod 배포 — GHCR 이미지를 pull만 한다(빌드 안 함).
+# Jenkins(A1)가 release 브랜치를 받아 scripts/deploy.sh로 docker rollout 무중단 배포한다(ADR-0015).
+#
+# - 모든 backend 서비스(api·worker·worker-chat·relay·4 bridge)는 같은 embed-chat-api 이미지.
+# - 공개 TLS/도메인은 NPM(Nginx Proxy Manager)이 종단 → 공유 `proxy` 네트워크로 이 스택의 nginx
+#   (별칭 embed-chat-web:80)에 포워딩. 그래서 nginx는 호스트 포트를 열지 않는다.
+# - 무중단: api·worker·worker-chat만 `docker rollout`(start-first). db·redis·nginx는 싱글톤.
+# - ollama·paddle 없음(per-Tenant Provider/Vision OCR). collectstatic 없음(STATIC_ROOT 미사용).
+#
+# 사전 준비(A1): `docker network create proxy` (NPM과 공유), .env, GHCR login(read:packages).
+# 이미지 태그: deploy.sh가 IMAGE_TAG=<git-sha>로 핀(롤백 = 옛 sha 재실행).
+
+x-backend: &backend
+  image: ghcr.io/sandcorporation/embed-chat-api:${IMAGE_TAG:-latest}
+  env_file: .env
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${DB_NAME:-embed_chat}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  api:
+    <<: *backend
+    command: gunicorn config.wsgi:application --worker-class=gevent --workers=4 --bind 0.0.0.0:8000
+    volumes:
+      - media:/app/media
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  worker:
+    <<: *backend
+    command: celery -A config.celery worker --loglevel=info
+    volumes:
+      - media:/app/media
+    # 배치 드레인 — grace를 넘겨 SIGKILL돼도 재배달로 유실 0이 되려면 backend가 acks_late=True여야
+    # 한다(ADR-0015 Q4, 멱등성 감사 후속). 지금은 60s 드레인 여유만 둔다.
+    stop_grace_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  worker-chat:
+    <<: *backend
+    command: celery -A config.celery worker -Q chat --concurrency=4 --prefetch-multiplier=1 --loglevel=info
+    volumes:
+      - media:/app/media
+    # acks_late=False(중복 응답 방지) — 진행 중 응답을 마치고 종료하도록 충분히 드레인.
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  relay:
+    <<: *backend
+    command: python manage.py relay
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  worker-webhook:
+    <<: *backend
+    command: python manage.py consume_events --group=webhook
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  worker-visitor-bridge:
+    <<: *backend
+    command: python manage.py consume_events --group=visitor-bridge
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  worker-console-bridge:
+    <<: *backend
+    command: python manage.py consume_events --group=console-bridge
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  worker-presence-bridge:
+    <<: *backend
+    command: python manage.py consume_events --group=presence-bridge --topic=signals.presence
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # 정적 SPA 빌드 산출물을 볼륨에 복사하고 종료(one-shot). nginx가 그 볼륨을 서빙.
+  widget-init:
+    image: ghcr.io/sandcorporation/embed-chat-widget:${IMAGE_TAG:-latest}
+    volumes:
+      - widget_dist:/output
+    restart: "no"
+
+  admin-init:
+    image: ghcr.io/sandcorporation/embed-chat-admin:${IMAGE_TAG:-latest}
+    volumes:
+      - admin_dist:/output
+    restart: "no"
+
+  nginx:
+    image: nginx:1.25-alpine
+    volumes:
+      - ./backend/nginx/nginx.oracle.conf:/etc/nginx/nginx.conf:ro
+      - widget_dist:/app/widget:ro
+      - admin_dist:/app/admin:ro
+    depends_on:
+      widget-init:
+        condition: service_completed_successfully
+      admin-init:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      default: {}
+      proxy:
+        aliases:
+          - embed-chat-web   # NPM이 이 이름:80으로 포워딩
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+volumes:
+  postgres_data:
+  redis_data:
+  widget_dist:
+  admin_dist:
+  media:
+
+networks:
+  # 앱 내부 통신은 기본 네트워크. nginx만 NPM과 공유하는 외부 proxy 네트워크에도 붙는다.
+  proxy:
+    external: true
