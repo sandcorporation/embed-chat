@@ -148,7 +148,7 @@ services:
     restart: "no"
 
   nginx:
-    image: nginx:1.25-alpine
+    image: nginx:1.27-alpine
     # 호스트 포트로 노출 → NPM이 <A1 호스트>:${NGINX_PORT}로 포워딩한다(공유 네트워크 불필요).
     # 이 포트는 Oracle 보안목록에 열지 말 것 — 같은 호스트의 NPM만 접근한다.
     ports:
