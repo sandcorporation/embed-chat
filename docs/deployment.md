@@ -100,7 +100,7 @@ echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
 |---|---|---|
 | `DJANGO_SETTINGS_MODULE` | ✅ | **`config.settings.prod`** (없으면 dev 설정으로 뜸) |
 | `SECRET_KEY` | ✅ | Django 시크릿 **이자** 테넌트 provider 키 암호화 Fernet 키의 파생원([crypto.py](../backend/apps/tenants/crypto.py)). ⚠️ **절대 로테이트 금지** — 바꾸면 저장된 모든 테넌트 API 키가 복호화 불가. |
-| `ALLOWED_HOSTS` | ✅ | 쉼표구분 도메인(NPM 도메인). |
+| `ALLOWED_HOSTS` | ✅ | 쉼표구분 도메인(NPM 도메인) **+ `127.0.0.1,localhost`**(컨테이너 healthcheck·배포 스모크가 127.0.0.1로 친다 — 빠지면 400). |
 | `DB_HOST`·`DB_NAME`·`DB_USER`·`DB_PASSWORD`·`DB_PORT` | ✅ | `DB_HOST=db`, `DB_PORT=5432`. |
 | `REDIS_URL` | ✅ | `redis://redis:6379/0`. |
 | `EVENTS_TOPIC` | ✅ | EventBus(Streams) 토픽. |
@@ -124,6 +124,7 @@ echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
 - **NPM이 502/연결 안 됨**: NPM Forward가 `<A1 호스트 IP>:${NGINX_PORT}`인지 확인(컨테이너 NPM이면 host-gateway). nginx 컨테이너가 그 포트로 `up` 됐는지(`docker compose ... ps nginx`)도 확인.
 - **rollout이 안 먹음/명령 없음**: Jenkins 컨테이너에 `docker rollout` 플러그인 미설치. 전역 cli-plugins 경로 확인.
 - **GHCR pull 403/denied**: A1 `docker login` 만료 또는 PAT 권한/ SSO. classic `read:packages` + org authorize.
+- **스모크/healthcheck가 `/api/health`에서 400**: `ALLOWED_HOSTS`에 `127.0.0.1,localhost` 누락(DisallowedHost). → 추가. (301로 바뀌면 SSL 리다이렉트 문제 — prod.py의 `SECURE_REDIRECT_EXEMPT`가 health를 제외하므로 새 이미지로 배포돼야 적용됨.)
 - **첫 배포 `migrate` 실패**: `.env`의 `DJANGO_SETTINGS_MODULE`·DB 변수 확인. db 컨테이너 healthy 대기 후 migrate(deploy.sh가 처리).
 - **이벤트 파이프라인 정지**: relay·bridge는 events 마이그레이션 미적용 시 크래시 — migrate가 모든 마이그레이션을 적용하므로 배포에 포함됨.
 

@@ -13,6 +13,10 @@ SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 
+# 컨테이너 healthcheck·배포 스모크는 127.0.0.1로 http로 /api/health를 친다 — SSL 리다이렉트에서
+# 제외해 301이 아니라 200을 받게 한다(외부 트래픽은 NPM이 https로 종단하므로 영향 없음).
+SECURE_REDIRECT_EXEMPT = [r"^api/health/?$"]
+
 # JWT API라 CSRF는 비필수지만, 프록시 도메인 출처를 명시(있으면 env로 주입; 예: https://chat.example.com).
 CSRF_TRUSTED_ORIGINS = [o for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if o]
 
