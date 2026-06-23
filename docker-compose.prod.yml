@@ -16,44 +16,14 @@ services:
       - admin_dist:/output
     restart: "no"
 
-  ollama:
-    image: ollama/ollama
-    runtime: nvidia
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - OLLAMA_FLASH_ATTENTION=0
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: unless-stopped
-    healthcheck:
-      test: [ "CMD", "ollama", "list" ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
-  ollama-init:
-    image: ollama/ollama
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-    command: [ "pull", "bge-m3" ]
-    depends_on:
-      ollama:
-        condition: service_healthy
-    restart: "no"
+  # Ollama는 prod에서 제거됨 — Oracle A1(ARM·GPU 없음)에서 runtime: nvidia가 동작하지 않고,
+  # PLATFORM_DEFAULT_PROVIDERS_ENABLED=False라 플랫폼 기본 ollama 임베딩 폴백도 꺼져 있다.
+  # prod 임베딩은 per-Tenant Provider(OpenAI 등, ADR-0012)로 수행한다. dev/test는 ollama 유지.
 
   api:
     restart: unless-stopped
     volumes:
       - ./media:/app/media
-    environment:
-      OLLAMA_BASE_URL: http://ollama:11434
-    depends_on:
-      ollama:
-        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -63,11 +33,6 @@ services:
     restart: unless-stopped
     volumes:
       - ./media:/app/media
-    environment:
-      OLLAMA_BASE_URL: http://ollama:11434
-    depends_on:
-      ollama:
-        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -77,11 +42,6 @@ services:
     restart: unless-stopped
     volumes:
       - ./media:/app/media
-    environment:
-      OLLAMA_BASE_URL: http://ollama:11434
-    depends_on:
-      ollama:
-        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -108,4 +68,3 @@ services:
 volumes:
   widget_dist:
   admin_dist:
-  ollama_data:
