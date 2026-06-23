@@ -781,6 +781,30 @@ def test_document_label_becomes_graph_entity(client, tenant_agent_token, tenant_
     assert "ZX900PRO.txt" in names
 
 
+@pytest.mark.django_db
+def test_ingest_to_graph_is_idempotent_on_rerun(tenant_with_key):
+    """같은 (text, document_id)로 재실행해도 그래프가 중복되지 않는다.
+
+    docker rollout 중 배치 worker가 SIGKILL→재배달되면 같은 태스크가 다시 돈다(acks_late). mention/
+    text_unit ID가 결정적(document_id 기반)이고 GraphStore가 upsert라 재실행은 같은 행을 덮어쓴다
+    — 이 멱등성이 acks_late 무중단 배포의 전제다(ADR-0015 Q4)."""
+    from apps.rag.graph_ingester import ingest_to_graph
+    from apps.rag.graph_store import GraphStore
+
+    tenant, _ = tenant_with_key
+    tid = str(tenant.id)
+    text = "The unit offers ten assignable footswitches and two expression pedals for stage use."
+
+    ingest_to_graph(text, tid, "doc-1", "ZX900PRO")
+    first = sorted(m["name"] for m in GraphStore(tid).query_mentions())
+
+    ingest_to_graph(text, tid, "doc-1", "ZX900PRO")   # 재배달 시뮬레이션
+    second = sorted(m["name"] for m in GraphStore(tid).query_mentions())
+
+    assert first == second, f"재실행으로 mention 중복/변동: {first} → {second}"
+    assert len(first) == len(set(first)), f"mention 중복 존재: {first}"
+
+
 # ── Issue 53/66: Document Label 수정 (rename + Entity 재시드, 재임베딩 없음) ────
 
 @pytest.mark.django_db

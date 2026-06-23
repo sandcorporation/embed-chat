@@ -2,13 +2,22 @@ import httpx
 
 from config.celery import app
 
-
-@app.task(
+# 배치 태스크 공통 옵션 — 무중단 배포(docker rollout)로 worker가 SIGKILL돼도 유실 0.
+# acks_late: 태스크 완료 후에 ack → 중간에 죽으면 재배달. reject_on_worker_lost: worker 유실 시
+# 메시지를 재큐. 안전 전제는 멱등성 — 이 태스크들은 결정적 ID + GraphStore upsert라 재실행해도
+# 중복되지 않는다(ADR-0015 Q4, test_ingest_to_graph_is_idempotent_on_rerun). chat 태스크는
+# 반대로 acks_late=False(재배달 시 중복 응답 방지)라 여기 묶지 않는다.
+_BATCH = dict(
     bind=True,
     max_retries=3,
     autoretry_for=(httpx.ReadTimeout, httpx.ConnectError),
     default_retry_delay=60,
+    acks_late=True,
+    reject_on_worker_lost=True,
 )
+
+
+@app.task(**_BATCH)
 def ingest_document(self, document_id: str, tenant_id: str, mime_type: str):
     import os
     from django.conf import settings
@@ -51,24 +60,14 @@ def ingest_document(self, document_id: str, tenant_id: str, mime_type: str):
         raise
 
 
-@app.task(
-    bind=True,
-    max_retries=3,
-    autoretry_for=(httpx.ReadTimeout, httpx.ConnectError),
-    default_retry_delay=60,
-)
+@app.task(**_BATCH)
 def rebuild_graph_communities(self, tenant_id: str):
     from apps.rag.community_builder import rebuild_communities
 
     rebuild_communities(tenant_id)
 
 
-@app.task(
-    bind=True,
-    max_retries=3,
-    autoretry_for=(httpx.ReadTimeout, httpx.ConnectError),
-    default_retry_delay=60,
-)
+@app.task(**_BATCH)
 def reembed_tenant_task(self, tenant_id: str):
     """Embedding Provider 변경 시 재임베딩 재구축(구조 보존, 무중단 swap)."""
     from apps.rag.reembed import reembed_tenant
