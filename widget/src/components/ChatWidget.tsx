@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
 import type { CSSProperties } from 'react'
 import Markdown from './Markdown'
 import { realTransport, API_BASE } from '../transport'
@@ -21,7 +21,14 @@ interface ChatWidgetProps {
   transport?: ChatTransport
 }
 
-export default function ChatWidget({ slug, visitorId, hash = '', transport = realTransport }: ChatWidgetProps) {
+/** 외부에서 메시지를 보낼 수 있는 imperative 핸들(랜딩 데모의 추천 칩 클릭용). */
+export interface ChatWidgetHandle {
+  send(text: string): void
+}
+
+const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function ChatWidget(
+  { slug, visitorId, hash = '', transport = realTransport }, ref
+) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -124,11 +131,11 @@ export default function ChatWidget({ slug, visitorId, hash = '', transport = rea
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamingText])
 
-  const sendMessage = useCallback(async () => {
-    if (!input.trim() || !sessionId || status === 'streaming') return
+  const sendMessage = useCallback(async (explicitText?: string) => {
+    const userMsg = (explicitText ?? input).trim()
+    if (!userMsg || !sessionId || status === 'streaming') return
 
-    const userMsg = input.trim()
-    setInput('')
+    if (explicitText === undefined) setInput('')
     setMessages(prev => [...prev, { role: 'user', content: userMsg }])
     if (!isHitl) setStatus('streaming')
 
@@ -139,6 +146,8 @@ export default function ChatWidget({ slug, visitorId, hash = '', transport = rea
       setStatus('error')
     }
   }, [input, sessionId, status, isHitl, transport])
+
+  useImperativeHandle(ref, () => ({ send: (text: string) => { sendMessage(text) } }), [sendMessage])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -205,7 +214,7 @@ export default function ChatWidget({ slug, visitorId, hash = '', transport = rea
         />
         <button
           style={styles.sendBtn(status !== 'connecting' && status !== 'error' && !!input.trim())}
-          onClick={sendMessage}
+          onClick={() => sendMessage()}
           disabled={status === 'connecting' || status === 'error' || !input.trim()}
         >
           전송
@@ -213,13 +222,15 @@ export default function ChatWidget({ slug, visitorId, hash = '', transport = rea
       </div>
     </div>
   )
-}
+})
+
+export default ChatWidget
 
 const styles = {
   container: {
     display: 'flex',
     flexDirection: 'column',
-    height: '100vh',
+    height: '100%',
     background: '#fff',
   } as CSSProperties,
   header: {

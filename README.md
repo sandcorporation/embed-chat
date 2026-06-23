@@ -20,6 +20,7 @@ Embed Chat는 타사 웹사이트에 iframe으로 삽입하는 챗봇을 제공�
 | **OCR** | 이미지/스캔 PDF의 텍스트 추출 — prod은 **per-Tenant Vision Provider**(GPT-4o·Claude·Gemini 등), dev/test는 **PaddleOCR**(GPU) 폴백 ([ADR-0020](./docs/adr/0020-vision-ocr-replaces-paddle.md)) |
 | **Redis** | SSE pub/sub + Celery 브로커 + **EventBus(Streams)** + relay wake + 레이트리밋·세션 락 |
 | **Widget** (`/chatbot/{slug}/`) | Visitor용 채팅 위젯 (React) — 토큰 없이 slug로 접근 |
+| **Landing** (`/`) | 공개 소개 페이지 — 실제 `ChatWidget`을 mock 스트리밍으로 구동하는 라이브 챗봇 데모 + 지식그래프(react-force-graph) 데모 + 연락처. widget 레포의 별도 멀티페이지 엔트리(무거운 데모 의존은 landing 청크에만 → 위젯 챗봇 번들은 경량 유지) |
 | **Admin UI** (`/admin-ui/`) | Operator·Tenant 관리 화면 (React + Tailwind/shadcn) — **좌측 사이드바 내비 + 자원별 URL 라우트**(ADR-0017). 문서·**지식그래프 인스펙터**·Visitors·설정(Provider 포함)·팀원·HITL 섹션 |
 | **Nginx** | 리버스 프록시, 정적 파일 서빙 |
 

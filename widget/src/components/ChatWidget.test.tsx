@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import { createRef } from 'react'
 import { render, act } from '@testing-library/react'
 import ChatWidget from './ChatWidget'
+import type { ChatWidgetHandle } from './ChatWidget'
 import type { ChatTransport, EventSourceLike } from '../transport'
 
 // 결정적 mock 트랜스포트 — 전역 EventSource 덮어쓰기 대신 주입한다(175: 트랜스포트 주입).
@@ -58,5 +60,16 @@ describe('ChatWidget (주입 트랜스포트)', () => {
 
     act(() => { es.emit('token', { content: '** 입니다' }) })
     expect(document.querySelector('strong')).toHaveTextContent('굵게')
+  })
+
+  it('imperative send(text)로 메시지를 보낸다(추천 칩용)', () => {
+    const { es, sent, transport } = makeTransport()
+    const ref = createRef<ChatWidgetHandle>()
+    render(<ChatWidget ref={ref} slug="t" visitorId="v" transport={transport} />)
+    act(() => { es.emit('connected', { session_id: 's1' }) })
+
+    act(() => { ref.current!.send('안녕') })
+
+    expect(sent).toEqual([{ sessionId: 's1', content: '안녕' }])
   })
 })
