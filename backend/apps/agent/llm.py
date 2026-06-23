@@ -51,6 +51,24 @@ def complete_text(provider, messages) -> str:
     return cast(str, build_llm_client(provider).invoke(messages).content)
 
 
+def stream_structured(provider, messages, schema):
+    """구조화 출력을 토큰 단위로 스트리밍한다 — 누적 dict를 점진 yield한다.
+
+    스키마 필드 순서가 '제어필드 먼저'면, 노드가 response를 흘리기 전에 라우팅(폴백)을 판정할 수
+    있다. provider가 부분 스트리밍을 안 하면 최종 1청크만 와도 되며(노드가 one-shot으로 저하),
+    호출부는 항상 dict를 받는다(아직 안 온 필드는 키 부재 — Pydantic 기본값 함정 회피).
+    """
+    messages = _mark_cache_breakpoint(provider, messages)
+    client = build_llm_client(provider).with_structured_output(schema)
+    for chunk in client.stream(messages):
+        if isinstance(chunk, dict):
+            yield chunk
+        elif hasattr(chunk, "model_dump"):
+            yield chunk.model_dump()
+        else:
+            yield dict(chunk)
+
+
 # OCR 전사 가드레일(ADR-0009): vision 모델은 생성형이라 환각할 수 있으므로, '보이는 텍스트만
 # 그대로 전사'로 강하게 제약하고 temperature 0으로 결정성을 높인다. citation 원문성을 지킨다.
 _OCR_TRANSCRIBE_PROMPT = (

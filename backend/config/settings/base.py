@@ -113,6 +113,11 @@ OPEN_ROUTER_BASE_URL = os.environ.get("OPEN_ROUTER_BASE_URL", "https://openroute
 # base 기본은 안전하게 False(미설정 환경에서 실수로 플랫폼 비용을 떠안지 않도록).
 PLATFORM_DEFAULT_PROVIDERS_ENABLED = False
 
+# 챗 응답 토큰 스트리밍(PRD-chat-token-streaming) 킬스위치. 기본 on — 답변을 토큰 델타로 실시간
+# 흘린다. off면 현행 one-shot(complete_structured)으로 동작한다. provider가 부분 구조화 스트리밍을
+# 불안정하게 처리할 때 ops가 전면 끌 수 있는 안전판.
+CHAT_STREAMING_ENABLED = os.environ.get("CHAT_STREAMING_ENABLED", "true").lower() == "true"
+
 # Ollama (embedding)
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3")

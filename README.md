@@ -107,7 +107,7 @@ START → local_search → call_llm ─(context_sufficient=False)─→ source_s
 - **Visitor Memory**: ChatSession을 넘어 축적되는 장기 기억. 대화 중 LLM이 자동 추출하며 어드민에서 조회·수정·삭제할 수 있습니다.
 - **프롬프트 하드닝**(인젝션 방어): 비신뢰 입력(RAG·메모리·Visitor 메시지)을 `UNTRUSTED_DATA` 구역으로 격리·라벨링하고, 플랫폼이 anti-disclosure 지침을 항상 주입합니다. 테넌트 스코프 RAG와 무도구 에이전트가 크로스테넌트·행동 위험을 이미 차단합니다.
 - **프롬프트 캐싱 친화 구조**: 테넌트-불변 prefix(구조화 출력 tool 스키마 + Base System Prompt + 보안 지침)를 안정 prefix로 고정하고, 매 턴 바뀌는 휘발성(RAG·메모리·운영 안내)은 마지막 사용자 턴으로 내려 모든 세션·턴에서 prefix가 재사용되게 합니다. Anthropic provider는 안정 블록에 `cache_control` 분기점 1개를 주입(boundary에서 provider-aware), OpenAI·OpenRouter는 자동 prefix 캐싱을 탑니다.
-- **스트리밍**: 토큰·HITL 이벤트는 Redis pub/sub(`session:{id}` 채널)을 통해 SSE로 전달됩니다([ADR-0001](./docs/adr/0001-sse-redis-pubsub.md)). 다중 API 인스턴스에서도 스트리밍이 보장됩니다.
+- **스트리밍**: 토큰·HITL 이벤트는 Redis pub/sub(`session:{id}` 채널)을 통해 SSE로 전달됩니다([ADR-0001](./docs/adr/0001-sse-redis-pubsub.md)). 다중 API 인스턴스에서도 스트리밍이 보장됩니다. AI 답변은 **토큰 델타로 실시간** 흘러(첫 토큰까지 대기 최소화) 위젯이 타이핑되듯 누적 렌더합니다. 구조화 출력의 라우팅 신호(`context_sufficient`)를 응답보다 **먼저** 받도록 스키마를 배치해, 원문 폴백(비-종단 패스)에선 스트리밍을 억제하고(중복 출력 방지) 종단 패스만 흘립니다. provider가 부분 구조화 스트리밍을 못 하면 자동으로 현행 one-shot으로 저하하며, `CHAT_STREAMING_ENABLED=false`로 전면 끌 수 있습니다.
 
 ### HITL (Human-in-the-Loop)
 

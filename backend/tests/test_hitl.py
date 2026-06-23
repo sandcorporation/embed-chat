@@ -55,10 +55,16 @@ def test_hitl_with_response_streams_transition_then_escalates(
 
     run_chat_agent(session, "FCB1010 전원 사양 알려줘")
 
-    # 전환 멘트가 먼저 token으로 스트리밍된다 (escalation 이벤트보다 앞서)
+    # 전환 멘트가 먼저 token 델타로 스트리밍된다 (escalation 이벤트보다 앞서)
     first = get_redis_message(pubsub)
     assert first is not None and first["type"] == "token", f"전환 멘트 스트리밍 안 됨: {first}"
-    assert first["content"] == "상담원에게 연결해 드리겠습니다."
+    streamed = first["content"]
+    while True:
+        nxt = get_redis_message(pubsub)
+        if nxt is None or nxt["type"] != "token":
+            break
+        streamed += nxt["content"]
+    assert streamed == "상담원에게 연결해 드리겠습니다."
     # 전환 멘트가 ChatMessage로도 저장된다
     assert ChatMessage.objects.filter(
         session=session, role=ChatMessage.ROLE_ASSISTANT,

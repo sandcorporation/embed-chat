@@ -115,6 +115,20 @@ class _FakeChatLLM:
             hitl_reason="",
         )
 
+    def stream_structured(self, provider, messages, schema):
+        """complete_structured와 같은 판정을 '제어필드 먼저 → response 청크'로 결정적 yield한다
+        (PRD-chat-token-streaming). 노드의 델타 publish·폴백 게이팅을 검증할 수 있게 한다."""
+        result = self.complete_structured(provider, messages, schema)
+        d = result.model_dump()
+        cs = d.get("context_sufficient", True)
+        resp = d.get("response", "") or ""
+        yield {"context_sufficient": cs}                              # 제어 먼저
+        if resp:
+            mid = max(1, len(resp) // 2)
+            yield {"context_sufficient": cs, "response": resp[:mid]}  # response 자라남
+            yield {"context_sufficient": cs, "response": resp}
+        yield d                                                       # 최종(모든 필드)
+
 
 @pytest.fixture(autouse=True)
 def fake_chat_llm(monkeypatch):
@@ -124,6 +138,7 @@ def fake_chat_llm(monkeypatch):
     """
     fake = _FakeChatLLM()
     monkeypatch.setattr("apps.agent.llm.complete_structured", fake.complete_structured)
+    monkeypatch.setattr("apps.agent.llm.stream_structured", fake.stream_structured)
     return fake
 
 

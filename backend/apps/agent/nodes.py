@@ -25,17 +25,19 @@ _CONTEXT_SUFFICIENT_DESC = (
 )
 
 
+# 필드 순서: context_sufficient를 response보다 **먼저** 둔다 — 스트리밍 시 라우팅(폴백) 신호가
+# 응답 앞에 도착해, 노드가 흘리기 전에 종단 여부를 판정할 수 있다(PRD-chat-token-streaming).
 class HITLResponse(BaseModel):
+    context_sufficient: bool = Field(default=True, description=_CONTEXT_SUFFICIENT_DESC)
     response: str
     needs_hitl: bool
     hitl_reason: str = ""
-    context_sufficient: bool = Field(default=True, description=_CONTEXT_SUFFICIENT_DESC)
 
 
 class PlainResponse(BaseModel):
     """HITL-OFF Tenant용 구조화 출력 — needs_hitl 필드가 없어 escalation을 표현할 수 없다."""
-    response: str
     context_sufficient: bool = Field(default=True, description=_CONTEXT_SUFFICIENT_DESC)
+    response: str
 
 
 def local_search_node(state: dict) -> dict:
@@ -163,39 +165,74 @@ def _will_source_fallback(state: dict, result) -> bool:
     return not result.context_sufficient and not state.get("source_text_tried", False)
 
 
-def call_llm_structured(state: dict) -> dict:
+def _will_fallback_dict(state: dict, d: dict) -> bool:
+    """dict 기반 폴백 판정 — _will_source_fallback과 동일 조건(비-종단 패스면 스트리밍 억제)."""
+    return (not d.get("context_sufficient", True)) and not state.get("source_text_tried", False)
+
+
+def _oneshot_route(state: dict, schema) -> tuple:
+    """킬스위치(CHAT_STREAMING_ENABLED=False) 경로 — 현행 단일 호출·one-shot publish."""
+    sid = state["session_id"]
     lc_messages = _assemble_lc_messages(state)
-
-    result = llm_boundary.complete_structured(get_chat_provider(), lc_messages, HITLResponse)
-
-    # HITL 여부와 무관하게, AI가 만든 응답(전환 멘트 포함)이 있으면 사용자에게 스트리밍한다.
-    # 단, 원문 폴백(issue 119)이 예정된 비-종단 패스에선 스트리밍하지 않는다 — 재호출로 두 번
-    # publish되어 AI 메시지가 중복 출력되는 것을 막는다.
+    result = llm_boundary.complete_structured(get_chat_provider(), lc_messages, schema)
     if result.response and not _will_source_fallback(state, result):
-        publish_token(state["session_id"], result.response)
-        publish_done(state["session_id"])
+        publish_token(sid, result.response)
+        publish_done(sid)
+    return result.model_dump(), (result.response or "")
 
+
+def _stream_and_route(state: dict, schema) -> tuple:
+    """구조화 출력을 스트리밍하며 response 델타를 publish(안전·종단일 때만)하고, 최종 dict와 응답을 반환.
+
+    제어필드(context_sufficient)가 보이면 1회 종단 판정 → 종단이면 델타를 흘리고, 폴백 패스면 억제
+    (issue 119 중복 출력 방지). 제어필드가 늦거나 부분 스트리밍이 없으면 끝에 one-shot으로 저하한다
+    (provider 호환 안전망 — 최악이 현행 동작, 후퇴·중복 없음).
+    """
+    from django.conf import settings
+    if not getattr(settings, "CHAT_STREAMING_ENABLED", True):
+        return _oneshot_route(state, schema)
+
+    sid = state["session_id"]
+    lc_messages = _assemble_lc_messages(state)
+    published = 0
+    streaming = None  # None=미결정, True=흘림, False=억제
+    final: dict = {}
+    for chunk in llm_boundary.stream_structured(get_chat_provider(), lc_messages, schema):
+        final.update(chunk)  # 누적(부분 스트림이 delta든 accumulating이든 키 보존)
+        if streaming is None and "context_sufficient" in chunk:
+            streaming = not _will_fallback_dict(state, chunk)
+        if streaming:
+            resp = chunk.get("response") or ""
+            if len(resp) > published:
+                publish_token(sid, resp[published:])
+                published = len(resp)
+    response = final.get("response") or ""
+    if streaming:
+        if published > 0:  # 흘린 게 있을 때만 done(빈 응답=needs_hitl 무-멘트는 현행대로 무발행)
+            publish_done(sid)
+    elif response and not _will_fallback_dict(state, final):
+        # 자동 저하: 안전 종단인데 못 흘림(제어필드 늦음/부분없음) → 현행 one-shot
+        publish_token(sid, response)
+        publish_done(sid)
+    return final, response
+
+
+def call_llm_structured(state: dict) -> dict:
+    final, response = _stream_and_route(state, HITLResponse)
     return {
-        "assistant_response": result.response,
-        "needs_hitl": result.needs_hitl,
-        "hitl_reason": result.hitl_reason,
-        "context_sufficient": result.context_sufficient,
+        "assistant_response": response,
+        "needs_hitl": bool(final.get("needs_hitl", False)),
+        "hitl_reason": final.get("hitl_reason", "") or "",
+        "context_sufficient": bool(final.get("context_sufficient", True)),
     }
 
 
 def call_llm_plain(state: dict) -> dict:
     """HITL-OFF 경로: needs_hitl 없는 response-only 출력. 전환 멘트 누수가 구조적으로 불가능."""
-    lc_messages = _assemble_lc_messages(state)
-    result = llm_boundary.complete_structured(get_chat_provider(), lc_messages, PlainResponse)
-
-    # 폴백 예정 패스에선 스트리밍 억제(중복 출력 방지) — call_llm_structured와 동일.
-    if result.response and not _will_source_fallback(state, result):
-        publish_token(state["session_id"], result.response)
-        publish_done(state["session_id"])
-
+    final, response = _stream_and_route(state, PlainResponse)
     return {
-        "assistant_response": result.response, "needs_hitl": False, "hitl_reason": "",
-        "context_sufficient": result.context_sufficient,
+        "assistant_response": response, "needs_hitl": False, "hitl_reason": "",
+        "context_sufficient": bool(final.get("context_sufficient", True)),
     }
 
 
