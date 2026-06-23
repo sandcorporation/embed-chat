@@ -8,9 +8,9 @@
 # 인증: GITHUB_TOKEN(packages:write) — PAT 불필요. 태그: <git sha>(불변, 배포 핀) + latest(main).
 # on: push라 fork PR은 트리거되지 않는다(self-hosted 러너 보안).
 #
-# deploy: main push에서 빌드 성공 후 SSH로 A1에 접속해 scripts/deploy.sh <sha>를 실행한다
-# (docker rollout 무중단). A1은 GHCR에 1회 로그인돼 있어 pull만 하므로 워크플로우가 레지스트리
-# 토큰을 넘기지 않는다. SSH 시크릿은 production 환경에 둔다(deploy job 주석 참조).
+# release: main push에서 빌드 성공 후 release 브랜치를 그 SHA로 갱신한다. A1의 Jenkins
+# (jenkins.moonpair.org)가 release push 웹훅을 받아 로컬에서 scripts/deploy.sh를 실행해
+# docker rollout 무중단 배포한다 — SSH·배포 시크릿 불필요(배포가 호스트 네이티브).
 
 name: build-images
 
@@ -69,47 +69,23 @@ jobs:
           cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/embed-chat-${{ matrix.image }}:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/embed-chat-${{ matrix.image }}:buildcache,mode=max
 
-  # main push에서 3개 이미지 빌드가 모두 성공한 뒤에만 A1에 배포한다. SSH로 접속해 repo를 배포
-  # SHA로 checkout하고 scripts/deploy.sh를 호출(거기서 pull→migrate→docker rollout 무중단).
-  #
-  # 필요한 GitHub 설정(Settings → Environments → production, 또는 Actions secrets/variables):
-  #   secrets:
-  #     ORACLE_SSH_HOST         A1 공인 IP 또는 도메인
-  #     ORACLE_SSH_USER         배포 유저(예: deployer)
-  #     ORACLE_SSH_KEY          배포용 SSH 개인키 전문(-----BEGIN ... END-----)
-  #     ORACLE_SSH_KNOWN_HOSTS  A1 호스트 공개키 — `ssh-keyscan -p <port> <host>` 결과(MITM 방지)
-  #   variables(선택):
-  #     ORACLE_SSH_PORT         SSH 포트(기본 22)
-  #     ORACLE_DEPLOY_PATH      A1의 repo 경로(기본 /opt/embed-chat)
-  deploy:
+  # main push에서 3개 이미지 빌드가 모두 성공하면 release 브랜치를 그 SHA로 force-update한다.
+  # 이 push가 GitHub 웹훅을 발화 → A1의 Jenkins가 release를 감지해 로컬 배포한다.
+  # (GITHUB_TOKEN push는 다른 GH Actions 워크플로우는 재귀 방지로 안 깨우지만, 외부 웹훅(Jenkins)은
+  #  정상 발화한다.) release HEAD = 빌드된 SHA = 이미지 태그라 Jenkins가 그대로 쓴다.
+  # 추가 시크릿 불필요 — 내장 GITHUB_TOKEN(contents:write)만 쓴다.
+  release:
     needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: production
-    concurrency:
-      group: deploy-production
-      cancel-in-progress: false
+    permissions:
+      contents: write
     steps:
-      - name: Deploy to oracle A1 over SSH
+      - name: release 브랜치를 빌드된 SHA로 갱신(웹훅 → Jenkins 배포)
         env:
-          SSH_HOST: ${{ secrets.ORACLE_SSH_HOST }}
-          SSH_USER: ${{ secrets.ORACLE_SSH_USER }}
-          SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
-          SSH_PORT: ${{ vars.ORACLE_SSH_PORT || '22' }}
-          DEPLOY_PATH: ${{ vars.ORACLE_DEPLOY_PATH || '/opt/embed-chat' }}
-          GIT_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          # repo를 배포 SHA로 맞춘 뒤(컴포즈·nginx·deploy.sh를 이미지와 lockstep) deploy.sh 실행.
-          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o IdentitiesOnly=yes \
-              "$SSH_USER@$SSH_HOST" \
-              "set -euo pipefail; \
-               cd '$DEPLOY_PATH'; \
-               git fetch --quiet origin; \
-               git checkout --quiet '$GIT_SHA'; \
-               IMAGE_TAG='$GIT_SHA' bash scripts/deploy.sh '$GIT_SHA'"
+          gh api -X PATCH "repos/${{ github.repository }}/git/refs/heads/release" \
+            -f sha='${{ github.sha }}' -F force=true \
+          || gh api -X POST "repos/${{ github.repository }}/git/refs" \
+            -f ref='refs/heads/release' -f sha='${{ github.sha }}'
