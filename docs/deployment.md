@@ -54,7 +54,8 @@ docker network create proxy            # NPM 컨테이너도 이 네트워크에
 # 2) 배포 디렉토리(.env·media·release fetch가 여기 산다)
 git clone git@github.com:sandcorporation/embed-chat.git /opt/embed-chat
 
-# 3) .env 작성 (아래 "환경변수" 참조) — 이미지·git에 절대 포함 금지
+# 3) .env 작성 — 템플릿 복사 후 채운다 (아래 "환경변수" 참조). 이미지·git에 절대 포함 금지
+cp /opt/embed-chat/.env.prod.example /opt/embed-chat/.env && vi /opt/embed-chat/.env
 
 # 4) GHCR pull 인증 (classic PAT, read:packages, org면 SSO authorize)
 echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
