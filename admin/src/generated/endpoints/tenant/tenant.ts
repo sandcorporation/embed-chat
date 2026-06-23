@@ -6,9 +6,11 @@
  */
 import type {
   AppsTenantsApiProviderModels400,
+  AppsTenantsApiProviderQuickSetup400,
   AppsTenantsApiUpdateConfig400,
   ProviderModelsIn,
   ProviderModelsOut,
+  QuickSetupIn,
   ResetKeyOut,
   SlugIn,
   TenantConfigIn,
@@ -138,6 +140,53 @@ export const appsTenantsApiProviderModels = async (providerModelsIn: ProviderMod
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(
       providerModelsIn,)
+  }
+);}
+
+
+/**
+ * OpenAI 키 1개로 LLM·Embedding·OCR 3종을 기본값으로 한 번에 설정한다(PRD-openai-quick-setup).
+
+키 검증 실패 시 400 + 미저장(원자성). 임베딩 provider가 바뀌면 재임베딩을 트리거한다
+(신규 테넌트엔 no-op).
+ * @summary Provider Quick Setup
+ */
+export type appsTenantsApiProviderQuickSetupResponse200 = {
+  data: TenantConfigOut
+  status: 200
+}
+
+export type appsTenantsApiProviderQuickSetupResponse400 = {
+  data: AppsTenantsApiProviderQuickSetup400
+  status: 400
+}
+    
+export type appsTenantsApiProviderQuickSetupResponseSuccess = (appsTenantsApiProviderQuickSetupResponse200) & {
+  headers: Headers;
+};
+export type appsTenantsApiProviderQuickSetupResponseError = (appsTenantsApiProviderQuickSetupResponse400) & {
+  headers: Headers;
+};
+
+export type appsTenantsApiProviderQuickSetupResponse = (appsTenantsApiProviderQuickSetupResponseSuccess | appsTenantsApiProviderQuickSetupResponseError)
+
+export const getAppsTenantsApiProviderQuickSetupUrl = () => {
+
+
+  
+
+  return `/api/tenant/providers/quick-setup`
+}
+
+export const appsTenantsApiProviderQuickSetup = async (quickSetupIn: QuickSetupIn, options?: RequestInit): Promise<appsTenantsApiProviderQuickSetupResponse> => {
+  
+  return customInstance<appsTenantsApiProviderQuickSetupResponse>(getAppsTenantsApiProviderQuickSetupUrl(),
+  {      
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      quickSetupIn,)
   }
 );}
 

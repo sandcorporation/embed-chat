@@ -529,6 +529,19 @@
         "title": "ProviderModelsOut",
         "type": "object"
       },
+      "QuickSetupIn": {
+        "properties": {
+          "api_key": {
+            "title": "Api Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "title": "QuickSetupIn",
+        "type": "object"
+      },
       "RebuildOut": {
         "properties": {
           "status": {
@@ -2780,6 +2793,56 @@
           }
         ],
         "summary": "Provider Models",
+        "tags": [
+          "tenant"
+        ]
+      }
+    },
+    "/api/tenant/providers/quick-setup": {
+      "post": {
+        "description": "OpenAI 키 1개로 LLM·Embedding·OCR 3종을 기본값으로 한 번에 설정한다(PRD-openai-quick-setup).\n\n키 검증 실패 시 400 + 미저장(원자성). 임베딩 provider가 바뀌면 재임베딩을 트리거한다\n(신규 테넌트엔 no-op).",
+        "operationId": "apps_tenants_api_provider_quick_setup",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuickSetupIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantConfigOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "TenantAgentAuth": []
+          }
+        ],
+        "summary": "Provider Quick Setup",
         "tags": [
           "tenant"
         ]

@@ -343,3 +343,65 @@ def test_update_config_rejects_invalid_ocr_provider(client, tenant_agent_token, 
     assert resp.status_code == 400
     g = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}").json()
     assert g["ocr_provider_type"] == ""
+
+
+# ── OpenAI 한방 quick-setup (issue 168) ──────────────────────────────────────
+
+def _quick_setup(client, token, api_key):
+    return client.post(
+        "/api/tenant/providers/quick-setup", {"api_key": api_key},
+        content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {token}",
+    )
+
+
+@pytest.mark.django_db
+def test_quick_setup_configures_all_three_openai(client, tenant_agent_token, monkeypatch):
+    """유효 키 한 번으로 LLM·Embedding·OCR 3종이 openai 기본값으로 설정된다."""
+    _patch_get(monkeypatch, {"data": [{"id": "gpt-4o-mini"}]})  # 키 검증(models 조회) 통과
+    resp = _quick_setup(client, tenant_agent_token, "sk-openai-123")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["llm_provider_type"] == "openai" and body["model_id"] == "gpt-4o-mini"
+    assert body["embed_provider_type"] == "openai" and body["embed_model"] == "text-embedding-3-small"
+    assert body["embed_dim"] == 1536
+    assert body["ocr_provider_type"] == "openai" and body["ocr_model"] == "gpt-4o-mini"
+    assert body["llm_api_key"] == "********"          # 마스킹
+    assert "sk-openai-123" not in resp.content.decode()  # 평문 미노출
+
+
+@pytest.mark.django_db
+def test_quick_setup_invalid_key_400_nothing_saved(client, tenant_agent_token, monkeypatch):
+    """키 검증 실패 시 400이고 config는 변경되지 않는다(원자성)."""
+    _patch_get(monkeypatch, {}, status=401)
+    resp = _quick_setup(client, tenant_agent_token, "bad")
+    assert resp.status_code == 400
+    g = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}").json()
+    assert g["llm_provider_type"] == "" and g["embed_provider_type"] == "" and g["ocr_provider_type"] == ""
+
+
+@pytest.mark.django_db
+def test_quick_setup_validates_key_once(client, tenant_agent_token, monkeypatch):
+    """같은 키를 3번이 아니라 1회만 검증한다."""
+    from apps.agent import provider_models
+    cap = {"n": 0}
+    def fake_get(url, headers=None, timeout=None):
+        cap["n"] += 1
+        return _FakeResp(200, {"data": [{"id": "gpt-4o-mini"}]})
+    monkeypatch.setattr(provider_models.httpx, "get", fake_get)
+    _quick_setup(client, tenant_agent_token, "sk-x")
+    assert cap["n"] == 1
+
+
+@pytest.mark.django_db
+def test_quick_setup_key_encrypted(client, tenant_agent_token, tenant_with_key, monkeypatch):
+    """저장 키는 암호화(복호화 시 원문) — 3종 모두 같은 키."""
+    _patch_get(monkeypatch, {"data": [{"id": "gpt-4o-mini"}]})
+    _quick_setup(client, tenant_agent_token, "sk-secret")
+    from apps.tenants.models import TenantConfig
+    from apps.tenants.crypto import decrypt_secret
+    tenant, _ = tenant_with_key
+    cfg = TenantConfig.objects.get(tenant=tenant)
+    assert cfg.llm_api_key != "sk-secret"
+    assert decrypt_secret(cfg.llm_api_key) == "sk-secret"
+    assert decrypt_secret(cfg.embed_api_key) == "sk-secret"
+    assert decrypt_secret(cfg.ocr_api_key) == "sk-secret"

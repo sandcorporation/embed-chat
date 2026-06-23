@@ -519,6 +519,33 @@ def provider_models(request, body: ProviderModelsIn):
     return 200, {"models": models}
 
 
+class QuickSetupIn(Schema):
+    api_key: str
+
+
+@tenant_router.post("/providers/quick-setup", response={200: TenantConfigOut, 400: dict})
+def provider_quick_setup(request, body: QuickSetupIn):
+    """OpenAI 키 1개로 LLM·Embedding·OCR 3종을 기본값으로 한 번에 설정한다(PRD-openai-quick-setup).
+
+    키 검증 실패 시 400 + 미저장(원자성). 임베딩 provider가 바뀌면 재임베딩을 트리거한다
+    (신규 테넌트엔 no-op).
+    """
+    from apps.tenants.quick_setup import openai_quick_setup
+    from apps.agent.provider_models import ProviderError
+
+    config = request.auth.tenant.config
+    _old_embed = _embed_signature(config)
+    try:
+        openai_quick_setup(config, body.api_key)
+    except ProviderError as e:
+        return 400, {"detail": str(e)}
+
+    if _embed_signature(config) != _old_embed:
+        from apps.rag.tasks import reembed_tenant_task
+        reembed_tenant_task.delay(str(config.tenant_id))
+    return 200, _config_out(config)
+
+
 @tenant_router.post("/reset-key", response={200: ResetKeyOut})
 def reset_tenant_key(request):
     tenant = request.auth.tenant
