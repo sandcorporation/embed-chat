@@ -111,17 +111,19 @@ def test_send_message_unknown_session_returns_404(client):
     assert resp.status_code == 404
 
 
-@pytest.mark.django_db
-def test_get_session_checkpoint_returns_channel_values(client, tenant_with_key, tenant_agent_token):
+@pytest.mark.django_db(transaction=True)
+async def test_get_session_checkpoint_returns_channel_values(client, tenant_with_key, tenant_agent_token):
     """run_chat_agent 실행 후 GET /api/tenant/sessions/{id}/checkpoint → channel_values JSON."""
-    from apps.agent.graph import run_chat_agent
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async
     from apps.chat.models import ChatSession
+    adb = sync_to_async
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-checkpoint-api")
-    run_chat_agent(session, "안녕하세요")
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-checkpoint-api")
+    await run_chat_agent_async(session, "안녕하세요")
 
-    resp = client.get(
+    resp = await adb(client.get)(
         f"/api/tenant/sessions/{session.id}/checkpoint",
         HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
     )
@@ -164,25 +166,26 @@ def test_get_session_checkpoint_404_for_other_tenant(client, tenant_agent_token)
     assert resp.status_code == 404
 
 
-@pytest.mark.django_db
-def test_checkpoint_has_messages_but_not_lc_messages(tenant_with_key):
-    """Checkpoint channel_values에 대화는 messages로만 남고 lc_messages(프롬프트 조립물)는 없다.
-
-    lc_messages가 남아 있으면 어드민 Checkpoint 뷰에서 대화가 두 형식으로 중복 표시된다.
-    """
-    from apps.agent.graph import run_chat_agent, _create_checkpointer
+@pytest.mark.django_db(transaction=True)
+async def test_checkpoint_has_messages_but_not_lc_messages(tenant_with_key):
+    """Checkpoint channel_values에 대화는 messages로만 남고 lc_messages(프롬프트 조립물)는 없다."""
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async, _create_checkpointer
     from apps.chat.models import ChatSession
+    adb = sync_to_async
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-lc-messages")
-    run_chat_agent(session, "안녕하세요")
-    run_chat_agent(session, "또 질문이요")
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-lc-messages")
+    await run_chat_agent_async(session, "안녕하세요")
+    await run_chat_agent_async(session, "또 질문이요")
 
-    saver, conn = _create_checkpointer()
-    try:
-        cp = saver.get({"configurable": {"thread_id": str(session.id)}})
-    finally:
-        conn.close()
+    def _read():
+        saver, conn = _create_checkpointer()
+        try:
+            return saver.get({"configurable": {"thread_id": str(session.id)}})
+        finally:
+            conn.close()
+    cp = await adb(_read)()
 
     cv = cp["channel_values"]
     assert "messages" in cv
@@ -193,20 +196,22 @@ def test_checkpoint_has_messages_but_not_lc_messages(tenant_with_key):
     assert roles == ["user", "assistant", "user", "assistant"], roles
 
 
-@pytest.mark.django_db
-def test_multi_turn_creates_multiple_assistant_replies(tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_multi_turn_creates_multiple_assistant_replies(tenant_with_key):
     """agent를 두 번 실행하면 각각 assistant 메시지가 저장되고 히스토리가 누적된다."""
-    from apps.agent.graph import run_chat_agent
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async
     from apps.chat.models import ChatSession, ChatMessage
+    adb = sync_to_async
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-multiturn")
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-multiturn")
 
-    run_chat_agent(session, "안녕하세요")
-    assert ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_ASSISTANT).count() == 1
+    await run_chat_agent_async(session, "안녕하세요")
+    assert await adb(ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_ASSISTANT).count)() == 1
 
-    run_chat_agent(session, "감사합니다")
-    assert ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_ASSISTANT).count() == 2
+    await run_chat_agent_async(session, "감사합니다")
+    assert await adb(ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_ASSISTANT).count)() == 2
 
 
 @pytest.mark.django_db

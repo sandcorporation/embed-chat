@@ -57,51 +57,54 @@ def test_vector_search_is_tenant_isolated(client, tenant_agent_token, tenant_wit
 
 # ── Issue 63: Local Search 라우팅 + chat end-to-end ──────────────────────────
 
-@pytest.mark.django_db
-def test_chat_answers_from_graph_local_search(client, tenant_agent_token, tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_chat_answers_from_graph_local_search(client, tenant_agent_token, tenant_with_key):
     """업로드한 문서 내용을 그래프 Local Search로 끌어와 chat이 답한다 (assistant 메시지 저장)."""
-    from apps.agent.graph import run_chat_agent
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async
     from apps.chat.models import ChatSession, ChatMessage
+    adb = sync_to_async
 
     tenant, _ = tenant_with_key
     f = io.BytesIO(b"The return policy allows returns within 30 days of purchase.")
     f.name = "returns.txt"
-    client.post(
+    await adb(client.post)(
         "/api/tenant/documents/",
         {"file": f},
         HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
     )
 
-    session = ChatSession.objects.create(
-        tenant_id=tenant.id, visitor_id="v-graph-chat"    )
-    run_chat_agent(session, "환불 정책 알려줘")
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-graph-chat")
+    await run_chat_agent_async(session, "환불 정책 알려줘")
 
-    # 그래프 검색 + 응답 경로가 동작해 assistant 메시지가 저장된다
-    assert ChatMessage.objects.filter(
-        session=session, role=ChatMessage.ROLE_ASSISTANT
-    ).exists()
+    assert await adb(ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_ASSISTANT).exists)()
 
 
-@pytest.mark.django_db
-def test_local_search_returns_entities_and_relations_not_chunks(tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_local_search_returns_entities_and_relations_not_chunks(tenant_with_key):
     """Local Search는 거대한 Text Unit chunk가 아니라 Entity·Relation 결과를 rag_chunks에 담는다."""
+    from asgiref.sync import sync_to_async
     from apps.rag.graph_store import GraphStore
     from apps.rag.ingesters import get_embeddings
     from apps.agent.nodes import local_search_node
+    adb = sync_to_async
 
     tenant, _ = tenant_with_key
-    gs = GraphStore(str(tenant.id))
-    gs.ensure_mention_vector_index()
-    doc = "doc1"
-    e1 = get_embeddings(["FCB1010: MIDI foot controller"])[0]
-    e2 = get_embeddings(["Power Supply: 9V DC power adapter"])[0]
-    gs.upsert_mention(f"{doc}:FCB1010", "FCB1010", "product", "MIDI foot controller",
-                      source_document_id=doc, embedding=e1)
-    gs.upsert_mention(f"{doc}:Power Supply", "Power Supply", "spec", "9V DC power adapter",
-                      source_document_id=doc, embedding=e2)
-    gs.upsert_mention_relation(f"{doc}:FCB1010", f"{doc}:Power Supply", "powered by", doc)
 
-    out = local_search_node({"user_message": "FCB1010 power supply", "tenant_id": str(tenant.id)})
+    def _setup():
+        gs = GraphStore(str(tenant.id))
+        gs.ensure_mention_vector_index()
+        doc = "doc1"
+        e1 = get_embeddings(["FCB1010: MIDI foot controller"])[0]
+        e2 = get_embeddings(["Power Supply: 9V DC power adapter"])[0]
+        gs.upsert_mention(f"{doc}:FCB1010", "FCB1010", "product", "MIDI foot controller",
+                          source_document_id=doc, embedding=e1)
+        gs.upsert_mention(f"{doc}:Power Supply", "Power Supply", "spec", "9V DC power adapter",
+                          source_document_id=doc, embedding=e2)
+        gs.upsert_mention_relation(f"{doc}:FCB1010", f"{doc}:Power Supply", "powered by", doc)
+    await adb(_setup)()
+
+    out = await local_search_node({"user_message": "FCB1010 power supply", "tenant_id": str(tenant.id)})
     blob = " ".join(out["rag_chunks"])
     assert "FCB1010" in blob, f"엔티티가 결과에 없음: {out['rag_chunks']}"
     assert "Power Supply" in blob, f"이웃 엔티티가 없음: {out['rag_chunks']}"

@@ -1,9 +1,16 @@
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
 from pydantic import BaseModel, Field
+from asgiref.sync import sync_to_async
 
 from apps.agent import llm as llm_boundary
 from apps.agent.providers import get_chat_provider
-from apps.chat.sse import publish_token, publish_done
+from apps.chat.sse import apublish_token, apublish_done
+
+
+# 노드는 async def다(issue 195/노드 async화). DB 협력자(GraphStore raw psycopg·Django ORM)는
+# sync라 sync_to_async로 단일 스레드에서 돌려 커넥션 누수를 막고, LLM·토큰 publish는 진짜 async
+# (acomplete/astream·apublish)로 이벤트루프에서 yield한다. LangGraph ainvoke가 async 노드를
+# 네이티브로 실행하므로 executor 스레드 누수가 사라진다.
 
 
 # 플랫폼이 항상 주입하는 인젝션 하드닝 지침(Tenant base prompt와 별개). 아키텍처가 이미
@@ -40,11 +47,8 @@ class PlainResponse(BaseModel):
     response: str
 
 
-def local_search_node(state: dict) -> dict:
-    """엔티티 중심 근거 — 질의로 resolved Entity를 찾고 그 이웃 관계를 모은다.
-
-    거대한 Text Unit chunk 대신 구조화된 Entity·Relation을 근거로 전달한다(ADR-0010).
-    """
+def _local_search_sync(state: dict) -> dict:
+    """엔티티 중심 근거 — 질의로 resolved Entity를 찾고 그 이웃 관계를 모은다(ADR-0010). DB(sync)."""
     from apps.rag.graph_store import GraphStore
 
     gs = GraphStore(state["tenant_id"])
@@ -71,16 +75,15 @@ def local_search_node(state: dict) -> dict:
     return {"rag_chunks": chunks}
 
 
+async def local_search_node(state: dict) -> dict:
+    return await sync_to_async(_local_search_sync)(state)
+
+
 SOURCE_TOP_K = 4  # 폴백 1회당 끌어올 원문 청크 수(토큰 통제)
 
 
-def source_search_node(state: dict) -> dict:
-    """원문(TextUnit) 폴백 — 그래프-only가 답을 못 냈을 때(context_sufficient=False) 호출된다.
-
-    추출이 버린 스펙·수치·표는 그래프엔 없고 원문에만 산다(ADR-0010 보강). 질의 임베딩으로
-    최근접 TextUnit 원문을 vector_search해 기존 rag_chunks에 보강한다(중복 회피, top_k 캡).
-    augmentation은 best-effort라 실패 시 빈 결과로 진행한다.
-    """
+def _source_search_sync(state: dict) -> dict:
+    """원문(TextUnit) 폴백 — 그래프-only가 답을 못 냈을 때 질의 임베딩으로 최근접 원문을 보강(ADR-0010)."""
     from apps.rag.graph_store import GraphStore
     from apps.rag.ingesters import get_embeddings
 
@@ -101,10 +104,12 @@ def source_search_node(state: dict) -> dict:
     return {"rag_chunks": existing + added, "source_text_tried": True}
 
 
-def _untrusted_block(state: dict) -> str:
-    """RAG·Visitor Memory를 하나의 비신뢰 데이터 구역으로 delimit한다("지시 아니라 데이터").
+async def source_search_node(state: dict) -> dict:
+    return await sync_to_async(_source_search_sync)(state)
 
-    RAG에는 웹 인제스션(B)발 간접 인젝션이 섞일 수 있으므로 구조적으로 격리한다. 비면 ""."""
+
+def _untrusted_block(state: dict) -> str:
+    """RAG·Visitor Memory를 하나의 비신뢰 데이터 구역으로 delimit한다("지시 아니라 데이터"). 비면 ""."""
     untrusted = []
     if state.get("visitor_memories"):
         mem_lines = "\n".join(f"- {m}" for m in state["visitor_memories"])
@@ -122,11 +127,7 @@ def _untrusted_block(state: dict) -> str:
 
 
 def _user_turn_content(state: dict) -> str:
-    """마지막 사용자 턴 = (선택) 운영 안내 + (선택) 비신뢰 컨텍스트 + 현재 질문.
-
-    휘발성(RAG·메모리·운영 안내)은 system이 아니라 이 턴에 실어, 테넌트-불변 system prefix가
-    모든 세션·턴에서 동일하게 유지되도록 한다(프롬프트 캐싱 — issue 133).
-    """
+    """마지막 사용자 턴 = (선택) 운영 안내 + (선택) 비신뢰 컨텍스트 + 현재 질문."""
     parts = []
     if state.get("operational_notice"):
         parts.append(state["operational_notice"])
@@ -138,12 +139,7 @@ def _user_turn_content(state: dict) -> str:
 
 
 def _assemble_lc_messages(state: dict) -> list:
-    """캐시 친화 LLM 입력을 조립한다.
-
-    안정 prefix = 테넌트-불변 system(Base System Prompt + 보안 지침). 휘발성(RAG·Visitor
-    Memory·운영 안내)은 마지막 사용자 턴에 UNTRUSTED_DATA 격리를 유지한 채 싣는다. 조립물은
-    임시 산출물이라 그래프 채널에 저장하지 않는다(Checkpoint 중복 방지).
-    """
+    """캐시 친화 LLM 입력을 조립한다(안정 prefix=테넌트-불변 system, 휘발성은 마지막 턴)."""
     system_content = state["system_prompt"] + _ANTI_DISCLOSURE
 
     lc_messages: list[BaseMessage] = [SystemMessage(content=system_content)]
@@ -157,68 +153,63 @@ def _assemble_lc_messages(state: dict) -> list:
 
 
 def _will_source_fallback(state: dict, result) -> bool:
-    """이 call_llm 결과 뒤에 원문 폴백(source_search→재호출)이 예정돼 있는가.
-
-    graph._route_after_llm의 폴백 조건과 일치해야 한다 — 비-종단 패스에선 스트리밍을 억제해
-    재호출로 인한 중복 출력을 막는다(issue 119 폴백 회귀).
-    """
+    """이 call_llm 결과 뒤에 원문 폴백(source_search→재호출)이 예정돼 있는가(비-종단 패스면 스트리밍 억제)."""
     return not result.context_sufficient and not state.get("source_text_tried", False)
 
 
 def _will_fallback_dict(state: dict, d: dict) -> bool:
-    """dict 기반 폴백 판정 — _will_source_fallback과 동일 조건(비-종단 패스면 스트리밍 억제)."""
+    """dict 기반 폴백 판정 — _will_source_fallback과 동일 조건."""
     return (not d.get("context_sufficient", True)) and not state.get("source_text_tried", False)
 
 
-def _oneshot_route(state: dict, schema) -> tuple:
-    """킬스위치(CHAT_STREAMING_ENABLED=False) 경로 — 현행 단일 호출·one-shot publish."""
+async def _aoneshot_route(state: dict, schema) -> tuple:
+    """킬스위치(CHAT_STREAMING_ENABLED=False) 경로 — 단일 호출·one-shot publish(async)."""
     sid = state["session_id"]
     lc_messages = _assemble_lc_messages(state)
-    result = llm_boundary.complete_structured(get_chat_provider(), lc_messages, schema)
+    result = await llm_boundary.acomplete_structured(get_chat_provider(), lc_messages, schema)
     if result.response and not _will_source_fallback(state, result):
-        publish_token(sid, result.response)
-        publish_done(sid)
+        await apublish_token(sid, result.response)
+        await apublish_done(sid)
     return result.model_dump(), (result.response or "")
 
 
-def _stream_and_route(state: dict, schema) -> tuple:
-    """구조화 출력을 스트리밍하며 response 델타를 publish(안전·종단일 때만)하고, 최종 dict와 응답을 반환.
+async def _astream_and_route(state: dict, schema) -> tuple:
+    """구조화 출력을 async 스트리밍하며 response 델타를 publish(안전·종단일 때만)하고 최종 dict·응답을 반환.
 
     제어필드(context_sufficient)가 보이면 1회 종단 판정 → 종단이면 델타를 흘리고, 폴백 패스면 억제
-    (issue 119 중복 출력 방지). 제어필드가 늦거나 부분 스트리밍이 없으면 끝에 one-shot으로 저하한다
-    (provider 호환 안전망 — 최악이 현행 동작, 후퇴·중복 없음).
+    (issue 119 중복 출력 방지). 제어필드가 늦거나 부분 스트리밍이 없으면 끝에 one-shot으로 저하한다.
     """
     from django.conf import settings
     if not getattr(settings, "CHAT_STREAMING_ENABLED", True):
-        return _oneshot_route(state, schema)
+        return await _aoneshot_route(state, schema)
 
     sid = state["session_id"]
     lc_messages = _assemble_lc_messages(state)
     published = 0
     streaming = None  # None=미결정, True=흘림, False=억제
     final: dict = {}
-    for chunk in llm_boundary.stream_structured(get_chat_provider(), lc_messages, schema):
-        final.update(chunk)  # 누적(부분 스트림이 delta든 accumulating이든 키 보존)
+    async for chunk in llm_boundary.astream_structured(get_chat_provider(), lc_messages, schema):
+        final.update(chunk)
         if streaming is None and "context_sufficient" in chunk:
             streaming = not _will_fallback_dict(state, chunk)
         if streaming:
             resp = chunk.get("response") or ""
             if len(resp) > published:
-                publish_token(sid, resp[published:])
+                await apublish_token(sid, resp[published:])
                 published = len(resp)
     response = final.get("response") or ""
     if streaming:
-        if published > 0:  # 흘린 게 있을 때만 done(빈 응답=needs_hitl 무-멘트는 현행대로 무발행)
-            publish_done(sid)
+        if published > 0:  # 흘린 게 있을 때만 done(빈 응답=needs_hitl 무-멘트는 무발행)
+            await apublish_done(sid)
     elif response and not _will_fallback_dict(state, final):
-        # 자동 저하: 안전 종단인데 못 흘림(제어필드 늦음/부분없음) → 현행 one-shot
-        publish_token(sid, response)
-        publish_done(sid)
+        # 자동 저하: 안전 종단인데 못 흘림(제어필드 늦음/부분없음) → one-shot
+        await apublish_token(sid, response)
+        await apublish_done(sid)
     return final, response
 
 
-def call_llm_structured(state: dict) -> dict:
-    final, response = _stream_and_route(state, HITLResponse)
+async def call_llm_structured(state: dict) -> dict:
+    final, response = await _astream_and_route(state, HITLResponse)
     return {
         "assistant_response": response,
         "needs_hitl": bool(final.get("needs_hitl", False)),
@@ -227,9 +218,9 @@ def call_llm_structured(state: dict) -> dict:
     }
 
 
-def call_llm_plain(state: dict) -> dict:
+async def call_llm_plain(state: dict) -> dict:
     """HITL-OFF 경로: needs_hitl 없는 response-only 출력. 전환 멘트 누수가 구조적으로 불가능."""
-    final, response = _stream_and_route(state, PlainResponse)
+    final, response = await _astream_and_route(state, PlainResponse)
     return {
         "assistant_response": response, "needs_hitl": False, "hitl_reason": "",
         "context_sufficient": bool(final.get("context_sufficient", True)),
@@ -237,22 +228,12 @@ def call_llm_plain(state: dict) -> dict:
 
 
 def _clear_transient() -> dict:
-    """종단 노드에서 턴 한정·휘발성 채널을 비운다(Checkpoint 슬림화).
-
-    rag_chunks(그래프 근거 + 원문 폴백 청크)·visitor_memories·operational_notice는 매 턴
-    새로 조립되는 임시 산출물이라 휴지 체크포인트에 남길 이유가 없다. 그래프 채널에 두면 어드민
-    Checkpoint 뷰어가 마지막 턴의 검색 원문까지 통째로 노출하며 스냅샷마다 누적된다(MEMORY 원칙).
-    messages(대화)만 보존한다.
-    """
+    """종단 노드에서 턴 한정·휘발성 채널을 비운다(Checkpoint 슬림화). messages(대화)만 보존."""
     return {"rag_chunks": [], "visitor_memories": [], "operational_notice": ""}
 
 
-def create_escalation_node(state: dict) -> dict:
-    """AI escalation 전이 — 상태 변경 + SessionEscalated 이벤트를 한 트랜잭션으로 기록한다(issue 151).
-
-    방문자 알림(hitl_start)·콘솔 델타·webhook은 더 이상 직접 publish하지 않고, 소비자
-    (visitor/console-bridge·webhook)가 이 이벤트에서 파생한다(단일 원천, dual-write 제거).
-    """
+def _create_escalation_sync(state: dict) -> dict:
+    """AI escalation 전이 — 상태 변경 + SessionEscalated 이벤트를 한 트랜잭션으로 기록(issue 151). DB(sync)."""
     from django.db import transaction
     from apps.chat.models import ChatSession, ChatMessage
     from apps.escalation.models import Escalation
@@ -264,7 +245,6 @@ def create_escalation_node(state: dict) -> dict:
         session = ChatSession.objects.get(id=state["session_id"])
         session.is_hitl = True
         session.save(update_fields=["is_hitl"])
-        # AI가 만든 전환 멘트가 있으면 사용자 대화에 남긴다(이미 SSE로 스트리밍됨).
         if response:
             ChatMessage.objects.create(
                 session=session, role=ChatMessage.ROLE_ASSISTANT, content=response
@@ -290,7 +270,11 @@ def create_escalation_node(state: dict) -> dict:
     return {"messages": messages, **_clear_transient()}
 
 
-def save_messages_node(state: dict) -> dict:
+async def create_escalation_node(state: dict) -> dict:
+    return await sync_to_async(_create_escalation_sync)(state)
+
+
+def _save_messages_sync(state: dict) -> dict:
     from apps.chat.models import ChatSession, ChatMessage
     from apps.memory.tasks import schedule_memory_extraction
 
@@ -316,3 +300,7 @@ def save_messages_node(state: dict) -> dict:
         ],
         **_clear_transient(),
     }
+
+
+async def save_messages_node(state: dict) -> dict:
+    return await sync_to_async(_save_messages_sync)(state)
