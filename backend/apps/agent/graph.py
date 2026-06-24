@@ -118,7 +118,12 @@ def _off_hours_notice(config) -> str:
     )
 
 
-def run_chat_agent(session, user_message: str) -> str:
+def _prepare_chat_state(session, user_message: str):
+    """config·provider·usage·memories·영업시간 게이팅으로 initial_state와 effective_hitl을 만든다(sync).
+
+    챗 그래프 노드가 쓸 LLM provider와 토큰 사용량 컨텍스트(ContextVar)도 여기서 설정한다.
+    run_chat_agent(sync)와 run_chat_agent_async(issue 192)가 공유한다.
+    """
     from django.utils import timezone
     from apps.tenants.models import TenantConfig
     from apps.tenants import business_hours
@@ -158,7 +163,11 @@ def run_chat_agent(session, user_message: str) -> str:
         "source_text_tried": False,
         "operational_notice": operational_notice,
     }
+    return initial_state, effective_hitl
 
+
+def run_chat_agent(session, user_message: str) -> str:
+    initial_state, effective_hitl = _prepare_chat_state(session, user_message)
     saver, conn = _create_checkpointer()
     try:
         graph = build_graph(checkpointer=saver, hitl_enabled=effective_hitl)
@@ -168,5 +177,39 @@ def run_chat_agent(session, user_message: str) -> str:
         )
     finally:
         conn.close()
+
+    return result["assistant_response"]
+
+
+async def _create_async_checkpointer():
+    """AsyncPostgresSaver — chat async 경로 체크포인트(issue 192). autocommit async 커넥션."""
+    import psycopg
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+    conninfo = _build_conninfo()
+    conn = await psycopg.AsyncConnection.connect(conninfo, autocommit=True)
+    saver = AsyncPostgresSaver(conn)
+    await saver.setup()
+    return saver, conn
+
+
+async def run_chat_agent_async(session, user_message: str) -> str:
+    """run_chat_agent의 async 대응(issue 192) — AsyncPostgresSaver + graph.ainvoke.
+
+    sync 준비(config·provider·memories)는 sync_to_async로, 그래프 실행은 async-native로.
+    호출 위치(taskiq/인라인) 무관한 순수 async deep module.
+    """
+    from asgiref.sync import sync_to_async
+
+    initial_state, effective_hitl = await sync_to_async(_prepare_chat_state)(session, user_message)
+    saver, conn = await _create_async_checkpointer()
+    try:
+        graph = build_graph(checkpointer=saver, hitl_enabled=effective_hitl)
+        result = await graph.ainvoke(
+            initial_state,
+            config={"configurable": {"thread_id": str(session.id)}},
+        )
+    finally:
+        await conn.close()
 
     return result["assistant_response"]
