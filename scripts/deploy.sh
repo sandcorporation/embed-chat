@@ -38,11 +38,19 @@ echo "▶ 인프라·이벤트 소비자 기동/갱신"
 $COMPOSE up -d --no-deps relay \
   worker-webhook worker-visitor-bridge worker-console-bridge worker-presence-bridge
 
-# nginx 설정은 bind mount라 파일 내용만 바뀌면 compose가 재생성하지 않는다(게다가 git 파일 교체로
-# 옛 inode를 물 수 있어 reload도 불확실). 매 배포마다 강제 재생성해 현재 nginx.oracle.conf를 다시
-# 읽게 한다 — nginx는 싱글톤이라 ~1s 블립(NPM의 proxy_next_upstream/재시도로 흡수).
-echo "▶ nginx 재생성(설정 반영)"
-$COMPOSE up -d --no-deps --force-recreate nginx
+# nginx 설정은 단일 파일 bind mount라 (1) compose는 파일 내용 변경으로 재생성하지 않고,
+# (2) git reset --hard가 파일을 inode째 교체해 실행 중 컨테이너는 옛 inode를 계속 본다(reload·
+# restart는 mount 유지라 stale, recreate만 현재 파일을 봄). 그래서 컨테이너가 서빙 중인 설정이
+# 현재 파일과 다를 때만 재생성한다 — 설정 안 바뀐 배포는 nginx를 안 건드려 무중단, 바뀐 배포에서만
+# ~1s 재생성(NPM 재시도로 흡수).
+echo "▶ nginx 설정 변경 확인"
+if ! $COMPOSE exec -T nginx cat /etc/nginx/nginx.conf 2>/dev/null \
+     | cmp -s - backend/nginx/nginx.oracle.conf; then
+  echo "  변경 감지 → nginx 재생성"
+  $COMPOSE up -d --no-deps --force-recreate nginx
+else
+  echo "  변경 없음 → 유지(무중단)"
+fi
 
 echo "▶ 무중단 롤링(start-first → /api/health 통과 → 옛 컨테이너 드레인)"
 for svc in api worker worker-chat; do
