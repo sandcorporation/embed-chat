@@ -165,12 +165,17 @@ describe('ConfigTab — LLM Provider', () => {
 })
 
 describe('ConfigTab — AI 모델', () => {
-  it('단일 "AI 모델" 선택을 model_id로 저장한다', async () => {
+  it('불러온 모델 중 하나를 골라 model_id로 저장한다', async () => {
+    // 모델 옵션은 provider에서 조회한 것만(하드코딩 제안 없음) → 불러온 뒤 선택한다.
+    vi.mocked(api.fetchProviderModels).mockResolvedValue(['gpt-4o', 'gpt-4o-mini'])
     renderConfig('ai')
-    await userEvent.selectOptions(await screen.findByLabelText('AI 모델'), 'openai/gpt-4o')
+    await screen.findByLabelText('LLM Provider 타입')   // config 로딩 완료 대기
+    await userEvent.click(screen.getByRole('button', { name: 'LLM 모델 불러오기' }))
+    await screen.findByRole('option', { name: 'gpt-4o' })
+    await userEvent.selectOptions(screen.getByLabelText('AI 모델'), 'gpt-4o')
     await save()
     await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ model_id: 'openai/gpt-4o' }),
+      expect.objectContaining({ model_id: 'gpt-4o' }),
     ))
   })
 })

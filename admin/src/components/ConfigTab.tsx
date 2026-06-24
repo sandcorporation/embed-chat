@@ -16,15 +16,13 @@ const WEEKDAYS: [string, string][] = [
   ['mon', '월'], ['tue', '화'], ['wed', '수'], ['thu', '목'], ['fri', '금'], ['sat', '토'], ['sun', '일'],
 ]
 
-function modelOptions(loaded: string[], current: string, extra: string[] = []): string[] {
-  return Array.from(new Set([...extra, ...loaded, current].filter(Boolean)))
+// 모델 드롭다운 후보 = provider에서 실제 조회한 모델 + 현재 저장값(중복 제거). 하드코딩 제안은
+// 두지 않는다 — provider-agnostic하게 섞이면(예: OpenAI인데 anthropic/* 노출) 혼란·오작동한다.
+// 목록에 없는 모델은 바로 아래 "직접 입력"으로 넣는다.
+function modelOptions(loaded: string[], current: string): string[] {
+  return Array.from(new Set([...loaded, current].filter(Boolean)))
 }
 
-const POPULAR_MODELS = [
-  'openrouter/owl-alpha', 'openai/gpt-4o', 'openai/gpt-4o-mini',
-  'anthropic/claude-3-5-sonnet', 'anthropic/claude-3-haiku',
-  'google/gemini-flash-1.5', 'meta-llama/llama-3.1-8b-instruct:free',
-]
 const WEBHOOK_TYPES = [
   { value: '', label: '없음' }, { value: 'slack', label: 'Slack' },
   { value: 'discord', label: 'Discord' }, { value: 'generic', label: 'Generic' },
@@ -268,7 +266,7 @@ export default function ConfigTab() {
             <div className="space-y-2">
               <Label>AI 모델</Label>
               <Select aria-label="AI 모델" value={config.model_id} onChange={e => setConfig(c => ({ ...c, model_id: e.target.value }))}>
-                {modelOptions(llmModels, config.model_id, POPULAR_MODELS).map(m => <option key={m} value={m}>{m}</option>)}
+                {modelOptions(llmModels, config.model_id).map(m => <option key={m} value={m}>{m}</option>)}
               </Select>
               <Input aria-label="AI 모델 직접 입력" className="text-xs" value={config.model_id}
                 onChange={e => setConfig(c => ({ ...c, model_id: e.target.value }))} placeholder="직접 입력(목록에 없는 모델)" />
