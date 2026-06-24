@@ -1,8 +1,8 @@
 # prod 이미지(arm64) 빌드 → GHCR push → oracle(A1) 무중단 배포 (ADR-0015).
 #
-# sub의 self-hosted 러너(x86)에서 QEMU buildx로 linux/arm64를 빌드해 oracle(Ampere A1)이
+# sub의 self-hosted 러너 3대(x86)에서 QEMU buildx로 linux/arm64를 빌드해 oracle(Ampere A1)이
 # pull만 하게 한다. 빌드 대상은 backend(api·worker·worker-chat·relay·bridge 공용), admin,
-# widget 3개. paddle은 Vision OCR 전환으로 prod에서 제거(ADR-0020), ollama·nginx·pg·redis·
+# widget 3개 — 매트릭스라 러너 3대에 1:1 분배돼 병렬로 빌드된다(러너가 적으면 자동 큐잉). paddle은 Vision OCR 전환으로 prod에서 제거(ADR-0020), ollama·nginx·pg·redis·
 # neo4j는 공식 멀티아치 이미지라 빌드 불필요.
 #
 # 인증: GITHUB_TOKEN(packages:write) — PAT 불필요. 태그: <git sha>(불변, 배포 핀) + latest(main).
@@ -18,6 +18,12 @@ on:
   push:
   workflow_dispatch:
 
+# main에 연속 push가 겹치면 진행 중이던 이전 빌드 run을 취소해 self-hosted 러너 3대를 즉시
+# 회수한다(어차피 최신 SHA만 배포). ref별 그룹이라 브랜치끼리는 독립적으로 병렬 빌드된다.
+concurrency:
+  group: build-images-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write
@@ -27,6 +33,9 @@ jobs:
     runs-on: [self-hosted, arm64-builder]
     strategy:
       fail-fast: false
+      # 러너 3대(arm64-builder)에 api·admin·widget 매트릭스가 1:1로 분배돼 병렬로 빌드된다.
+      # 러너가 더 적으면 자동으로 큐잉된다(이 값은 동시 실행 상한일 뿐).
+      max-parallel: 3
       matrix:
         include:
           - image: api
