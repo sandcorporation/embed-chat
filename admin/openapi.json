@@ -150,6 +150,24 @@
         "title": "ChunkOut",
         "type": "object"
       },
+      "DailyPoint": {
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "total_tokens"
+        ],
+        "title": "DailyPoint",
+        "type": "object"
+      },
       "DetailOut": {
         "properties": {
           "detail": {
@@ -478,6 +496,35 @@
           "content"
         ],
         "title": "MessageIn",
+        "type": "object"
+      },
+      "OperatorUsageOut": {
+        "properties": {
+          "by_tenant": {
+            "items": {
+              "$ref": "#/components/schemas/TenantRow"
+            },
+            "title": "By Tenant",
+            "type": "array"
+          },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/DailyPoint"
+            },
+            "title": "Daily",
+            "type": "array"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_tokens",
+          "by_tenant",
+          "daily"
+        ],
+        "title": "OperatorUsageOut",
         "type": "object"
       },
       "ProviderModelsIn": {
@@ -1167,6 +1214,63 @@
         "title": "TenantOut",
         "type": "object"
       },
+      "TenantRow": {
+        "properties": {
+          "request_count": {
+            "title": "Request Count",
+            "type": "integer"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "tenant_name": {
+            "title": "Tenant Name",
+            "type": "string"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "tenant_name",
+          "total_tokens",
+          "request_count"
+        ],
+        "title": "TenantRow",
+        "type": "object"
+      },
+      "TenantUsageOut": {
+        "properties": {
+          "by_call_type": {
+            "items": {
+              "$ref": "#/components/schemas/UsageBucket"
+            },
+            "title": "By Call Type",
+            "type": "array"
+          },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/DailyPoint"
+            },
+            "title": "Daily",
+            "type": "array"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_tokens",
+          "by_call_type",
+          "daily"
+        ],
+        "title": "TenantUsageOut",
+        "type": "object"
+      },
       "UrlsIn": {
         "properties": {
           "urls": {
@@ -1181,6 +1285,39 @@
           "urls"
         ],
         "title": "UrlsIn",
+        "type": "object"
+      },
+      "UsageBucket": {
+        "properties": {
+          "call_type": {
+            "title": "Call Type",
+            "type": "string"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "request_count": {
+            "title": "Request Count",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "call_type",
+          "input_tokens",
+          "output_tokens",
+          "total_tokens",
+          "request_count"
+        ],
+        "title": "UsageBucket",
         "type": "object"
       },
       "VisitorOut": {
@@ -1661,6 +1798,45 @@
         "summary": "Suspend Tenant",
         "tags": [
           "operator"
+        ]
+      }
+    },
+    "/api/operator/usage/": {
+      "get": {
+        "description": "전체 테넌트 토큰 사용량(테넌트별·일별).",
+        "operationId": "apps_usage_api_operator_usage",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorUsageOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "OperatorAuth": []
+          }
+        ],
+        "summary": "Operator Usage",
+        "tags": [
+          "usage"
         ]
       }
     },
@@ -3120,6 +3296,45 @@
         "summary": "Update Slug",
         "tags": [
           "tenant"
+        ]
+      }
+    },
+    "/api/tenant/usage/": {
+      "get": {
+        "description": "인증된 테넌트의 토큰 사용량(기간·call_type별·일별).",
+        "operationId": "apps_usage_api_tenant_usage",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantUsageOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "TenantAgentAuth": []
+          }
+        ],
+        "summary": "Tenant Usage",
+        "tags": [
+          "usage"
         ]
       }
     },

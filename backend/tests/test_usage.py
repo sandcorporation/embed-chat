@@ -77,3 +77,42 @@ def test_record_embedding_usage_from_response():
 
     record_embedding_usage({}, tid, "text-embedding-3-small")   # usage 없음 → 생략
     assert TokenUsage.objects.filter(tenant_id=tid, call_type="embedding").count() == 1
+
+
+@pytest.mark.django_db
+def test_tenant_usage_endpoint_returns_only_own(client, tenant_with_key, tenant_agent_token):
+    """테넌트 usage 엔드포인트는 자기 데이터만(다른 테넌트 0)."""
+    tenant, _ = tenant_with_key
+    other = uuid.uuid4()
+    record_usage(tenant.id, "chat", "gpt-4o-mini", input_tokens=10, output_tokens=5)
+    record_usage(tenant.id, "embedding", "text-embedding-3-small", input_tokens=7)
+    record_usage(other, "chat", "gpt-4o-mini", input_tokens=999)  # 다른 테넌트 — 보이면 안 됨
+
+    resp = client.get("/api/tenant/usage/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_tokens"] == 15 + 7
+    call_types = {b["call_type"] for b in data["by_call_type"]}
+    assert call_types == {"chat", "embedding"}
+
+
+@pytest.mark.django_db
+def test_operator_usage_endpoint_returns_all_tenants(client, tenant_with_key, operator_token):
+    """오퍼레이터 usage 엔드포인트는 전체 테넌트를 테넌트별로 집계."""
+    tenant, _ = tenant_with_key
+    other = uuid.uuid4()
+    record_usage(tenant.id, "chat", "m", input_tokens=10, output_tokens=5)
+    record_usage(other, "chat", "m", input_tokens=20, output_tokens=0)
+
+    resp = client.get("/api/operator/usage/", HTTP_AUTHORIZATION=f"Bearer {operator_token}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_tokens"] == 35
+    tids = {row["tenant_id"] for row in data["by_tenant"]}
+    assert str(tenant.id) in tids and str(other) in tids
+
+
+@pytest.mark.django_db
+def test_tenant_usage_requires_auth(client):
+    """인증 없으면 401."""
+    assert client.get("/api/tenant/usage/").status_code == 401
