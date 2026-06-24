@@ -8,7 +8,9 @@ import os
 from taskiq import InMemoryBroker
 
 if os.environ.get("TASKIQ_INMEMORY") == "1":
-    broker = InMemoryBroker()
+    # await_inplace=True: kiq가 task를 그 자리에서 await 완료한다(테스트 결정성 — dispatch가
+    # fire-and-forget이어도 enqueue 시점에 실행이 끝나 있음).
+    broker = InMemoryBroker(await_inplace=True)
 else:
     from taskiq_redis import ListQueueBroker
 

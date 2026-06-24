@@ -76,16 +76,17 @@ def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
 
 
 @chat_router.post("/message", response={202: dict, 404: dict, 429: dict})
-def send_message(request, body: MessageIn):
+async def send_message(request, body: MessageIn):
     from django.conf import settings
+    from asgiref.sync import sync_to_async
     from apps.chat.rate_limit import allow_message
 
     try:
-        session = ChatSession.objects.get(id=body.session_id, ended_at=None)
+        session = await ChatSession.objects.aget(id=body.session_id, ended_at=None)
     except ChatSession.DoesNotExist:
         return 404, {"detail": "Session not found"}
 
-    if not allow_message(
+    if not await sync_to_async(allow_message)(
         str(session.tenant_id),
         session.visitor_id,
         per_visitor=settings.CHAT_RATE_LIMIT_PER_VISITOR,
@@ -93,7 +94,7 @@ def send_message(request, body: MessageIn):
     ):
         return 429, {"detail": "Rate limit exceeded"}
 
-    ChatMessage.objects.create(
+    await ChatMessage.objects.acreate(
         session=session,
         role=ChatMessage.ROLE_USER,
         content=body.content,
@@ -101,9 +102,9 @@ def send_message(request, body: MessageIn):
 
     if session.is_hitl:
         from apps.chat.sse import publish_visitor_message
-        publish_visitor_message(str(session.tenant_id), str(session.id), body.content)
+        await sync_to_async(publish_visitor_message)(str(session.tenant_id), str(session.id), body.content)
     else:
-        from apps.chat.tasks import run_chat_agent_task
-        run_chat_agent_task.delay(str(session.id), body.content)
+        from apps.chat.chat_task import dispatch_chat
+        await dispatch_chat(str(session.id), body.content)  # taskiq 워커로 1턴 enqueue(issue 194/195)
 
     return 202, {"status": "processing"}

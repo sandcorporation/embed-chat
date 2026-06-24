@@ -181,35 +181,25 @@ def run_chat_agent(session, user_message: str) -> str:
     return result["assistant_response"]
 
 
-async def _create_async_checkpointer():
-    """AsyncPostgresSaver — chat async 경로 체크포인트(issue 192). autocommit async 커넥션."""
-    import psycopg
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-    conninfo = _build_conninfo()
-    conn = await psycopg.AsyncConnection.connect(conninfo, autocommit=True)
-    saver = AsyncPostgresSaver(conn)
-    await saver.setup()
-    return saver, conn
-
-
 async def run_chat_agent_async(session, user_message: str) -> str:
     """run_chat_agent의 async 대응(issue 192) — AsyncPostgresSaver + graph.ainvoke.
 
     sync 준비(config·provider·memories)는 sync_to_async로, 그래프 실행은 async-native로.
-    호출 위치(taskiq/인라인) 무관한 순수 async deep module.
+    체크포인터는 from_conn_string(async context manager)으로 커넥션을 확실히 정리한다 —
+    누수 시 테스트 teardown(flush)이 "DB accessed by other users"로 실패한다. 호출 위치
+    (taskiq/인라인) 무관한 순수 async deep module.
     """
     from asgiref.sync import sync_to_async
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
     initial_state, effective_hitl = await sync_to_async(_prepare_chat_state)(session, user_message)
-    saver, conn = await _create_async_checkpointer()
-    try:
+    conninfo = _build_conninfo()
+    async with AsyncPostgresSaver.from_conn_string(conninfo) as saver:
+        await saver.setup()
         graph = build_graph(checkpointer=saver, hitl_enabled=effective_hitl)
         result = await graph.ainvoke(
             initial_state,
             config={"configurable": {"thread_id": str(session.id)}},
         )
-    finally:
-        await conn.close()
 
     return result["assistant_response"]

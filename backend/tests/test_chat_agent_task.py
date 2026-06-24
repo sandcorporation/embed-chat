@@ -8,31 +8,8 @@ def _open_session(client, tenant, visitor_id):
     return open_stream(client, tenant, visitor_id)["X-Session-Id"]
 
 
-# ── Issue 81: 에이전트 실행을 Celery 태스크로 (gevent 스레드 제거) ──────────────
-
-@pytest.mark.django_db
-def test_send_message_runs_agent_via_task_and_saves_assistant(client, tenant_with_key):
-    """non-hitl 메시지를 보내면 에이전트가 태스크로 실행되어 assistant 응답이 저장된다.
-
-    Celery EAGER로 태스크가 뷰 응답 전에 인라인 실행되므로, POST가 끝난 직후
-    assistant ChatMessage가 결정적으로 존재한다 (daemon 스레드의 비결정성 제거).
-    """
-    from apps.chat.models import ChatSession, ChatMessage
-
-    tenant, raw_key = tenant_with_key
-    session_id = _open_session(client, tenant, "v-task-wiring")
-
-    resp = client.post(
-        "/api/chat/message",
-        {"session_id": session_id, "content": "안녕하세요"},
-        content_type="application/json",
-    )
-    assert resp.status_code == 202
-
-    session = ChatSession.objects.get(id=session_id)
-    assert ChatMessage.objects.filter(
-        session=session, role=ChatMessage.ROLE_ASSISTANT
-    ).exists(), "에이전트 태스크가 인라인 실행되어 assistant 메시지를 남겨야 한다"
+# ── Issue 81/195: send_message→에이전트 배선은 test_chat_message_async(taskiq async)가 검증한다 ──
+# (async send_message는 sync test client+django_db 롤백과 안 맞아 async client로 옮김)
 
 
 @pytest.mark.django_db
