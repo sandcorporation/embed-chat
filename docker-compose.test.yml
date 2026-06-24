@@ -121,7 +121,7 @@ services:
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py create_test_operator &&
-             gunicorn config.wsgi:application --worker-class=gevent --workers=4 --bind 0.0.0.0:8000"
+             uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 2"
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       DB_HOST: db-test
@@ -186,13 +186,13 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── E2E용 Celery Worker ───────────────────────────────────────────────────
-  # 기본 큐(배치)와 chat 전용 큐를 모두 소비한다(E2E는 격리가 아니라 정확성이 관심사).
+  # ── E2E용 Celery Worker(배치 전담) ────────────────────────────────────────
+  # chat은 taskiq(chat-worker-e2e)로 분리됐다 — 여기선 기본 큐(ingest/OCR/community 등)만 소비.
   worker-e2e:
     build:
       context: ./backend
-    command: celery -A config worker -Q celery,chat --loglevel=info
-    environment:
+    command: celery -A config worker --loglevel=info
+    environment: &worker-e2e-env
       DJANGO_SETTINGS_MODULE: config.settings.dev
       DB_HOST: db-test
       DB_NAME: embed_chat
@@ -205,6 +205,21 @@ services:
       OPEN_ROUTER_DEFAULT_MODEL: fake-llm
       OLLAMA_BASE_URL: http://ollama-test:11434
       PADDLE_OCR_URL: http://paddle-ocr-test:8080
+    volumes:
+      - media-e2e:/app/media
+    depends_on:
+      api-e2e:
+        condition: service_healthy
+      fake-llm:
+        condition: service_healthy
+
+  # ── E2E용 taskiq chat 워커 ────────────────────────────────────────────────
+  # send_message가 dispatch한 chat_task(taskiq redis 큐)를 실제로 실행한다 — 없으면 chat이 멈춘다.
+  chat-worker-e2e:
+    build:
+      context: ./backend
+    command: taskiq worker config.taskiq_worker:broker --workers 1 --max-async-tasks 10
+    environment: *worker-e2e-env
     volumes:
       - media-e2e:/app/media
     depends_on:

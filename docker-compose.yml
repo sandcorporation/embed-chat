@@ -27,7 +27,9 @@ services:
 
   api:
     build: ./backend
-    command: gunicorn config.wsgi:application --worker-class=gevent --workers=4 --bind 0.0.0.0:8000
+    # uvicorn ASGI(전면 async, ADR-0022) — async ninja view + async SSE generator를 네이티브로
+    # 서빙한다. gunicorn gevent 폐기(블로킹-허브 병 원천 제거).
+    command: uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4
     env_file: .env
     depends_on:
       db:
@@ -45,12 +47,12 @@ services:
       redis:
         condition: service_healthy
 
-  # 인터랙티브 chat 전용 워커 — 'chat' 큐만 소비해 무거운 배치(worker)에 굶지 않는다.
-  # prefork(프로세스 격리)로 gevent web 워커의 블로킹-허브 문제를 피하고, prefetch=1로
-  # 긴 태스크의 head-of-line 블로킹을 막는다. 처리량은 이 서비스의 replica로 확장한다.
+  # 인터랙티브 chat 전용 taskiq 워커(ADR-0024) — taskiq redis 큐에서 chat_task를 소비한다.
+  # 노드가 async라 한 이벤트루프가 동시 다수 chat을 IO 대기 중 yield하며 처리(--max-async-tasks).
+  # 무거운 배치(Celery worker)와 프로세스가 분리돼 chat이 굶지 않는다. 처리량은 replica로 확장.
   worker-chat:
     build: ./backend
-    command: celery -A config.celery worker -Q chat --concurrency=4 --prefetch-multiplier=1 --loglevel=info
+    command: taskiq worker config.taskiq_worker:broker --workers 2 --max-async-tasks 25
     env_file: .env
     depends_on:
       db:

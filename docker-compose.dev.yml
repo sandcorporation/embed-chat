@@ -11,7 +11,8 @@ services:
       - "6379:6379"
 
   api:
-    command: python manage.py runserver 0.0.0.0:8000
+    # uvicorn ASGI + --reload(코드 변경 핫리로드) — async view·SSE를 dev에서도 네이티브로.
+    command: uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ./backend:/app
     ports:
@@ -31,8 +32,9 @@ services:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       OLLAMA_BASE_URL: http://ollama:11434
 
+  # taskiq chat 워커(dev) — chat 코드 변경 시 컨테이너 재시작 필요(taskiq 핫리로드 미사용).
   worker-chat:
-    command: celery -A config.celery worker -Q chat --concurrency=2 --prefetch-multiplier=1 --loglevel=debug
+    command: taskiq worker config.taskiq_worker:broker --workers 1 --max-async-tasks 10 --log-level DEBUG
     volumes:
       - ./backend:/app
     environment:

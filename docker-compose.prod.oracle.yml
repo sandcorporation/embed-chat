@@ -53,7 +53,8 @@ services:
 
   api:
     <<: *backend
-    command: gunicorn config.wsgi:application --worker-class=gevent --workers=4 --bind 0.0.0.0:8000
+    # uvicorn ASGI(전면 async, ADR-0022). A1 메모리 제약상 워커 2(async라 워커당 동시 다수 SSE 처리).
+    command: uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 2
     volumes:
       - media:/app/media
     healthcheck:
@@ -83,10 +84,12 @@ services:
 
   worker-chat:
     <<: *backend
-    command: celery -A config.celery worker -Q chat --concurrency=4 --prefetch-multiplier=1 --loglevel=info
+    # taskiq chat 워커(ADR-0024). ListQueueBroker는 pop=소비라 재배달 없음(at-most-once,
+    # 비멱등 스트리밍 중복 응답 방지). async라 워커 2 × 동시 25면 충분.
+    command: taskiq worker config.taskiq_worker:broker --workers 2 --max-async-tasks 25
     volumes:
       - media:/app/media
-    # acks_late=False(중복 응답 방지) — 진행 중 응답을 마치고 종료하도록 충분히 드레인.
+    # 진행 중 응답(LLM ~30s)을 마치고 종료하도록 충분히 드레인(SIGTERM 후 신규 수신 중단·완료 대기).
     stop_grace_period: 60s
     deploy:
       resources:

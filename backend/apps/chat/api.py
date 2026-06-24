@@ -2,7 +2,6 @@ from typing import Any
 from ninja import Router, Schema
 from django.http import StreamingHttpResponse
 from apps.chat.models import ChatSession, ChatMessage
-from apps.chat.sse import sse_event_stream
 from apps.tenants.auth import tenant_key_auth
 
 chat_router = Router(tags=["chat"])
