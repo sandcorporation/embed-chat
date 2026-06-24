@@ -186,12 +186,3 @@ async def run_chat_agent_async(session, user_message: str) -> str:
         )
 
     return result["assistant_response"]
-
-
-def run_chat_agent(session, user_message: str) -> str:
-    """sync 호출부 호환 래퍼(노드 async화 — issue 195). asyncio.run으로 async 그래프를 돌린다.
-    production chat 경로는 run_chat_agent_async를 직접 await한다(taskiq) — 이 래퍼는 sync
-    컨텍스트(관리 명령·일부 테스트)용."""
-    import asyncio
-
-    return asyncio.run(run_chat_agent_async(session, user_message))
