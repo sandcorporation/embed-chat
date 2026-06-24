@@ -26,6 +26,8 @@ Embed Chat는 타사 웹사이트에 iframe으로 삽입하는 챗봇을 제공�
 
 > **저장소 역할 분담**: **PostgreSQL이 관계형 데이터 + LangGraph 대화 체크포인트 + RAG 지식그래프·임베딩(pgvector)** 을 모두 담당합니다. GraphRAG의 엔티티/관계 모델은 그대로이며 저장 엔진만 Neo4j→pgvector로 이전했습니다([ADR-0021](./docs/adr/0021-graphstore-pgvector-replaces-neo4j.md)) — 단일 DB로 통합해 박스 부담을 줄이고 관리형 Postgres 이식을 단순화. (GraphRAG 채택 자체는 [ADR-0007](./docs/adr/0007-graphrag-neo4j-replaces-2step-vector-rag.md).)
 
+> 📐 **전체 아키텍처 다이어그램**(런타임 토폴로지 · 챗 요청 흐름 · 인제스션·RAG · 배포 CI/CD)은 [docs/architecture.md](./docs/architecture.md)에 mermaid로 정리되어 있습니다.
+
 ---
 
 ## 2. 지식그래프 기반 RAG 원리
