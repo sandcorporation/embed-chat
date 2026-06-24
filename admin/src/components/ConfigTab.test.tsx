@@ -378,3 +378,10 @@ describe('ConfigTab — Tenant Slug', () => {
     await waitFor(() => expect(api.updateTenantSlug).toHaveBeenCalledWith('abc-shop'))
   })
 })
+
+describe('ConfigTab — 공개 URL(slug) 한글 안내 (issue 189)', () => {
+  it('slug 입력 힌트에 한글 가능 안내가 보인다', async () => {
+    renderConfig('security')
+    expect(await screen.findByText(/한글·영문·숫자·하이픈을 쓸 수 있어요/)).toBeInTheDocument()
+  })
+})

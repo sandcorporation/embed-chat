@@ -480,11 +480,11 @@ export default function ConfigTab() {
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">/chatbot/</span>
               <Input aria-label="Tenant Slug" className="w-64" value={slug} onChange={e => setSlug(e.target.value)}
-                placeholder="abc-shop (소문자·숫자·하이픈)" />
+                placeholder="우리가게 · abc-shop" />
               <span className="text-sm text-muted-foreground">/</span>
               <Button size="sm" variant="outline" onClick={handleSaveSlug}>{slugSaved ? '✓ 저장됨' : 'Slug 저장'}</Button>
             </div>
-            <p className={hint}>손님이 접속하는 공개 챗봇 주소의 일부예요. 변경하면 사이트에 박아둔 기존 임베드 URL이 끊깁니다.</p>
+            <p className={hint}>손님이 접속하는 공개 챗봇 주소의 일부예요. 한글·영문·숫자·하이픈을 쓸 수 있어요(예: 우리가게). 변경하면 사이트에 박아둔 기존 임베드 URL이 끊깁니다.</p>
           </div>
           <div>
             <label className="flex cursor-pointer items-center gap-2 text-sm">
