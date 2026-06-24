@@ -385,3 +385,32 @@ describe('ConfigTab — 공개 URL(slug) 한글 안내 (issue 189)', () => {
     expect(await screen.findByText(/한글·영문·숫자·하이픈을 쓸 수 있어요/)).toBeInTheDocument()
   })
 })
+
+describe('ConfigTab — 공개 URL(slug) 복원·복사', () => {
+  it('config의 slug가 입력 필드에 복원된다(새로고침)', async () => {
+    mockConfig({ slug: '우리가게' })
+    renderConfig('security')
+    expect(await screen.findByLabelText('Tenant Slug')).toHaveValue('우리가게')
+  })
+
+  it('URL·임베드 코드 복사 버튼이 clipboard에 쓴다', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    mockConfig({ slug: 'myshop' })
+    renderConfig('security')
+    await screen.findByLabelText('Tenant Slug')
+
+    await userEvent.click(screen.getByRole('button', { name: /URL 복사/ }))
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/chatbot/myshop/'))
+
+    await userEvent.click(screen.getByRole('button', { name: /임베드 코드 복사/ }))
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('<iframe'))
+  })
+
+  it('slug가 없으면 복사 버튼이 보이지 않는다', async () => {
+    mockConfig({ slug: '' })
+    renderConfig('security')
+    await screen.findByLabelText('Tenant Slug')
+    expect(screen.queryByRole('button', { name: /URL 복사/ })).toBeNull()
+  })
+})

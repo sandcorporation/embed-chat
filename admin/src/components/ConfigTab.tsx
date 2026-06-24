@@ -52,6 +52,7 @@ export default function ConfigTab() {
   const [resetConfirm, setResetConfirm] = useState(false)
   const [slug, setSlug] = useState('')
   const [slugSaved, setSlugSaved] = useState(false)
+  const [copied, setCopied] = useState<'' | 'url' | 'iframe'>('')
   const [llmModels, setLlmModels] = useState<string[]>([])
   const [embedModels, setEmbedModels] = useState<string[]>([])
   const [ocrModels, setOcrModels] = useState<string[]>([])
@@ -116,8 +117,23 @@ export default function ConfigTab() {
     } catch (e) { alert(e instanceof Error ? e.message : String(e)) }
   }
 
+  // 공개 챗봇 URL·임베드 코드(현재 slug 기준). 복사 버튼용.
+  const publicUrl = slug ? `${window.location.origin}/chatbot/${slug}/` : ''
+  const iframeCode = `<iframe src="${publicUrl}" width="400" height="600" style="border:none;"></iframe>`
+  const copyToClipboard = async (text: string, which: 'url' | 'iframe') => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(which)
+      setTimeout(() => setCopied(''), 2000)
+    } catch { /* clipboard 거부 시 무시 */ }
+  }
+
   useEffect(() => {
-    getTenantConfig().then(data => { setConfig(data); setLoading(false) })
+    getTenantConfig().then(data => {
+      setConfig(data)
+      setSlug(data.slug || '')   // 새로고침 시 저장된 slug를 입력에 복원
+      setLoading(false)
+    })
   }, [])
 
   const handleSave = async () => {
@@ -485,6 +501,20 @@ export default function ConfigTab() {
               <Button size="sm" variant="outline" onClick={handleSaveSlug}>{slugSaved ? '✓ 저장됨' : 'Slug 저장'}</Button>
             </div>
             <p className={hint}>손님이 접속하는 공개 챗봇 주소의 일부예요. 한글·영문·숫자·하이픈을 쓸 수 있어요(예: 우리가게). 변경하면 사이트에 박아둔 기존 임베드 URL이 끊깁니다.</p>
+            {slug && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-xs">{publicUrl}</code>
+                  <Button size="sm" variant="outline" type="button" onClick={() => copyToClipboard(publicUrl, 'url')}>
+                    {copied === 'url' ? '✓ 복사됨' : 'URL 복사'}
+                  </Button>
+                  <Button size="sm" variant="outline" type="button" onClick={() => copyToClipboard(iframeCode, 'iframe')}>
+                    {copied === 'iframe' ? '✓ 복사됨' : '임베드 코드 복사'}
+                  </Button>
+                </div>
+                <p className={hint}>저장된 slug 기준입니다. 변경 후엔 먼저 Slug를 저장하세요.</p>
+              </div>
+            )}
           </div>
           <div>
             <label className="flex cursor-pointer items-center gap-2 text-sm">

@@ -1087,6 +1087,11 @@
             "title": "Require Identity Verification",
             "type": "boolean"
           },
+          "slug": {
+            "default": "",
+            "title": "Slug",
+            "type": "string"
+          },
           "system_prompt": {
             "title": "System Prompt",
             "type": "string"

@@ -221,3 +221,22 @@ def test_nfd_slug_saved_as_nfc(client, tenant_with_key, tenant_agent_token):
     tenant.refresh_from_db()
     assert tenant.slug == unicodedata.normalize("NFC", "강남점")
     assert Tenant.resolve_slug("강남점").id == tenant.id
+
+
+@pytest.mark.django_db
+def test_get_config_includes_slug(client, tenant_with_key, tenant_agent_token):
+    """config 조회 응답에 현재 slug가 포함된다(새로고침 시 입력 복원용)."""
+    tenant, _ = tenant_with_key
+    client.patch("/api/tenant/slug/", {"slug": "우리가게"}, content_type="application/json",
+                 HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}")
+    resp = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}")
+    assert resp.status_code == 200
+    assert resp.json()["slug"] == "우리가게"
+
+
+@pytest.mark.django_db
+def test_get_config_slug_empty_when_unset(client, tenant_with_key, tenant_agent_token):
+    """slug 미설정이면 빈 문자열(None 아님)."""
+    resp = client.get("/api/tenant/config/", HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}")
+    assert resp.status_code == 200
+    assert resp.json()["slug"] == ""
