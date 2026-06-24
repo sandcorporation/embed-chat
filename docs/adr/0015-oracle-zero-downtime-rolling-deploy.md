@@ -3,6 +3,15 @@
 ## Status
 Proposed (grill 진행 중 — 일부 항목 미해결, 아래 "미해결" 참조. 구현은 후속)
 
+## 갱신 (2026-06 — ADR-0022/0024, 전면 async 개편)
+런타임이 전면 async로 바뀌었다: 웹 **gunicorn gevent → uvicorn ASGI**, chat 실행 **Celery
+worker-chat → taskiq 워커**(배치는 Celery prefork 유지·공존). 아래 본문의 **롤아웃 메커니즘**
+(docker rollout·expand/contract·GHCR arm64·동적 resolver·정적 SPA 스왑)과 **서비스명**
+(api·worker·worker-chat)은 그대로 유효하다. 단 chat 실행 세부 — "worker-chat=Celery·
+`acks_late=False`"(Q4 등) — 는 taskiq `ListQueueBroker`(pop=소비, 재배달 없는 at-most-once)로
+대체됐다. 운영 절차의 최신 소스는 [deployment.md](../deployment.md)(특히 "최초 async 컷오버"),
+결정 근거는 [ADR-0022](0022-full-async-uvicorn-taskiq.md)·[ADR-0024](0024-taskiq-chat-celery-batch-coexist.md).
+
 ## Context
 실서버를 **oracle**(Ampere A1, **arm64**, 4core/24GB, **CPU 전용**, SSH 배포 대상)로 옮긴다. 빌드/CI는 **sub**(Intel i7-8700, x86_64, 32GB RAM, Jenkins DinD `/server/jenkins`, 공개 URL `https://jenkins.honeycombpizza.link`)에서 돈다. 최우선 요구는 **새 배포 시 다운타임 0**(rolling).
 
