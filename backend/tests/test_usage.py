@@ -116,3 +116,27 @@ def test_operator_usage_endpoint_returns_all_tenants(client, tenant_with_key, op
 def test_tenant_usage_requires_auth(client):
     """인증 없으면 401."""
     assert client.get("/api/tenant/usage/").status_code == 401
+
+
+def test_langfuse_handler_none_without_env(monkeypatch):
+    """LANGFUSE_* env 미설정이면 핸들러는 None(dev/test no-op)."""
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    from apps.usage.langfuse_client import get_langfuse_handler, langfuse_enabled
+    get_langfuse_handler.cache_clear()
+    assert langfuse_enabled() is False
+    assert get_langfuse_handler() is None
+
+
+@pytest.mark.django_db
+def test_usage_config_has_metadata_and_callback():
+    """_usage_config은 UsageContext를 메타데이터로 싣고 우리 DB 콜백을 부착한다(Langfuse 없어도)."""
+    from apps.agent.llm import _usage_config, _USAGE_CB
+    from apps.usage.context import set_usage_context
+
+    tid = uuid.uuid4()
+    set_usage_context(tid, "chat", session_id="s1")
+    cfg = _usage_config()
+    assert _USAGE_CB in cfg["callbacks"]
+    assert cfg["metadata"]["tenant_id"] == str(tid)
+    assert cfg["metadata"]["call_type"] == "chat"

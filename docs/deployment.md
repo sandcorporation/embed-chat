@@ -128,6 +128,20 @@ echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
 - **첫 배포 `migrate` 실패**: `.env`의 `DJANGO_SETTINGS_MODULE`·DB 변수 확인. db 컨테이너 healthy 대기 후 migrate(deploy.sh가 처리).
 - **이벤트 파이프라인 정지**: relay·bridge는 events 마이그레이션 미적용 시 크래시 — migrate가 모든 마이그레이션을 적용하므로 배포에 포함됨.
 
+## Langfuse 토큰/트레이스 관찰 (선택)
+
+테넌트별 토큰 추적은 앱 자체(우리 DB + `/usage` 화면)로 동작하며 Langfuse 없이도 무방하다.
+오퍼레이터 디버깅(실제 프롬프트·RAG 근거·응답 트레이스)을 원하면 Langfuse v3를 A1에 셀프호스트한다:
+
+```bash
+# langfuse.env(시크릿: PG/Clickhouse/MinIO 비번·NEXTAUTH_SECRET·SALT·ENCRYPTION_KEY 64hex) 작성 후
+docker compose -f docker-compose.langfuse.yml --env-file langfuse.env up -d
+# Langfuse UI(NPM 별도 호스트, 오퍼레이터 전용)에서 프로젝트 API 키 발급 →
+# /opt/embed-chat/.env 에 LANGFUSE_HOST·PUBLIC_KEY·SECRET_KEY 입력 후 재배포
+```
+- env 미설정이면 앱은 **완전 no-op**(코드는 가드형). `LANGFUSE_CAPTURE_CONTENT=false`로 본문 마스킹.
+- 전용 데이터스토어(postgres·redis·clickhouse·minio)라 운영 pg/redis와 분리. Clickhouse가 메모리를 쓰므로 A1 여유 확인.
+
 ## 관련 문서
 - [ADR-0015](./adr/0015-oracle-zero-downtime-rolling-deploy.md) — 무중단 롤링 설계·기각안
 - [ADR-0012](./adr/0012-per-tenant-llm-embedding-providers.md) — per-Tenant Provider(플랫폼 기본 off)

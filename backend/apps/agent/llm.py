@@ -9,12 +9,27 @@ from pydantic import BaseModel
 
 from apps.agent.providers import build_llm_client, PROVIDER_ANTHROPIC
 from apps.usage.instrument import UsageRecordingCallback
-from apps.usage.context import override_call_type
+from apps.usage.context import override_call_type, get_usage_context
+from apps.usage.langfuse_client import get_langfuse_handler
 
 T = TypeVar("T", bound=BaseModel)
 
-# 모든 LLM 호출에 토큰 사용량 콜백을 부착한다(UsageContext로 tenant·call_type 귀속). 스테이트리스라 공유.
-_USAGE_CONFIG = {"callbacks": [UsageRecordingCallback()]}
+# 우리 DB 적재용 토큰 콜백(스테이트리스 공유). Langfuse 핸들러는 설정 시에만 추가된다.
+_USAGE_CB = UsageRecordingCallback()
+
+
+def _usage_config() -> dict:
+    """LLM 호출 config — UsageContext의 tenant·call_type을 메타데이터로, 콜백을 부착한다.
+    Langfuse가 설정됐으면 그 CallbackHandler도 추가(트레이스·본문), 아니면 우리 DB 콜백만(no-op)."""
+    callbacks = [_USAGE_CB]
+    lf = get_langfuse_handler()
+    if lf is not None:
+        callbacks.append(lf)
+    ctx = get_usage_context()
+    metadata = {}
+    if ctx and ctx.tenant_id:
+        metadata = {"tenant_id": ctx.tenant_id, "call_type": ctx.call_type, "session_id": ctx.session_id}
+    return {"callbacks": callbacks, "metadata": metadata}
 
 
 def _mark_cache_breakpoint(provider, messages):
@@ -47,13 +62,13 @@ def _mark_cache_breakpoint(provider, messages):
 def complete_structured(provider, messages, schema: type[T]) -> T:
     """구조화 출력을 반환한다 (schema 인스턴스). 제네릭이라 호출부가 schema의 필드에 타입 안전하게 접근한다."""
     messages = _mark_cache_breakpoint(provider, messages)
-    result = build_llm_client(provider).with_structured_output(schema).invoke(messages, config=_USAGE_CONFIG)
+    result = build_llm_client(provider).with_structured_output(schema).invoke(messages, config=_usage_config())
     return cast(T, result)
 
 
 def complete_text(provider, messages) -> str:
     """LLM 응답 본문(문자열)을 반환한다."""
-    return cast(str, build_llm_client(provider).invoke(messages, config=_USAGE_CONFIG).content)
+    return cast(str, build_llm_client(provider).invoke(messages, config=_usage_config()).content)
 
 
 def stream_structured(provider, messages, schema):
@@ -65,7 +80,7 @@ def stream_structured(provider, messages, schema):
     """
     messages = _mark_cache_breakpoint(provider, messages)
     client = build_llm_client(provider).with_structured_output(schema)
-    for chunk in client.stream(messages, config=_USAGE_CONFIG):
+    for chunk in client.stream(messages, config=_usage_config()):
         if isinstance(chunk, dict):
             yield chunk
         elif hasattr(chunk, "model_dump"):
@@ -98,5 +113,5 @@ def transcribe_image(provider, image_bytes: bytes, mime_type: str = "image/png")
         {"type": "image", "source_type": "base64", "data": b64, "mime_type": mime_type},
     ])
     with override_call_type("ocr"):
-        result = build_llm_client(provider).bind(temperature=0).invoke([message], config=_USAGE_CONFIG)
+        result = build_llm_client(provider).bind(temperature=0).invoke([message], config=_usage_config())
     return cast(str, result.content)

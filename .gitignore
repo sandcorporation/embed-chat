@@ -12,4 +12,4 @@ staticfiles/
 media/
 node_modules/
 .cache/
-*.pdf
+*.pdflangfuse.env
