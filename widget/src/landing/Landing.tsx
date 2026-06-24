@@ -1,5 +1,6 @@
 import ChatDemo from './ChatDemo'
 import KGDemo from './KGDemo'
+import SiteFooter from './SiteFooter'
 
 const FEATURES = [
   { title: '지식그래프 기반 RAG', desc: '문서를 Entity·관계 그래프로 구조화해 더 정확한 근거로 답합니다.' },
@@ -60,7 +61,7 @@ export default function Landing() {
         </div>
       </section>
 
-      <footer className="footer">© Embed Chat</footer>
+      <SiteFooter />
     </div>
   )
 }
