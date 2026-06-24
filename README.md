@@ -127,7 +127,7 @@ START → local_search → call_llm ─(context_sufficient=False)─→ source_s
 
 옛 EmbedToken(per-session 서명 토큰) 방식은 폐지되고, **공개 `/chatbot/{slug}/` URL**로 대체됐습니다([ADR-0011](./docs/adr/0011-public-slug-url-replaces-embed-token.md)). Tenant는 발급 단계 없이 iframe만 박으면 됩니다.
 
-- **Tenant Slug**: 표시명과 분리된 고유·URL-safe 공개 식별자. Tenant가 어드민에서 설정.
+- **Tenant Slug**: 표시명과 분리된 고유·URL-safe 공개 식별자. Tenant가 어드민에서 설정. **완성형 한글**(예: `/chatbot/우리가게/`)·영문(대소문자)·숫자·하이픈 허용. NFC 정규화 + 대소문자 무시로 조회·중복을 처리합니다(`MyStore`↔`mystore`).
 - **Visitor 신원 — 계층형**:
   - *익명*: 위젯이 생성·localStorage에 저장하는 **Anonymous Visitor ID**(세션 넘어 지속).
   - *식별 기본*: `?visitor_id=` 평문(마찰 0).
