@@ -20,13 +20,16 @@ flowchart TB
     nginx["nginx<br/>리버스 프록시 + 정적 SPA"]
 
     subgraph web["웹 / 실시간"]
-      api["api<br/>gunicorn gevent · ninja API + SSE"]
+      api["api<br/>uvicorn ASGI · ninja API + async SSE"]
       relay["relay<br/>outbox → EventBus 드레인 (싱글톤)"]
     end
 
-    subgraph cworkers["Celery 워커"]
+    subgraph cworkers["Celery 워커 (배치)"]
       worker["worker<br/>기본 큐 · 인제스션·추출"]
-      workerchat["worker-chat<br/>-Q chat · LangGraph 1턴"]
+    end
+
+    subgraph tworkers["taskiq 워커 (chat)"]
+      workerchat["worker-chat<br/>async LangGraph 1턴"]
     end
 
     subgraph consumers["EventBus 소비자 (consume_events)"]
@@ -60,8 +63,8 @@ flowchart TB
   nginx -. 미디어 .-> media
 
   api -->|enqueue| redis
-  redis -->|chat 큐| workerchat
-  redis -->|기본 큐| worker
+  redis -->|taskiq chat 큐| workerchat
+  redis -->|Celery 기본 큐| worker
   workerchat -->|토큰 publish| redis
   redis -->|pub/sub| api
 
@@ -84,23 +87,23 @@ flowchart TB
 
 ## 2. 챗 요청 흐름 (시퀀스)
 
-방문자 메시지가 SSE로 스트리밍 응답되기까지. chat 1턴은 web 워커가 아니라 전용 `worker-chat`에서
-실행되어 블로킹이 SSE 서빙을 얼리지 않는다.
+방문자 메시지가 SSE로 스트리밍 응답되기까지. chat 1턴은 api 프로세스가 아니라 전용 taskiq
+`worker-chat`에서 async로 실행되어 블로킹이 SSE 서빙을 얼리지 않는다.
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant V as Visitor 위젯
   participant N as nginx
-  participant A as api (gevent SSE)
+  participant A as api (uvicorn async SSE)
   participant R as redis
-  participant WC as worker-chat (LangGraph)
+  participant WC as worker-chat (taskiq · async LangGraph)
   participant DB as Postgres (GraphStore)
   participant L as per-tenant LLM
 
   V->>N: POST /api/chat (메시지)
   N->>A: 프록시
-  A->>R: chat 작업 enqueue (chat 큐)
+  A->>R: chat 작업 enqueue (taskiq 큐)
   A-->>V: SSE 연결 (redis pub/sub 구독)
   R->>WC: chat 작업 디큐
   WC->>DB: GraphRAG 검색 (pgvector + 엔티티/관계)
@@ -128,8 +131,8 @@ flowchart LR
   ocr --> chunk
   chunk --> extract["엔티티·관계 추출<br/>LLM"]
   chunk --> embed["임베딩<br/>per-tenant embed provider"]
-  extract --> graph[("GraphStore<br/>Postgres pgvector<br/>엔티티·관계·청크")]
-  embed --> graph
+  extract --> GRAPH[("GraphStore<br/>Postgres pgvector<br/>엔티티·관계·청크")]
+  embed --> GRAPH
 ```
 
 ## 4. 배포 파이프라인 (CI/CD)
