@@ -20,6 +20,11 @@ describe('Landing (공개 랜딩)', () => {
     expect(screen.getByRole('link', { name: '운영자 로그인' })).toHaveAttribute('href', '/admin-ui/')
   })
 
+  it('테넌트 로그인 CTA가 /admin-ui/tenant를 가리킨다', () => {
+    render(<Landing />)
+    expect(screen.getByRole('link', { name: '테넌트 로그인' })).toHaveAttribute('href', '/admin-ui/tenant')
+  })
+
   it('Contact에 mailto·tel 링크가 있다', () => {
     render(<Landing />)
     expect(screen.getByRole('link', { name: 'gksdjf1690@gmail.com' }))

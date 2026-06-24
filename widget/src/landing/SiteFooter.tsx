@@ -4,12 +4,18 @@ import { BUSINESS } from './business'
 export default function SiteFooter() {
   return (
     <footer className="footer">
-      <div className="container">
-        <nav className="footer-links">
-          <a href="/">홈</a>
-          <a href="/terms">이용약관</a>
-          <a href="/privacy">개인정보처리방침</a>
-        </nav>
+      <div className="container footer-inner">
+        <div className="footer-top">
+          <div className="footer-brand">
+            <div className="footer-logo">Embed Chat</div>
+            <p className="footer-tagline">지식그래프 기반 AI 챗봇 플랫폼</p>
+          </div>
+          <nav className="footer-links">
+            <a href="/">홈</a>
+            <a href="/terms">이용약관</a>
+            <a href="/privacy">개인정보처리방침</a>
+          </nav>
+        </div>
         <div className="footer-biz">
           <span><b>{BUSINESS.name}</b></span>
           <span>대표 {BUSINESS.ceo}</span>
