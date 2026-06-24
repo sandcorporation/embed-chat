@@ -19,6 +19,7 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.escalation",
     "apps.events",
+    "apps.usage",
 ]
 
 MIDDLEWARE = [
