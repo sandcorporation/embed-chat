@@ -2,9 +2,11 @@ import { useMemo } from 'react'
 import ChatWidget from './components/ChatWidget'
 
 // /chatbot/{slug}/ 경로에서 Tenant Slug를 추출한다 (EmbedToken 폐지, issue 85).
-function resolveSlug(): string {
+// 한글 slug(issue 187): percent-encoded path를 디코딩하고 NFC로 정규화한다 — 브라우저/OS가
+// NFD(자모분리)로 줄 수 있어, 백엔드의 NFC 저장·iexact 조회와 일치시키려면 NFC가 필수.
+export function resolveSlug(): string {
   const m = window.location.pathname.match(/\/chatbot\/([^/?#]+)/)
-  return m ? decodeURIComponent(m[1]) : ''
+  return m ? decodeURIComponent(m[1]).normalize('NFC') : ''
 }
 
 // Visitor 식별: ?visitor_id= 명시값 우선, 없으면 위젯이 생성·localStorage에 지속하는
