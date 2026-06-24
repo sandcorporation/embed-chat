@@ -30,34 +30,37 @@ def issue_identity_hash(request, body: IdentityIn):
 
 
 @chat_router.get("/stream")
-def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
+async def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
+    from asgiref.sync import sync_to_async
     from apps.tenants.models import Tenant
+    from apps.chat.sse import asse_event_stream
 
-    tenant = Tenant.resolve_slug(slug)
+    tenant = await sync_to_async(Tenant.resolve_slug)(slug)
     if not tenant:
         return StreamingHttpResponse(status=404)
     if not visitor_id:
         return StreamingHttpResponse(status=400)
 
     # 신원검증 토글이 켜진 Tenant는 유효한 HMAC 해시가 있어야 visitor_id 위조를 막는다.
-    config = getattr(tenant, "config", None)
+    config = await sync_to_async(lambda: getattr(tenant, "config", None))()
     if config and config.require_identity_verification:
         from apps.chat.identity import verify_identity
         if not verify_identity(str(tenant.id), visitor_id, hash):
             return StreamingHttpResponse(status=401)
 
-    session, _ = ChatSession.objects.get_or_create(
+    session, _ = await ChatSession.objects.aget_or_create(
         tenant_id=tenant.id,
         visitor_id=visitor_id,
         ended_at=None,
     )
 
-    config = getattr(tenant, "config", None)
-    existing_messages = ChatMessage.objects.filter(session=session).order_by("created_at")
+    existing = await sync_to_async(
+        lambda: [{"role": m.role, "content": m.content}
+                 for m in ChatMessage.objects.filter(session=session).order_by("created_at")]
+    )()
     stream_kwargs: dict[str, Any]
-    if existing_messages.exists():
-        history = [{"role": m.role, "content": m.content} for m in existing_messages]
-        stream_kwargs = {"history": history, "is_hitl": session.is_hitl}
+    if existing:
+        stream_kwargs = {"history": existing, "is_hitl": session.is_hitl}
     else:
         stream_kwargs = {"welcome_message": config.welcome_message if config else ""}
     if config and config.brand_name:
@@ -66,7 +69,7 @@ def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
     stream_kwargs["tenant_id"] = str(tenant.id)
 
     response = StreamingHttpResponse(
-        sse_event_stream(str(session.id), **stream_kwargs),  # pyright: ignore[reportArgumentType]
+        asse_event_stream(str(session.id), **stream_kwargs),  # pyright: ignore[reportArgumentType]
         content_type="text/event-stream",
     )
     response["Cache-Control"] = "no-cache"

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Any
 
@@ -181,3 +182,57 @@ def sse_event_stream(session_id: str, welcome_message: str = "", history=None, i
             # 늦게 닫혀도 새 연결이 살아있으면 콘솔을 유휴로 뒤집지 않는다.
             if presence.unregister_connection(tenant_id, session_id, conn_id):
                 publish_presence(VISITOR_DISCONNECTED, tenant_id, session_id)
+
+
+async def asse_event_stream(session_id: str, welcome_message: str = "", history=None, is_hitl: bool = False, brand_name: str = "", tenant_id: str = ""):
+    """ASGI용 async SSE generator (issue 195) — sse_event_stream의 async 대응.
+
+    pubsub은 async redis, presence·publish_presence(sync)는 sync_to_async로. uvicorn 이벤트루프를
+    막지 않고 토큰을 흘린다. 클라이언트 disconnect는 GeneratorExit/CancelledError로 정리된다.
+    """
+    import uuid
+    from asgiref.sync import sync_to_async
+    from apps.chat import presence
+
+    r = get_async_redis_client()
+    pubsub = r.pubsub()
+    await pubsub.subscribe(f"session:{session_id}")
+    conn_id = uuid.uuid4().hex
+    if tenant_id:
+        from apps.events.signals import publish_presence
+        from apps.events.types import VISITOR_CONNECTED
+        if await sync_to_async(presence.register_connection)(tenant_id, session_id, conn_id):
+            await sync_to_async(publish_presence)(VISITOR_CONNECTED, tenant_id, session_id)
+
+    connected_payload: dict[str, Any] = {"session_id": session_id}
+    if brand_name:
+        connected_payload["brand_name"] = brand_name
+    if history is not None:
+        connected_payload["history"] = history
+        if is_hitl:
+            connected_payload["is_hitl"] = True
+    elif welcome_message:
+        connected_payload["welcome_message"] = welcome_message
+    try:
+        yield f"event: connected\ndata: {json.dumps(connected_payload)}\n\n"
+        while True:
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message is None:
+                if tenant_id:
+                    await sync_to_async(presence.touch_connection)(tenant_id, session_id, conn_id)
+                yield ": keepalive\n\n"
+                continue
+            data = json.loads(message["data"])
+            event_type = data.get("type", "token")
+            yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+    except (GeneratorExit, asyncio.CancelledError):
+        pass
+    finally:
+        await pubsub.unsubscribe(f"session:{session_id}")
+        await pubsub.aclose()
+        await r.aclose()
+        if tenant_id:
+            from apps.events.signals import publish_presence
+            from apps.events.types import VISITOR_DISCONNECTED
+            if await sync_to_async(presence.unregister_connection)(tenant_id, session_id, conn_id):
+                await sync_to_async(publish_presence)(VISITOR_DISCONNECTED, tenant_id, session_id)

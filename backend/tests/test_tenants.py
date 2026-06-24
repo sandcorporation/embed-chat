@@ -1,5 +1,8 @@
 import pytest
-from utils import open_stream
+from asgiref.sync import sync_to_async
+from utils import aopen_stream, aread_first_chunk
+
+adb = sync_to_async
 
 
 @pytest.mark.django_db
@@ -470,33 +473,36 @@ def test_reset_tenant_key_returns_new_key(client, tenant_agent_token, tenant_wit
     assert Tenant.verify_key(new_key) is not None
 
 
-@pytest.mark.django_db
-def test_welcome_message_included_in_connected_event(client, tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_welcome_message_included_in_connected_event(tenant_with_key):
     """welcome_message가 설정된 경우 SSE connected 이벤트 payload에 포함된다."""
     import json
     from apps.tenants.models import TenantConfig
 
     tenant, raw_key = tenant_with_key
-    config = TenantConfig.objects.get(tenant=tenant)
-    config.welcome_message = "안녕하세요! 무엇을 도와드릴까요?"
-    config.save()
 
-    stream_resp = open_stream(client, tenant, "v-welcome")
+    def _seed():
+        config = TenantConfig.objects.get(tenant=tenant)
+        config.welcome_message = "안녕하세요! 무엇을 도와드릴까요?"
+        config.save()
+    await adb(_seed)()
 
-    first_chunk = next(stream_resp.streaming_content).decode()
+    stream_resp = await aopen_stream(tenant, "v-welcome")
+
+    first_chunk = await aread_first_chunk(stream_resp)
     assert "event: connected" in first_chunk
     payload = json.loads(first_chunk.split("data: ", 1)[1])
     assert payload["welcome_message"] == "안녕하세요! 무엇을 도와드릴까요?"
 
 
-@pytest.mark.django_db
-def test_no_welcome_message_when_empty(client, tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_no_welcome_message_when_empty(tenant_with_key):
     """welcome_message가 비어있으면 connected 이벤트 payload에 포함되지 않는다."""
     import json
 
     tenant, raw_key = tenant_with_key
-    stream_resp = open_stream(client, tenant, "v-no-welcome")
+    stream_resp = await aopen_stream(tenant, "v-no-welcome")
 
-    first_chunk = next(stream_resp.streaming_content).decode()
+    first_chunk = await aread_first_chunk(stream_resp)
     payload = json.loads(first_chunk.split("data: ", 1)[1])
     assert "welcome_message" not in payload
