@@ -6,7 +6,9 @@
 # neo4j는 공식 멀티아치 이미지라 빌드 불필요.
 #
 # 인증: GITHUB_TOKEN(packages:write) — PAT 불필요. 태그: <git sha>(불변, 배포 핀) + latest(main).
-# on: push라 fork PR은 트리거되지 않는다(self-hosted 러너 보안).
+# 트리거는 main push로 한정한다 — 피처 브랜치 푸시가 self-hosted 러너를 태우는 낭비를 막고,
+# pull_request가 아니라 push라 fork PR도 러너에서 안 돈다(보안). 배포 자체도 main-only(아래 release).
+# CI 설정만 바꾸는 커밋은 메시지에 [skip ci]를 넣어 불필요한 재빌드·재배포를 건너뛴다.
 #
 # release: main push에서 빌드 성공 후 release 브랜치를 그 SHA로 갱신한다. A1의 Jenkins
 # (jenkins.moonpair.org)가 release push 웹훅을 받아 로컬에서 scripts/deploy.sh를 실행해
@@ -16,10 +18,11 @@ name: build-images
 
 on:
   push:
+    branches: [main]
   workflow_dispatch:
 
 # main에 연속 push가 겹치면 진행 중이던 이전 빌드 run을 취소해 self-hosted 러너 3대를 즉시
-# 회수한다(어차피 최신 SHA만 배포). ref별 그룹이라 브랜치끼리는 독립적으로 병렬 빌드된다.
+# 회수한다(어차피 최신 SHA만 배포). ref별 그룹이라 main과 수동(workflow_dispatch) 실행은 독립적이다.
 concurrency:
   group: build-images-${{ github.ref }}
   cancel-in-progress: true
