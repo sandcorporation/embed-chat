@@ -25,6 +25,13 @@ git push main
 - 이미지 태그 = **git SHA**(불변 핀). 롤백 = 옛 SHA로 재배포.
 - A1은 **arm64·CPU 전용** — ollama·paddle 없음(임베딩·OCR은 per-Tenant Provider / Vision OCR).
 
+> **러너를 여러 대로 스케일할 때(매트릭스 병렬 빌드)**: build 잡은 api·admin·widget 매트릭스라
+> 러너가 N대면 N-way로 병렬 빌드된다. 단 sub의 러너 compose에서 **`RUNNER_NAME`(고정)을 쓰면 안 된다**
+> — 고정 이름 + `docker compose up --scale runner=N`은 같은 이름으로 등록돼 GitHub에 **1대만 active**로
+> 남아 잡이 직렬화된다(증상: 한 러너만 CPU를 씀). 대신 **`RUNNER_NAME_PREFIX`**를 써서 컨테이너마다
+> 유니크 이름(`...-a1b2c`)이 등록되게 한다. 또 `runner_work` **named volume을 공유 마운트하지 말 것**
+> — N개가 같은 `_work`를 쓰면 동시 체크아웃이 충돌한다(buildx 캐시는 GHCR registry라 _work에 무관).
+
 ## 무중단 메커니즘
 
 | 요소 | 방법 |
