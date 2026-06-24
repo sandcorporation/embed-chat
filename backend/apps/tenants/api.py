@@ -556,13 +556,15 @@ def reset_tenant_key(request):
 @tenant_router.patch("/slug/", response={200: SlugIn})
 def update_slug(request, body: SlugIn):
     from ninja.errors import HttpError
-    from apps.tenants.slug import is_valid_slug
+    from apps.tenants.slug import is_valid_slug, normalize_slug
 
-    if not is_valid_slug(body.slug):
+    slug = normalize_slug(body.slug)   # NFC + trim. 한글/대문자 보존, 검증·저장의 단일 기준.
+    if not is_valid_slug(slug):
         raise HttpError(400, "Invalid slug format")
     tenant = request.auth.tenant
-    if Tenant.objects.filter(slug=body.slug).exclude(id=tenant.id).exists():
+    # 대소문자 무시 유일성(MyStore↔mystore 충돌) — iexact로 검사.
+    if Tenant.objects.filter(slug__iexact=slug).exclude(id=tenant.id).exists():
         raise HttpError(400, "Slug already taken")
-    tenant.slug = body.slug
+    tenant.slug = slug
     tenant.save(update_fields=["slug"])
     return 200, {"slug": tenant.slug}

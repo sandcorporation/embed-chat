@@ -43,10 +43,17 @@ class Tenant(models.Model):
 
     @classmethod
     def resolve_slug(cls, slug: str) -> "Tenant | None":
-        """공개 챗봇 URL의 slug로 활성 Tenant를 조회한다. 미존재·정지 시 None."""
-        if not slug:
+        """공개 챗봇 URL의 slug로 활성 Tenant를 조회한다. 미존재·정지 시 None.
+
+        NFC 정규화 + 대소문자 무시(iexact) — 한글은 NFC로 저장돼 일치하고, 라틴은 대소문자
+        무관하게 해석된다(MyStore↔mystore). (issue 187)
+        """
+        from apps.tenants.slug import normalize_slug
+
+        s = normalize_slug(slug)
+        if not s:
             return None
-        return cls.objects.filter(slug=slug, is_active=True).first()
+        return cls.objects.filter(slug__iexact=s, is_active=True).first()
 
     def reset_key(self) -> str:
         new_key = secrets.token_urlsafe(32)
