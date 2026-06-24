@@ -12,4 +12,10 @@ staticfiles/
 media/
 node_modules/
 .cache/
-*.pdflangfuse.env
+*.pdf
+langfuse.env
+
+# 로컬 개발 도구 산출물(머신별 — 커밋 금지)
+.mcp.json
+.playwright-mcp/
+async-smoke-widget.png

@@ -39,8 +39,19 @@ git push main
 | 앱 교체 | **`docker rollout`**(start-first): 새 컨테이너 → `/api/health` 통과 → 옛 것 드레인. **api·worker·worker-chat만**. db·redis·nginx는 싱글톤. |
 | 프록시 수렴 | nginx **동적 resolver**(`127.0.0.11 valid=5s`) + 변수 `proxy_pass` → rollout로 바뀐 api IP를 reload 없이 ~5s 수렴. |
 | 마이그레이션 | **expand/contract** — migrate를 rollout보다 먼저. 옛/새 코드가 공존해야 하므로 컬럼 drop/rename·즉시 NOT NULL 금지. |
-| 워커 드레인 | `stop_grace_period`(api 30s·worker 120s·worker-chat 60s). 배치는 `acks_late=True`+`reject_on_worker_lost`로 SIGKILL돼도 재배달(전제: ingest 멱등 — 결정적 ID + upsert). chat은 `acks_late=False`(중복 응답 방지). |
+| 워커 드레인 | `stop_grace_period`(api 30s·worker 120s·worker-chat 60s). 배치(Celery)는 `acks_late=True`+`reject_on_worker_lost`로 SIGKILL돼도 재배달(전제: ingest 멱등 — 결정적 ID + upsert). chat(taskiq)은 `ListQueueBroker` pop=소비라 재배달 없음(at-most-once, 중복 응답 방지) — SIGTERM 후 신규 수신을 멈추고 진행 중 응답(LLM ~30s)을 마치도록 드레인. |
 | 정적 SPA | init이 dist를 볼륨에 복사(additive). Vite content-hash라 in-flight 세션 안전. |
+
+### 최초 async 컷오버(1회)
+
+gunicorn/gevent→uvicorn + Celery worker-chat→taskiq로 전환하는 **첫 배포**만 특수하다. 서비스명
+(`api`·`worker-chat`)은 유지하므로 `docker rollout`이 컨테이너를 in-place start-first로 교체한다.
+주의점:
+- **chat 큐 전환**: 옛 celery `chat` 리스트에 남아 있던 in-flight 작업은 새 taskiq 워커가 읽지
+  않는다(다른 redis 키). 비멱등 at-most-once라 유실 시 방문자가 재전송하면 되므로 허용. 컷오버는
+  유휴 시각에 권장.
+- **스모크**: `/api/health`(uvicorn) + chat 1턴(slug 위젯으로 SSE 토큰 수신 확인)을 수동 검증.
+- 이후 배포부턴 일반 무중단 롤링과 동일하다.
 
 ## 저장소 파일
 

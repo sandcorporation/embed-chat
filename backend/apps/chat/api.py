@@ -2,7 +2,6 @@ from typing import Any
 from ninja import Router, Schema
 from django.http import StreamingHttpResponse
 from apps.chat.models import ChatSession, ChatMessage
-from apps.chat.sse import sse_event_stream
 from apps.tenants.auth import tenant_key_auth
 
 chat_router = Router(tags=["chat"])
@@ -30,34 +29,37 @@ def issue_identity_hash(request, body: IdentityIn):
 
 
 @chat_router.get("/stream")
-def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
+async def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
+    from asgiref.sync import sync_to_async
     from apps.tenants.models import Tenant
+    from apps.chat.sse import asse_event_stream
 
-    tenant = Tenant.resolve_slug(slug)
+    tenant = await sync_to_async(Tenant.resolve_slug)(slug)
     if not tenant:
         return StreamingHttpResponse(status=404)
     if not visitor_id:
         return StreamingHttpResponse(status=400)
 
     # 신원검증 토글이 켜진 Tenant는 유효한 HMAC 해시가 있어야 visitor_id 위조를 막는다.
-    config = getattr(tenant, "config", None)
+    config = await sync_to_async(lambda: getattr(tenant, "config", None))()
     if config and config.require_identity_verification:
         from apps.chat.identity import verify_identity
         if not verify_identity(str(tenant.id), visitor_id, hash):
             return StreamingHttpResponse(status=401)
 
-    session, _ = ChatSession.objects.get_or_create(
+    session, _ = await ChatSession.objects.aget_or_create(
         tenant_id=tenant.id,
         visitor_id=visitor_id,
         ended_at=None,
     )
 
-    config = getattr(tenant, "config", None)
-    existing_messages = ChatMessage.objects.filter(session=session).order_by("created_at")
+    existing = await sync_to_async(
+        lambda: [{"role": m.role, "content": m.content}
+                 for m in ChatMessage.objects.filter(session=session).order_by("created_at")]
+    )()
     stream_kwargs: dict[str, Any]
-    if existing_messages.exists():
-        history = [{"role": m.role, "content": m.content} for m in existing_messages]
-        stream_kwargs = {"history": history, "is_hitl": session.is_hitl}
+    if existing:
+        stream_kwargs = {"history": existing, "is_hitl": session.is_hitl}
     else:
         stream_kwargs = {"welcome_message": config.welcome_message if config else ""}
     if config and config.brand_name:
@@ -66,7 +68,7 @@ def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
     stream_kwargs["tenant_id"] = str(tenant.id)
 
     response = StreamingHttpResponse(
-        sse_event_stream(str(session.id), **stream_kwargs),  # pyright: ignore[reportArgumentType]
+        asse_event_stream(str(session.id), **stream_kwargs),  # pyright: ignore[reportArgumentType]
         content_type="text/event-stream",
     )
     response["Cache-Control"] = "no-cache"
@@ -76,16 +78,17 @@ def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
 
 
 @chat_router.post("/message", response={202: dict, 404: dict, 429: dict})
-def send_message(request, body: MessageIn):
+async def send_message(request, body: MessageIn):
     from django.conf import settings
+    from asgiref.sync import sync_to_async
     from apps.chat.rate_limit import allow_message
 
     try:
-        session = ChatSession.objects.get(id=body.session_id, ended_at=None)
+        session = await ChatSession.objects.aget(id=body.session_id, ended_at=None)
     except ChatSession.DoesNotExist:
         return 404, {"detail": "Session not found"}
 
-    if not allow_message(
+    if not await sync_to_async(allow_message)(
         str(session.tenant_id),
         session.visitor_id,
         per_visitor=settings.CHAT_RATE_LIMIT_PER_VISITOR,
@@ -93,7 +96,7 @@ def send_message(request, body: MessageIn):
     ):
         return 429, {"detail": "Rate limit exceeded"}
 
-    ChatMessage.objects.create(
+    await ChatMessage.objects.acreate(
         session=session,
         role=ChatMessage.ROLE_USER,
         content=body.content,
@@ -101,9 +104,9 @@ def send_message(request, body: MessageIn):
 
     if session.is_hitl:
         from apps.chat.sse import publish_visitor_message
-        publish_visitor_message(str(session.tenant_id), str(session.id), body.content)
+        await sync_to_async(publish_visitor_message)(str(session.tenant_id), str(session.id), body.content)
     else:
-        from apps.chat.tasks import run_chat_agent_task
-        run_chat_agent_task.delay(str(session.id), body.content)
+        from apps.chat.chat_task import dispatch_chat
+        await dispatch_chat(str(session.id), body.content)  # taskiq 워커로 1턴 enqueue(issue 194/195)
 
     return 202, {"status": "processing"}

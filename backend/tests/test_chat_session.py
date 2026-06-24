@@ -1,6 +1,9 @@
 # pyright: reportOptionalSubscript=false
 import pytest
-from utils import open_stream
+from asgiref.sync import sync_to_async
+from utils import open_stream, aopen_stream, aread_first_chunk
+
+adb = sync_to_async
 
 
 @pytest.mark.django_db
@@ -55,15 +58,15 @@ def test_stream_missing_visitor_id_rejected(client, tenant_with_key):
     assert resp.status_code == 400
 
 
-@pytest.mark.django_db
-def test_stream_sends_connected_event_first(client, tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_stream_sends_connected_event_first(tenant_with_key):
     import json
 
     tenant, _ = tenant_with_key
-    stream_resp = open_stream(client, tenant, "v-connected")
+    stream_resp = await aopen_stream(tenant, "v-connected")
 
     # 첫 번째 청크가 'connected' 이벤트여야 한다
-    first_chunk = next(stream_resp.streaming_content).decode()
+    first_chunk = await aread_first_chunk(stream_resp)
     assert "event: connected" in first_chunk
     payload = json.loads(first_chunk.split("data: ", 1)[1])
     assert "session_id" in payload
@@ -111,17 +114,19 @@ def test_send_message_unknown_session_returns_404(client):
     assert resp.status_code == 404
 
 
-@pytest.mark.django_db
-def test_get_session_checkpoint_returns_channel_values(client, tenant_with_key, tenant_agent_token):
+@pytest.mark.django_db(transaction=True)
+async def test_get_session_checkpoint_returns_channel_values(client, tenant_with_key, tenant_agent_token):
     """run_chat_agent 실행 후 GET /api/tenant/sessions/{id}/checkpoint → channel_values JSON."""
-    from apps.agent.graph import run_chat_agent
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async
     from apps.chat.models import ChatSession
+    adb = sync_to_async
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-checkpoint-api")
-    run_chat_agent(session, "안녕하세요")
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-checkpoint-api")
+    await run_chat_agent_async(session, "안녕하세요")
 
-    resp = client.get(
+    resp = await adb(client.get)(
         f"/api/tenant/sessions/{session.id}/checkpoint",
         HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
     )
@@ -164,25 +169,26 @@ def test_get_session_checkpoint_404_for_other_tenant(client, tenant_agent_token)
     assert resp.status_code == 404
 
 
-@pytest.mark.django_db
-def test_checkpoint_has_messages_but_not_lc_messages(tenant_with_key):
-    """Checkpoint channel_values에 대화는 messages로만 남고 lc_messages(프롬프트 조립물)는 없다.
-
-    lc_messages가 남아 있으면 어드민 Checkpoint 뷰에서 대화가 두 형식으로 중복 표시된다.
-    """
-    from apps.agent.graph import run_chat_agent, _create_checkpointer
+@pytest.mark.django_db(transaction=True)
+async def test_checkpoint_has_messages_but_not_lc_messages(tenant_with_key):
+    """Checkpoint channel_values에 대화는 messages로만 남고 lc_messages(프롬프트 조립물)는 없다."""
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async, _create_checkpointer
     from apps.chat.models import ChatSession
+    adb = sync_to_async
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-lc-messages")
-    run_chat_agent(session, "안녕하세요")
-    run_chat_agent(session, "또 질문이요")
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-lc-messages")
+    await run_chat_agent_async(session, "안녕하세요")
+    await run_chat_agent_async(session, "또 질문이요")
 
-    saver, conn = _create_checkpointer()
-    try:
-        cp = saver.get({"configurable": {"thread_id": str(session.id)}})
-    finally:
-        conn.close()
+    def _read():
+        saver, conn = _create_checkpointer()
+        try:
+            return saver.get({"configurable": {"thread_id": str(session.id)}})
+        finally:
+            conn.close()
+    cp = await adb(_read)()
 
     cv = cp["channel_values"]
     assert "messages" in cv
@@ -193,20 +199,22 @@ def test_checkpoint_has_messages_but_not_lc_messages(tenant_with_key):
     assert roles == ["user", "assistant", "user", "assistant"], roles
 
 
-@pytest.mark.django_db
-def test_multi_turn_creates_multiple_assistant_replies(tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_multi_turn_creates_multiple_assistant_replies(tenant_with_key):
     """agent를 두 번 실행하면 각각 assistant 메시지가 저장되고 히스토리가 누적된다."""
-    from apps.agent.graph import run_chat_agent
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async
     from apps.chat.models import ChatSession, ChatMessage
+    adb = sync_to_async
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-multiturn")
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-multiturn")
 
-    run_chat_agent(session, "안녕하세요")
-    assert ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_ASSISTANT).count() == 1
+    await run_chat_agent_async(session, "안녕하세요")
+    assert await adb(ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_ASSISTANT).count)() == 1
 
-    run_chat_agent(session, "감사합니다")
-    assert ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_ASSISTANT).count() == 2
+    await run_chat_agent_async(session, "감사합니다")
+    assert await adb(ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_ASSISTANT).count)() == 2
 
 
 @pytest.mark.django_db
@@ -244,19 +252,22 @@ def test_stream_reconnect_reuses_same_session(client, tenant_with_key):
 
 # ── Issue 42: session restoration in connected event ─────────────────────────
 
-@pytest.mark.django_db
-def test_stream_reconnect_includes_history_in_connected_event(client, tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_stream_reconnect_includes_history_in_connected_event(tenant_with_key):
     """기존 메시지가 있는 세션에 재연결하면 connected 이벤트 payload에 history가 포함된다."""
     import json
     from apps.chat.models import ChatSession, ChatMessage
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-history-restore")
-    ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_USER, content="안녕하세요")
-    ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_ASSISTANT, content="무엇을 도와드릴까요?")
 
-    stream_resp = open_stream(client, tenant, "v-history-restore")
-    first_chunk = next(stream_resp.streaming_content).decode()
+    def _seed():
+        session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-history-restore")
+        ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_USER, content="안녕하세요")
+        ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_ASSISTANT, content="무엇을 도와드릴까요?")
+    await adb(_seed)()
+
+    stream_resp = await aopen_stream(tenant, "v-history-restore")
+    first_chunk = await aread_first_chunk(stream_resp)
 
     assert "event: connected" in first_chunk
     payload = json.loads(first_chunk.split("data: ", 1)[1])
@@ -266,60 +277,67 @@ def test_stream_reconnect_includes_history_in_connected_event(client, tenant_wit
     assert payload["history"][1] == {"role": "assistant", "content": "무엇을 도와드릴까요?"}
 
 
-@pytest.mark.django_db
-def test_stream_reconnect_is_hitl_true_included_in_connected_event(client, tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_stream_reconnect_is_hitl_true_included_in_connected_event(tenant_with_key):
     """is_hitl=True인 기존 세션에 재연결하면 connected 이벤트에 is_hitl: true가 포함된다."""
     import json
     from apps.chat.models import ChatSession, ChatMessage
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(
-        tenant_id=tenant.id, visitor_id="v-hitl-restore", is_hitl=True
-    )
-    ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_USER, content="상담원 연결해 주세요")
 
-    stream_resp = open_stream(client, tenant, "v-hitl-restore")
-    first_chunk = next(stream_resp.streaming_content).decode()
+    def _seed():
+        session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-hitl-restore", is_hitl=True)
+        ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_USER, content="상담원 연결해 주세요")
+    await adb(_seed)()
+
+    stream_resp = await aopen_stream(tenant, "v-hitl-restore")
+    first_chunk = await aread_first_chunk(stream_resp)
     payload = json.loads(first_chunk.split("data: ", 1)[1])
 
     assert payload.get("is_hitl") is True
 
 
-@pytest.mark.django_db
-def test_stream_reconnect_no_welcome_message_for_existing_session(client, tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_stream_reconnect_no_welcome_message_for_existing_session(tenant_with_key):
     """기존 메시지가 있는 세션에 재연결하면 connected 이벤트에 welcome_message가 없다."""
     import json
     from apps.chat.models import ChatSession, ChatMessage
     from apps.tenants.models import TenantConfig
 
     tenant, _ = tenant_with_key
-    config = TenantConfig.objects.get(tenant=tenant)
-    config.welcome_message = "안녕하세요! 무엇을 도와드릴까요?"
-    config.save()
 
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-no-welcome-repeat")
-    ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_USER, content="첫 메시지")
+    def _seed():
+        config = TenantConfig.objects.get(tenant=tenant)
+        config.welcome_message = "안녕하세요! 무엇을 도와드릴까요?"
+        config.save()
 
-    stream_resp = open_stream(client, tenant, "v-no-welcome-repeat")
-    first_chunk = next(stream_resp.streaming_content).decode()
+        session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-no-welcome-repeat")
+        ChatMessage.objects.create(session=session, role=ChatMessage.ROLE_USER, content="첫 메시지")
+    await adb(_seed)()
+
+    stream_resp = await aopen_stream(tenant, "v-no-welcome-repeat")
+    first_chunk = await aread_first_chunk(stream_resp)
     payload = json.loads(first_chunk.split("data: ", 1)[1])
 
     assert "welcome_message" not in payload
 
 
-@pytest.mark.django_db
-def test_stream_new_session_no_history_in_connected_event(client, tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_stream_new_session_no_history_in_connected_event(tenant_with_key):
     """신규 세션(ChatMessage 없음)에서 connected 이벤트에 history가 없고 welcome_message가 있다."""
     import json
     from apps.tenants.models import TenantConfig
 
     tenant, _ = tenant_with_key
-    config = TenantConfig.objects.get(tenant=tenant)
-    config.welcome_message = "신규 방문자 환영합니다!"
-    config.save()
 
-    stream_resp = open_stream(client, tenant, "v-new-no-history")
-    first_chunk = next(stream_resp.streaming_content).decode()
+    def _seed():
+        config = TenantConfig.objects.get(tenant=tenant)
+        config.welcome_message = "신규 방문자 환영합니다!"
+        config.save()
+    await adb(_seed)()
+
+    stream_resp = await aopen_stream(tenant, "v-new-no-history")
+    first_chunk = await aread_first_chunk(stream_resp)
     payload = json.loads(first_chunk.split("data: ", 1)[1])
 
     assert "history" not in payload
@@ -328,18 +346,22 @@ def test_stream_new_session_no_history_in_connected_event(client, tenant_with_ke
 
 # ── Issue 89: 위젯 브랜드 텍스트 ──────────────────────────────────────────────
 
-@pytest.mark.django_db
-def test_brand_name_in_connected_event(client, tenant_with_key):
+@pytest.mark.django_db(transaction=True)
+async def test_brand_name_in_connected_event(tenant_with_key):
     """brand_name이 설정되면 connected 이벤트 payload에 포함된다(헤더 타이틀용)."""
     import json
     from apps.tenants.models import TenantConfig
 
     tenant, _ = tenant_with_key
-    config = TenantConfig.objects.get(tenant=tenant)
-    config.brand_name = "ABC쇼핑 고객센터"
-    config.save()
 
-    first_chunk = next(open_stream(client, tenant, "v-brand").streaming_content).decode()
+    def _seed():
+        config = TenantConfig.objects.get(tenant=tenant)
+        config.brand_name = "ABC쇼핑 고객센터"
+        config.save()
+    await adb(_seed)()
+
+    stream_resp = await aopen_stream(tenant, "v-brand")
+    first_chunk = await aread_first_chunk(stream_resp)
     payload = json.loads(first_chunk.split("data: ", 1)[1])
     assert payload.get("brand_name") == "ABC쇼핑 고객센터"
 

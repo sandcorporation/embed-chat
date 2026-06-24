@@ -9,6 +9,7 @@ import pytest
 from django.test import Client
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
+os.environ.setdefault("TASKIQ_INMEMORY", "1")  # taskiq chat 태스크를 인라인 실행(issue 190)
 
 
 
@@ -137,6 +138,15 @@ class _FakeChatLLM:
             yield {"context_sufficient": cs, "response": resp}
         yield d                                                       # 최종(모든 필드)
 
+    async def acomplete_structured(self, provider, messages, schema):
+        """complete_structured의 async 대응(issue 191) — 같은 결정적 판정."""
+        return self.complete_structured(provider, messages, schema)
+
+    async def astream_structured(self, provider, messages, schema):
+        """stream_structured의 async 대응 — 같은 청크를 async로 yield."""
+        for chunk in self.stream_structured(provider, messages, schema):
+            yield chunk
+
 
 @pytest.fixture(autouse=True)
 def fake_chat_llm(monkeypatch):
@@ -147,6 +157,8 @@ def fake_chat_llm(monkeypatch):
     fake = _FakeChatLLM()
     monkeypatch.setattr("apps.agent.llm.complete_structured", fake.complete_structured)
     monkeypatch.setattr("apps.agent.llm.stream_structured", fake.stream_structured)
+    monkeypatch.setattr("apps.agent.llm.acomplete_structured", fake.acomplete_structured)
+    monkeypatch.setattr("apps.agent.llm.astream_structured", fake.astream_structured)
     return fake
 
 

@@ -115,3 +115,30 @@ def transcribe_image(provider, image_bytes: bytes, mime_type: str = "image/png")
     with override_call_type("ocr"):
         result = build_llm_client(provider).bind(temperature=0).invoke([message], config=_usage_config())
     return cast(str, result.content)
+
+
+# ── async 경계 (issue 191) — chat 경로 전용. sync 경계는 인제스션·추출·OCR이 그대로 쓴다(공존). ──
+async def acomplete_text(provider, messages) -> str:
+    """LLM 응답 본문(문자열)을 async로 반환한다."""
+    result = await build_llm_client(provider).ainvoke(messages, config=_usage_config())
+    return cast(str, result.content)
+
+
+async def acomplete_structured(provider, messages, schema: type[T]) -> T:
+    """구조화 출력을 async로 반환한다 (schema 인스턴스)."""
+    messages = _mark_cache_breakpoint(provider, messages)
+    result = await build_llm_client(provider).with_structured_output(schema).ainvoke(messages, config=_usage_config())
+    return cast(T, result)
+
+
+async def astream_structured(provider, messages, schema):
+    """구조화 출력을 async로 토큰 스트리밍한다 — 누적 dict를 점진 yield(stream_structured의 async 대응)."""
+    messages = _mark_cache_breakpoint(provider, messages)
+    client = build_llm_client(provider).with_structured_output(schema)
+    async for chunk in client.astream(messages, config=_usage_config()):
+        if isinstance(chunk, dict):
+            yield chunk
+        elif hasattr(chunk, "model_dump"):
+            yield chunk.model_dump()
+        else:
+            yield dict(chunk)

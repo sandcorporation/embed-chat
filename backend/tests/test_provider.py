@@ -115,23 +115,28 @@ def test_saving_masked_key_preserves_real_key(client, tenant_agent_token, tenant
 
 # ── Issue 92: 챗 호출이 Tenant LLM provider로 라우팅 ──────────────────────────
 
-@pytest.mark.django_db
-def test_chat_routes_through_tenant_llm_provider(tenant_with_key, fake_chat_llm):
+@pytest.mark.django_db(transaction=True)
+async def test_chat_routes_through_tenant_llm_provider(tenant_with_key, fake_chat_llm):
     """run_chat_agent의 LLM 호출이 Tenant가 설정한 provider로 라우팅된다(키 복호화 전달)."""
-    from apps.agent.graph import run_chat_agent
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async
     from apps.chat.models import ChatSession
     from apps.tenants.models import TenantConfig
     from apps.tenants.crypto import encrypt_secret
+    adb = sync_to_async
 
     tenant, _ = tenant_with_key
-    config = TenantConfig.objects.get(tenant=tenant)
-    config.llm_provider_type = "custom"
-    config.llm_base_url = "https://tenant-endpoint.example/v1"
-    config.llm_api_key = encrypt_secret("sk-tenant")
-    config.save()
 
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-provider")
-    run_chat_agent(session, "안녕하세요")
+    def _setup():
+        config = TenantConfig.objects.get(tenant=tenant)
+        config.llm_provider_type = "custom"
+        config.llm_base_url = "https://tenant-endpoint.example/v1"
+        config.llm_api_key = encrypt_secret("sk-tenant")
+        config.save()
+    await adb(_setup)()
+
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-provider")
+    await run_chat_agent_async(session, "안녕하세요")
 
     prov = fake_chat_llm.last_provider
     assert prov is not None and prov.type == "custom"
@@ -139,15 +144,16 @@ def test_chat_routes_through_tenant_llm_provider(tenant_with_key, fake_chat_llm)
     assert prov.api_key == "sk-tenant"  # 복호화되어 경계로 전달
 
 
-@pytest.mark.django_db
-def test_chat_falls_back_to_platform_provider_when_unset(tenant_with_key, fake_chat_llm):
+@pytest.mark.django_db(transaction=True)
+async def test_chat_falls_back_to_platform_provider_when_unset(tenant_with_key, fake_chat_llm):
     """provider 미설정 Tenant는 플랫폼 기본(OpenRouter)으로 폴백한다."""
-    from apps.agent.graph import run_chat_agent
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async
     from apps.chat.models import ChatSession
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-default")
-    run_chat_agent(session, "안녕하세요")
+    session = await sync_to_async(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-default")
+    await run_chat_agent_async(session, "안녕하세요")
 
     prov = fake_chat_llm.last_provider
     assert prov is not None and prov.type == ""  # 플랫폼 기본

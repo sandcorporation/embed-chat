@@ -42,9 +42,9 @@ relay·소비자 루프는 **supervisor 패턴**이다 — 한 반복에서 인�
 소비자는 `ensure_group` 재실행)해 재시도한다. 의존성이 복구되면 **컨테이너 재시작 없이 스스로
 회복**한다. (핸들러 자체 실패는 별도로 멱등 재시도→DLQ로 처리 — 아래.)
 
-> 다른 프로세스: **api**(gunicorn/runserver)는 요청 예외가 500일 뿐 서버는 생존하고, **celery
-> worker/worker-chat**는 태스크 예외에 죽지 않고 브로커를 재연결한다. 즉 무한 루프를 직접 도는
-> relay·consume_events만 이 가드가 필요하다.
+> 다른 프로세스: **api**(uvicorn ASGI)는 요청 예외가 500일 뿐 서버는 생존하고, **Celery
+> worker**(배치)·**taskiq worker-chat**(chat)은 태스크 예외에 죽지 않고 브로커를 재연결한다. 즉
+> 무한 루프를 직접 도는 relay·consume_events만 이 가드가 필요하다.
 
 ## 운영: dead-letter 처리
 

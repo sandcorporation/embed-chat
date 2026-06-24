@@ -6,6 +6,13 @@ from apps.usage.models import TokenUsage
 from apps.usage.recording import record_usage, record_embedding_usage
 
 
+@pytest.fixture(autouse=True)
+def _clean_token_usage(db):
+    """다른 transaction 테스트(async chat)가 커밋해 남길 수 있는 TokenUsage 잔여를 비우고 시작한다.
+    usage 검증은 전역 카운트를 보므로 테스트 독립성을 위해 자기 시작점을 깨끗이 한다."""
+    TokenUsage.objects.all().delete()
+
+
 @pytest.mark.django_db
 def test_record_usage_increments_rollup():
     """같은 키로 여러 번 기록하면 토큰·count가 누적된다(원자적 upsert)."""

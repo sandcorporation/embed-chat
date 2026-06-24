@@ -118,25 +118,24 @@ def _off_hours_notice(config) -> str:
     )
 
 
-def run_chat_agent(session, user_message: str) -> str:
+def _load_chat_inputs(session, user_message: str):
+    """DB 의존 입력(config·memories·영업시간 게이팅)으로 initial_state·effective_hitl·provider를 만든다(sync).
+
+    provider/usage ContextVar는 여기서 설정하지 않는다 — sync_to_async 스레드의 ContextVar는 이벤트
+    루프 노드로 전파되지 않으므로, 호출자(run_chat_agent_async, 이벤트루프)가 반환된 provider로 set한다.
+    """
     from django.utils import timezone
     from apps.tenants.models import TenantConfig
     from apps.tenants import business_hours
     from apps.memory.manager import get_visitor_memories
-    from apps.agent.providers import set_chat_provider, chat_provider
-
-    from apps.usage.context import set_usage_context
+    from apps.agent.providers import chat_provider
 
     config = TenantConfig.objects.get(tenant_id=session.tenant_id)
-    # 챗 그래프 노드가 쓸 LLM provider를 컨텍스트에 싣는다(비밀키를 state/Checkpoint에 안 넣음).
-    set_chat_provider(chat_provider(config))
-    # 토큰 사용량 귀속 컨텍스트(chat). LLM 경계 콜백·임베딩이 이를 읽어 record_usage.
-    set_usage_context(session.tenant_id, "chat", session_id=session.id)
+    provider = chat_provider(config)
     memories = get_visitor_memories(str(session.tenant_id), session.visitor_id)
 
-    # 영업시간 게이팅(issue 136): HITL이 켜져 있어도 상담시간 외엔 plain 그래프로 떨어뜨려
-    # AI 자동 escalation을 막는다(ADR-0001의 두 토폴로지를 시간으로 선택). 시간 외엔 운영 안내를
-    # trailing 컨텍스트에 실어 AI가 자연스럽게 안내하게 한다(수동 takeover는 별개로 항상 가능).
+    # 영업시간 게이팅(issue 136): HITL이 켜져 있어도 상담시간 외엔 plain 그래프로 떨어뜨려 AI 자동
+    # escalation을 막는다. 시간 외엔 운영 안내를 trailing 컨텍스트에 실어 AI가 자연스럽게 안내한다.
     open_now = business_hours.is_open(config, timezone.now())
     effective_hitl = config.hitl_enabled and open_now
     operational_notice = _off_hours_notice(config) if (config.hitl_enabled and not open_now) else ""
@@ -158,15 +157,32 @@ def run_chat_agent(session, user_message: str) -> str:
         "source_text_tried": False,
         "operational_notice": operational_notice,
     }
+    return initial_state, effective_hitl, provider
 
-    saver, conn = _create_checkpointer()
-    try:
+
+async def run_chat_agent_async(session, user_message: str) -> str:
+    """chat 1턴을 async로 실행한다(노드 async화 — issue 192/195). 호출 위치(taskiq/인라인) 무관.
+
+    DB 의존 입력은 sync_to_async로 로드하고, provider/usage ContextVar는 이벤트루프 컨텍스트에서
+    set해 async 노드(call_llm 등)로 전파한다. 체크포인터는 from_conn_string(async context manager)으로
+    커넥션을 확실히 정리한다. 노드가 async라 ainvoke가 네이티브로 실행 — executor 스레드 누수 없음.
+    """
+    from asgiref.sync import sync_to_async
+    from apps.agent.providers import set_chat_provider
+    from apps.usage.context import set_usage_context
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+    initial_state, effective_hitl, provider = await sync_to_async(_load_chat_inputs)(session, user_message)
+    set_chat_provider(provider)  # 이벤트루프 컨텍스트 → async 노드로 전파(비밀키는 state/Checkpoint에 안 넣음)
+    set_usage_context(session.tenant_id, "chat", session_id=session.id)
+
+    conninfo = _build_conninfo()
+    async with AsyncPostgresSaver.from_conn_string(conninfo) as saver:
+        await saver.setup()
         graph = build_graph(checkpointer=saver, hitl_enabled=effective_hitl)
-        result = graph.invoke(
+        result = await graph.ainvoke(
             initial_state,
             config={"configurable": {"thread_id": str(session.id)}},
         )
-    finally:
-        conn.close()
 
     return result["assistant_response"]

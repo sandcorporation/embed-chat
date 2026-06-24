@@ -6,40 +6,47 @@
 import pytest
 
 
-@pytest.mark.django_db
-def test_ai_escalation_records_one_session_escalated_event(tenant_with_key, fake_chat_llm):
-    from apps.agent.graph import run_chat_agent
+@pytest.mark.django_db(transaction=True)
+async def test_ai_escalation_records_one_session_escalated_event(tenant_with_key, fake_chat_llm):
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async
     from apps.chat.models import ChatSession
     from apps.events.models import EventStore, Outbox
     from apps.events.types import SESSION_ESCALATED
+    adb = sync_to_async
 
     tenant, _ = tenant_with_key
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-esc")
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-esc")
 
-    run_chat_agent(session, "상담원 연결해 주세요")
+    await run_chat_agent_async(session, "상담원 연결해 주세요")
 
-    evs = list(EventStore.objects.filter(aggregate_id=str(session.id), type=SESSION_ESCALATED))
+    evs = await adb(lambda: list(EventStore.objects.filter(aggregate_id=str(session.id), type=SESSION_ESCALATED)))()
     assert len(evs) == 1                                                  # 정확히 1건
     assert "escalation_id" in evs[0].payload
-    assert Outbox.objects.filter(event_id=evs[0].event_id).count() == 1   # outbox에도 1건
+    assert await adb(Outbox.objects.filter(event_id=evs[0].event_id).count)() == 1   # outbox에도 1건
 
 
-@pytest.mark.django_db
-def test_full_pipeline_fires_webhook_once_on_ai_escalation(
+@pytest.mark.django_db(transaction=True)
+async def test_full_pipeline_fires_webhook_once_on_ai_escalation(
     tenant_with_key, fake_chat_llm, webhook_server, drain_events
 ):
-    from apps.agent.graph import run_chat_agent
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async
     from apps.tenants.models import TenantConfig
     from apps.chat.models import ChatSession
+    adb = sync_to_async
 
     tenant, _ = tenant_with_key
-    config = TenantConfig.objects.get(tenant=tenant)
-    config.webhook_url, config.webhook_type = webhook_server["url"], "generic"
-    config.save()
-    session = ChatSession.objects.create(tenant_id=tenant.id, visitor_id="v-wh")
 
-    run_chat_agent(session, "상담원 연결해 주세요")
-    drain_events()  # 전이 이벤트 → relay → webhook 소비자
+    def _setup():
+        config = TenantConfig.objects.get(tenant=tenant)
+        config.webhook_url, config.webhook_type = webhook_server["url"], "generic"
+        config.save()
+    await adb(_setup)()
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-wh")
+
+    await run_chat_agent_async(session, "상담원 연결해 주세요")
+    await adb(drain_events)()  # 전이 이벤트 → relay → webhook 소비자
 
     assert len(webhook_server["received"]) == 1  # webhook 1회(at-least-once+멱등)
 

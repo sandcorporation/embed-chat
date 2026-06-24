@@ -92,16 +92,11 @@ CHAT_RATE_LIMIT_PER_TENANT = int(os.environ.get("CHAT_RATE_LIMIT_PER_TENANT", "3
 # Event pipeline (Transactional Outbox + EventBus). 단일 글로벌 내구 스트림(테스트는 격리).
 EVENTS_TOPIC = os.environ.get("EVENTS_TOPIC", "events.session")
 
-# Celery
+# Celery — 배치(ingest/OCR/community/webhook/memory)만 담당. chat은 taskiq 전담(ADR-0024).
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_TASK_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
-# 인터랙티브 chat을 무거운 배치(ingest/community)와 분리된 전용 큐로 보낸다.
-# worker-chat이 'chat' 큐만 소비하므로 배치가 밀려도 chat 슬롯이 굶지 않는다.
-CELERY_TASK_ROUTES = {
-    "apps.chat.tasks.run_chat_agent_task": {"queue": "chat"},
-}
 
 # OpenRouter
 OPEN_ROUTER_API_KEY = os.environ.get("OPEN_ROUTER_API_KEY", "")

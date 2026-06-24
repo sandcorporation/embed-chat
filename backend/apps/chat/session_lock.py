@@ -23,3 +23,24 @@ def release(session_id: str) -> None:
     """세션 락을 해제한다. 해제 실패(미보유 등)는 TTL로 자가치유되므로 무시한다."""
     r = get_redis_client()
     r.delete(_LOCK_KEY.format(session_id))
+
+
+# ── async 락 (issue 193) — taskiq chat 워커가 쓴다. 같은 키·의미, async redis. ──
+async def aacquire(session_id: str, ttl: int = LOCK_TTL_SECONDS) -> bool:
+    from apps.chat.sse import get_async_redis_client
+
+    r = get_async_redis_client()
+    try:
+        return bool(await r.set(_LOCK_KEY.format(session_id), "1", nx=True, ex=ttl))
+    finally:
+        await r.aclose()
+
+
+async def arelease(session_id: str) -> None:
+    from apps.chat.sse import get_async_redis_client
+
+    r = get_async_redis_client()
+    try:
+        await r.delete(_LOCK_KEY.format(session_id))
+    finally:
+        await r.aclose()
