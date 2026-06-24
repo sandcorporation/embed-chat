@@ -20,6 +20,8 @@ services:
       langfuse-redis: { condition: service_healthy }
     env_file: langfuse.env
     environment: &langfuse-env
+      # ⚠️ Node 힙 상한 — 미설정 시 V8이 컨테이너 메모리의 절반(~512MB)으로 잡아 init 중 힙 OOM.
+      NODE_OPTIONS: "--max-old-space-size=1536"
       DATABASE_URL: postgresql://langfuse:${LANGFUSE_PG_PASSWORD}@langfuse-postgres:5432/langfuse
       SALT: ${SALT}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
@@ -43,7 +45,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G
 
   langfuse-worker:
     image: langfuse/langfuse-worker:3
@@ -58,7 +60,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G
 
   langfuse-postgres:
     image: postgres:16-alpine
