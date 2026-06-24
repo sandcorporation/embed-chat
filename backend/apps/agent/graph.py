@@ -125,9 +125,13 @@ def run_chat_agent(session, user_message: str) -> str:
     from apps.memory.manager import get_visitor_memories
     from apps.agent.providers import set_chat_provider, chat_provider
 
+    from apps.usage.context import set_usage_context
+
     config = TenantConfig.objects.get(tenant_id=session.tenant_id)
     # 챗 그래프 노드가 쓸 LLM provider를 컨텍스트에 싣는다(비밀키를 state/Checkpoint에 안 넣음).
     set_chat_provider(chat_provider(config))
+    # 토큰 사용량 귀속 컨텍스트(chat). LLM 경계 콜백·임베딩이 이를 읽어 record_usage.
+    set_usage_context(session.tenant_id, "chat", session_id=session.id)
     memories = get_visitor_memories(str(session.tenant_id), session.visitor_id)
 
     # 영업시간 게이팅(issue 136): HITL이 켜져 있어도 상담시간 외엔 plain 그래프로 떨어뜨려

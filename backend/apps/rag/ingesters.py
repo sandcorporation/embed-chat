@@ -42,7 +42,16 @@ def get_embeddings(texts: List[str], provider=None) -> List[List[float]]:
         timeout=getattr(settings, "OLLAMA_TIMEOUT", 60.0),
     )
     resp.raise_for_status()
-    return [d["embedding"] for d in resp.json()["data"]]
+    body = resp.json()
+
+    # 임베딩은 httpx 직접 호출이라 langchain 콜백이 못 잡는다 — 응답 usage를 수동 기록(usage 없으면 생략).
+    from apps.usage.context import get_usage_context
+    from apps.usage.recording import record_embedding_usage
+    ctx = get_usage_context()
+    if ctx and ctx.tenant_id:
+        record_embedding_usage(body, ctx.tenant_id, model)
+
+    return [d["embedding"] for d in body["data"]]
 
 
 class DocumentIngester(ABC):

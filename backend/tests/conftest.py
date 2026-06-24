@@ -22,6 +22,14 @@ def celery_always_eager(settings):
     settings.CELERY_TASK_EAGER_PROPAGATES = False
 
 
+@pytest.fixture(autouse=True)
+def reset_usage_context():
+    """토큰 사용량 귀속 ContextVar를 테스트마다 초기화(누수 시 비-django_db 테스트가 DB write 시도)."""
+    from apps.usage.context import _current
+    _current.set(None)
+    yield
+
+
 # ── Event pipeline test helpers (issues 142-151) ─────────────────────────────
 
 @pytest.fixture(autouse=True)

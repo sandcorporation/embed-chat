@@ -26,3 +26,17 @@ def record_usage(tenant_id, call_type: str, model: str,
             """,
             [str(tenant_id), call_type, model, input_tokens, output_tokens, total],
         )
+
+
+def record_embedding_usage(resp_json: dict, tenant_id, model: str) -> None:
+    """임베딩 응답(OpenAI-호환)의 usage를 읽어 embedding 사용량으로 기록한다.
+
+    OpenAI는 usage.total_tokens(또는 prompt_tokens)를 준다. usage가 없으면(일부 ollama/custom)
+    조용히 생략한다(추정은 후속). httpx 직접 호출이라 langchain 콜백이 못 잡으므로 수동 경로.
+    """
+    if not tenant_id:
+        return
+    usage = (resp_json or {}).get("usage") or {}
+    total = usage.get("total_tokens") or usage.get("prompt_tokens") or 0
+    if total:
+        record_usage(tenant_id, "embedding", model, input_tokens=int(total), output_tokens=0)

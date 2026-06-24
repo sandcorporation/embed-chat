@@ -8,8 +8,13 @@ from typing import TypeVar, cast
 from pydantic import BaseModel
 
 from apps.agent.providers import build_llm_client, PROVIDER_ANTHROPIC
+from apps.usage.instrument import UsageRecordingCallback
+from apps.usage.context import override_call_type
 
 T = TypeVar("T", bound=BaseModel)
+
+# 모든 LLM 호출에 토큰 사용량 콜백을 부착한다(UsageContext로 tenant·call_type 귀속). 스테이트리스라 공유.
+_USAGE_CONFIG = {"callbacks": [UsageRecordingCallback()]}
 
 
 def _mark_cache_breakpoint(provider, messages):
@@ -42,13 +47,13 @@ def _mark_cache_breakpoint(provider, messages):
 def complete_structured(provider, messages, schema: type[T]) -> T:
     """구조화 출력을 반환한다 (schema 인스턴스). 제네릭이라 호출부가 schema의 필드에 타입 안전하게 접근한다."""
     messages = _mark_cache_breakpoint(provider, messages)
-    result = build_llm_client(provider).with_structured_output(schema).invoke(messages)
+    result = build_llm_client(provider).with_structured_output(schema).invoke(messages, config=_USAGE_CONFIG)
     return cast(T, result)
 
 
 def complete_text(provider, messages) -> str:
     """LLM 응답 본문(문자열)을 반환한다."""
-    return cast(str, build_llm_client(provider).invoke(messages).content)
+    return cast(str, build_llm_client(provider).invoke(messages, config=_USAGE_CONFIG).content)
 
 
 def stream_structured(provider, messages, schema):
@@ -60,7 +65,7 @@ def stream_structured(provider, messages, schema):
     """
     messages = _mark_cache_breakpoint(provider, messages)
     client = build_llm_client(provider).with_structured_output(schema)
-    for chunk in client.stream(messages):
+    for chunk in client.stream(messages, config=_USAGE_CONFIG):
         if isinstance(chunk, dict):
             yield chunk
         elif hasattr(chunk, "model_dump"):
@@ -92,5 +97,6 @@ def transcribe_image(provider, image_bytes: bytes, mime_type: str = "image/png")
         {"type": "text", "text": _OCR_TRANSCRIBE_PROMPT},
         {"type": "image", "source_type": "base64", "data": b64, "mime_type": mime_type},
     ])
-    result = build_llm_client(provider).bind(temperature=0).invoke([message])
+    with override_call_type("ocr"):
+        result = build_llm_client(provider).bind(temperature=0).invoke([message], config=_USAGE_CONFIG)
     return cast(str, result.content)

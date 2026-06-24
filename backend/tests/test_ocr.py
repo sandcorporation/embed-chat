@@ -142,7 +142,7 @@ def test_transcribe_image_builds_vision_message_with_guardrail(monkeypatch):
         def bind(self, **kwargs):
             captured["bound"] = kwargs
             return self
-        def invoke(self, messages):
+        def invoke(self, messages, **kwargs):
             captured["messages"] = messages
             return SimpleNamespace(content="OUT")
     monkeypatch.setattr(llm_mod, "build_llm_client", lambda provider: _Client())

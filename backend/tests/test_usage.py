@@ -3,7 +3,7 @@ import uuid
 import pytest
 
 from apps.usage.models import TokenUsage
-from apps.usage.recording import record_usage
+from apps.usage.recording import record_usage, record_embedding_usage
 
 
 @pytest.mark.django_db
@@ -32,3 +32,48 @@ def test_record_usage_isolates_by_key():
     assert TokenUsage.objects.get(tenant_id=b, call_type="chat", model="m1").input_tokens == 99
     assert TokenUsage.objects.get(tenant_id=a, call_type="embedding", model="m2").input_tokens == 3
     assert TokenUsage.objects.count() == 3
+
+
+@pytest.mark.django_db
+def test_callback_records_usage_from_langchain_response():
+    """UsageRecordingCallback이 langchain 응답의 usage_metadata를 UsageContext 귀속으로 기록한다."""
+    from langchain_core.outputs import LLMResult, ChatGeneration
+    from langchain_core.messages import AIMessage
+    from apps.usage.context import set_usage_context
+    from apps.usage.instrument import UsageRecordingCallback
+
+    tid = uuid.uuid4()
+    set_usage_context(tid, TokenUsage.CALL_CHAT, session_id="s1")
+
+    msg = AIMessage(content="안녕", usage_metadata={"input_tokens": 12, "output_tokens": 8, "total_tokens": 20})
+    result = LLMResult(generations=[[ChatGeneration(message=msg)]], llm_output={"model_name": "gpt-4o-mini"})
+    UsageRecordingCallback().on_llm_end(result)
+
+    row = TokenUsage.objects.get(tenant_id=tid, call_type="chat", model="gpt-4o-mini")
+    assert (row.input_tokens, row.output_tokens, row.total_tokens, row.request_count) == (12, 8, 20, 1)
+
+
+@pytest.mark.django_db
+def test_callback_noop_without_context():
+    """UsageContext가 없으면(테넌트 미상) 기록하지 않는다(안전)."""
+    from langchain_core.outputs import LLMResult, ChatGeneration
+    from langchain_core.messages import AIMessage
+    from apps.usage.context import _current
+    from apps.usage.instrument import UsageRecordingCallback
+
+    _current.set(None)
+    msg = AIMessage(content="x", usage_metadata={"input_tokens": 5, "output_tokens": 1, "total_tokens": 6})
+    UsageRecordingCallback().on_llm_end(LLMResult(generations=[[ChatGeneration(message=msg)]]))
+    assert TokenUsage.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_record_embedding_usage_from_response():
+    """OpenAI-호환 임베딩 응답의 usage를 embedding 사용량으로 기록(없으면 생략)."""
+    tid = uuid.uuid4()
+    record_embedding_usage({"usage": {"prompt_tokens": 42, "total_tokens": 42}}, tid, "text-embedding-3-small")
+    row = TokenUsage.objects.get(tenant_id=tid, call_type="embedding")
+    assert row.total_tokens == 42 and row.request_count == 1
+
+    record_embedding_usage({}, tid, "text-embedding-3-small")   # usage 없음 → 생략
+    assert TokenUsage.objects.filter(tenant_id=tid, call_type="embedding").count() == 1

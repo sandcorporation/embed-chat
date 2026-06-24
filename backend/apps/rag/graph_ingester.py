@@ -64,9 +64,12 @@ def ingest_to_graph(text: str, tenant_id: str, document_id: str, label: str) -> 
     from apps.rag.ingesters import chunk_text, get_embeddings
     from apps.tenants.models import TenantConfig
     from apps.agent.providers import extraction_provider, embedding_provider
+    from apps.usage.context import set_usage_context
 
     text = _CONTROL_CHARS.sub("", text or "")
     gs = GraphStore(tenant_id)
+    # 토큰 사용량 귀속(extraction). OCR은 transcribe_image가 'ocr'로, 임베딩은 'embedding'으로 재태깅.
+    set_usage_context(tenant_id, "extraction")
 
     config = TenantConfig.objects.filter(tenant_id=tenant_id).first()
     provider = extraction_provider(config) if config else None
