@@ -9,6 +9,7 @@ import pytest
 from django.test import Client
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
+os.environ.setdefault("TASKIQ_INMEMORY", "1")  # taskiq chat 태스크를 인라인 실행(issue 190)
 
 
 
