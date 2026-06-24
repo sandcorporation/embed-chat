@@ -43,6 +43,52 @@ def publish_hitl_end(session_id: str) -> None:
     r.publish(f"session:{session_id}", json.dumps({"type": "hitl_end"}))
 
 
+# ── async 포트 (issue 193) — taskiq chat 워커·ASGI SSE가 쓴다. 채널·payload는 sync와 동일. ──
+def get_async_redis_client():
+    import redis.asyncio as aioredis
+
+    return aioredis.from_url(settings.REDIS_URL)
+
+
+async def apublish_token(session_id: str, content: str) -> None:
+    r = get_async_redis_client()
+    try:
+        await r.publish(f"session:{session_id}", json.dumps({"type": "token", "content": content}))
+    finally:
+        await r.aclose()
+
+
+async def apublish_done(session_id: str) -> None:
+    r = get_async_redis_client()
+    try:
+        await r.publish(f"session:{session_id}", json.dumps({"type": "done"}))
+    finally:
+        await r.aclose()
+
+
+async def apublish_error(session_id: str, message: str) -> None:
+    r = get_async_redis_client()
+    try:
+        await r.publish(f"session:{session_id}", json.dumps({"type": "error", "message": message}))
+    finally:
+        await r.aclose()
+
+
+async def asubscribe(session_id: str):
+    """session 채널을 async 구독해 메시지(dict)를 yield한다(ASGI SSE generator용)."""
+    r = get_async_redis_client()
+    pubsub = r.pubsub()
+    await pubsub.subscribe(f"session:{session_id}")
+    try:
+        async for message in pubsub.listen():
+            if message.get("type") == "message":
+                yield json.loads(message["data"])
+    finally:
+        await pubsub.unsubscribe(f"session:{session_id}")
+        await pubsub.aclose()
+        await r.aclose()
+
+
 def publish_hitl_new(tenant_id: str, session_id: str, reason: str = "") -> None:
     r = get_redis_client()
     r.publish(f"hitl:{tenant_id}", json.dumps({"type": "hitl_new", "session_id": session_id, "reason": reason}))
