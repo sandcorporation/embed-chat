@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
-import { FileText, Network, Users, Settings, UserCog, Headphones, Building2 } from 'lucide-react'
+import { FileText, Network, Users, Settings, UserCog, Headphones, Building2, BarChart3 } from 'lucide-react'
 import OperatorLogin from './pages/OperatorLogin'
 import OperatorTenants from './pages/OperatorTenants'
 import TenantLogin from './pages/TenantLogin'
@@ -12,12 +12,15 @@ import SessionDetailPage from './components/SessionDetailPage'
 import ConfigTab from './components/ConfigTab'
 import AgentsTab from './components/AgentsTab'
 import HitlTab from './components/HitlTab'
+import TenantUsageTab from './components/TenantUsageTab'
+import OperatorUsageTab from './components/OperatorUsageTab'
 import { getAccess, bootSilentRefresh } from './auth'
 import { operatorLogout, operatorLogoutAll, agentLogout, agentLogoutAll } from './api'
 
 const ICON = 'h-4 w-4'
 const operatorNav: NavItem[] = [
   { to: '/operator/tenants', label: 'Tenants', icon: <Building2 className={ICON} /> },
+  { to: '/operator/usage', label: '사용량', icon: <BarChart3 className={ICON} /> },
 ]
 const tenantNav: NavItem[] = [
   { to: '/tenant/documents', label: '문서', icon: <FileText className={ICON} /> },
@@ -26,6 +29,7 @@ const tenantNav: NavItem[] = [
   { to: '/tenant/config', label: '설정', icon: <Settings className={ICON} /> },
   { to: '/tenant/agents', label: '팀원', icon: <UserCog className={ICON} /> },
   { to: '/tenant/hitl', label: 'HITL 상담', icon: <Headphones className={ICON} /> },
+  { to: '/tenant/usage', label: '사용량', icon: <BarChart3 className={ICON} /> },
 ]
 
 export default function App() {
@@ -95,6 +99,7 @@ export default function App() {
       <Route path="/operator" element={operatorEl}>
         <Route index element={<Navigate to="tenants" replace />} />
         <Route path="tenants" element={<OperatorTenants />} />
+        <Route path="usage" element={<OperatorUsageTab />} />
       </Route>
 
       <Route path="/tenant" element={tenantEl}>
@@ -108,6 +113,7 @@ export default function App() {
         <Route path="agents" element={<AgentsTab />} />
         <Route path="hitl" element={<HitlTab />} />
         <Route path="hitl/:escalationId" element={<HitlTab />} />
+        <Route path="usage" element={<TenantUsageTab />} />
       </Route>
     </Routes>
   )

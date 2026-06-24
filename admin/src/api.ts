@@ -31,6 +31,11 @@ import {
   appsTenantsApiChangePassword,
 } from './generated/endpoints/tenant-agents/tenant-agents'
 import {
+  appsUsageApiTenantUsage,
+  appsUsageApiOperatorUsage,
+} from './generated/endpoints/usage/usage'
+import type { TenantUsageOut, OperatorUsageOut } from './generated/model'
+import {
   appsRagApiListDocuments,
   appsRagApiUploadDocument,
   appsRagApiUpdateDocument,
@@ -296,4 +301,12 @@ export function openEscalationStream(onEvent: (event: any) => void): StreamHandl
       unsubscribe()
     },
   }
+}
+
+// ── 토큰 사용량 (PRD-langfuse-token-tracking) ────────────────────────────────
+export async function tenantUsage(days = 30): Promise<TenantUsageOut> {
+  return (await appsUsageApiTenantUsage({ days })).data as TenantUsageOut
+}
+export async function operatorUsage(days = 30): Promise<OperatorUsageOut> {
+  return (await appsUsageApiOperatorUsage({ days })).data as OperatorUsageOut
 }
