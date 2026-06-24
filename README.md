@@ -21,7 +21,7 @@ Embed Chat는 타사 웹사이트에 iframe으로 삽입하는 챗봇을 제공�
 | **Redis** | SSE pub/sub + Celery 브로커 + **EventBus(Streams)** + relay wake + 레이트리밋·세션 락 |
 | **Widget** (`/chatbot/{slug}/`) | Visitor용 채팅 위젯 (React) — 토큰 없이 slug로 접근 |
 | **Landing** (`/`) | 공개 소개 페이지 — 실제 `ChatWidget`을 mock 스트리밍으로 구동하는 라이브 챗봇 데모 + 지식그래프(react-force-graph) 데모 + 연락처. widget 레포의 별도 멀티페이지 엔트리(무거운 데모 의존은 landing 청크에만 → 위젯 챗봇 번들은 경량 유지) |
-| **Admin UI** (`/admin-ui/`) | Operator·Tenant 관리 화면 (React + Tailwind/shadcn) — **좌측 사이드바 내비 + 자원별 URL 라우트**(ADR-0017). 문서·**지식그래프 인스펙터**·Visitors·설정(Provider 포함)·팀원·HITL 섹션 |
+| **Admin UI** (`/admin-ui/`) | Operator·Tenant 관리 화면 (React + Tailwind/shadcn) — **좌측 사이드바 내비 + 자원별 URL 라우트**(ADR-0017). 문서·**지식그래프 인스펙터**·Visitors·설정(Provider 포함)·팀원·HITL·**토큰 사용량**(테넌트=자기 것/오퍼레이터=전체, recharts) 섹션 |
 | **Nginx** | 리버스 프록시, 정적 파일 서빙 |
 
 > **저장소 역할 분담**: **PostgreSQL이 관계형 데이터 + LangGraph 대화 체크포인트 + RAG 지식그래프·임베딩(pgvector)** 을 모두 담당합니다. GraphRAG의 엔티티/관계 모델은 그대로이며 저장 엔진만 Neo4j→pgvector로 이전했습니다([ADR-0021](./docs/adr/0021-graphstore-pgvector-replaces-neo4j.md)) — 단일 DB로 통합해 박스 부담을 줄이고 관리형 Postgres 이식을 단순화. (GraphRAG 채택 자체는 [ADR-0007](./docs/adr/0007-graphrag-neo4j-replaces-2step-vector-rag.md).)
@@ -109,6 +109,7 @@ START → local_search → call_llm ─(context_sufficient=False)─→ source_s
 - **프롬프트 하드닝**(인젝션 방어): 비신뢰 입력(RAG·메모리·Visitor 메시지)을 `UNTRUSTED_DATA` 구역으로 격리·라벨링하고, 플랫폼이 anti-disclosure 지침을 항상 주입합니다. 테넌트 스코프 RAG와 무도구 에이전트가 크로스테넌트·행동 위험을 이미 차단합니다.
 - **프롬프트 캐싱 친화 구조**: 테넌트-불변 prefix(구조화 출력 tool 스키마 + Base System Prompt + 보안 지침)를 안정 prefix로 고정하고, 매 턴 바뀌는 휘발성(RAG·메모리·운영 안내)은 마지막 사용자 턴으로 내려 모든 세션·턴에서 prefix가 재사용되게 합니다. Anthropic provider는 안정 블록에 `cache_control` 분기점 1개를 주입(boundary에서 provider-aware), OpenAI·OpenRouter는 자동 prefix 캐싱을 탑니다.
 - **스트리밍**: 토큰·HITL 이벤트는 Redis pub/sub(`session:{id}` 채널)을 통해 SSE로 전달됩니다([ADR-0001](./docs/adr/0001-sse-redis-pubsub.md)). 다중 API 인스턴스에서도 스트리밍이 보장됩니다. AI 답변은 **토큰 델타로 실시간** 흘러(첫 토큰까지 대기 최소화) 위젯이 타이핑되듯 누적 렌더합니다. 구조화 출력의 라우팅 신호(`context_sufficient`)를 응답보다 **먼저** 받도록 스키마를 배치해, 원문 폴백(비-종단 패스)에선 스트리밍을 억제하고(중복 출력 방지) 종단 패스만 흘립니다. provider가 부분 구조화 스트리밍을 못 하면 자동으로 현행 one-shot으로 저하하며, `CHAT_STREAMING_ENABLED=false`로 전면 끌 수 있습니다.
+- **토큰 사용량 추적**: 모든 LLM·임베딩 호출의 토큰을 **테넌트·call_type별로** 집계합니다. LLM 경계(`apps/agent/llm.py`)의 langchain 콜백 + 임베딩 응답 usage를 한 곳에서 캡처해, 우리 DB 롤업(`TokenUsage`, 인앱 사용량 화면용)과 **Langfuse**(오퍼레이터 트레이스·디버깅, A1 셀프호스트·env 미설정 시 no-op)에 동시 기록합니다. 테넌트는 자기 사용량을, 오퍼레이터는 전체를 봅니다.
 - **마크다운 챗버블**: AI(assistant) 메시지는 위젯·admin 모두 마크다운으로 렌더합니다(굵게·리스트·코드블록·표·링크, GFM). 스트리밍 중에도 라이브로 서식이 입혀집니다(react-markdown). 방문자 입력·상담원·시스템 안내는 평문 유지. 보안: raw HTML 미파싱·이미지 비활성·링크는 새 탭 + `rel="noopener noreferrer nofollow"` + http/https/mailto만 허용(`javascript:`·`data:` 차단)으로 3자 사이트 iframe에서 AI 출력의 XSS를 막습니다.
 
 ### HITL (Human-in-the-Loop)
