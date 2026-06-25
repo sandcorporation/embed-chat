@@ -947,6 +947,28 @@
             ],
             "title": "Require Identity Verification"
           },
+          "scope_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Description"
+          },
+          "scope_refusal_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Refusal Message"
+          },
           "system_prompt": {
             "anyOf": [
               {
@@ -957,6 +979,17 @@
               }
             ],
             "title": "System Prompt"
+          },
+          "topic_scope_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Scope Enabled"
           },
           "webhook_type": {
             "anyOf": [
@@ -1087,6 +1120,14 @@
             "title": "Require Identity Verification",
             "type": "boolean"
           },
+          "scope_description": {
+            "title": "Scope Description",
+            "type": "string"
+          },
+          "scope_refusal_message": {
+            "title": "Scope Refusal Message",
+            "type": "string"
+          },
           "slug": {
             "default": "",
             "title": "Slug",
@@ -1095,6 +1136,10 @@
           "system_prompt": {
             "title": "System Prompt",
             "type": "string"
+          },
+          "topic_scope_enabled": {
+            "title": "Topic Scope Enabled",
+            "type": "boolean"
           },
           "webhook_type": {
             "title": "Webhook Type",
@@ -1122,6 +1167,9 @@
           "hitl_schedule",
           "hitl_holidays",
           "require_identity_verification",
+          "topic_scope_enabled",
+          "scope_description",
+          "scope_refusal_message",
           "llm_provider_type",
           "llm_base_url",
           "llm_api_key",
