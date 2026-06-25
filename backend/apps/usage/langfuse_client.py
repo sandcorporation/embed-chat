@@ -33,3 +33,46 @@ def get_langfuse_handler():
         return CallbackHandler()
     except Exception:
         return None
+
+
+@functools.lru_cache(maxsize=1)
+def get_langfuse_client():
+    """Langfuse v3 클라이언트(싱글톤) — 설정 시 인스턴스, 아니면 None. import·생성 실패는 no-op로 흡수.
+
+    임베딩은 httpx 직접 호출이라 langchain 콜백이 못 잡는다(ADR/PRD-embedding-langfuse). 그래서
+    이 클라이언트로 generation을 수동 발행한다. LLM 트레이스와 같은 전역 클라이언트라 flush를 공유한다.
+    """
+    if not langfuse_enabled():
+        return None
+    try:
+        from langfuse import Langfuse
+        return Langfuse()
+    except Exception:
+        return None
+
+
+def record_embedding_langfuse(resp_json: dict, tenant_id, model: str, inputs, call_type: str = "embedding") -> None:
+    """임베딩 응답을 Langfuse generation으로 발행한다(LLM 호출과 대칭, deep module).
+
+    미설정/무tenant면 no-op, 발행 예외는 흡수한다(임베딩/인제스션/chat를 절대 안 깸 — best-effort).
+    토큰은 응답 usage(provider 실측)에서 읽고, 입력 텍스트는 LANGFUSE_CAPTURE_CONTENT off면 마스킹한다.
+    """
+    if not tenant_id:
+        return
+    client = get_langfuse_client()
+    if client is None:
+        return
+    try:
+        usage = (resp_json or {}).get("usage") or {}
+        total = int(usage.get("total_tokens") or usage.get("prompt_tokens") or 0)
+        payload_input = inputs if _capture_content() else "[REDACTED]"
+        gen = client.start_generation(
+            name="embedding",
+            model=model,
+            input=payload_input,
+            usage_details={"input": total},
+            metadata={"tenant_id": str(tenant_id), "call_type": call_type},
+        )
+        gen.end()
+    except Exception:
+        pass
