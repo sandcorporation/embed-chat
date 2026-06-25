@@ -58,6 +58,25 @@ describe('HitlTab — 세션 콘솔', () => {
     await waitFor(() => expect(api.takeoverSession).toHaveBeenCalledWith('s-idle'))
   })
 
+  it('"내역 보기"를 누르면 takeover 없이 그 세션의 채팅 내역을 펼친다', async () => {
+    vi.mocked(api.listEscalations).mockResolvedValue([] as any)
+    vi.mocked(api.listSessions).mockResolvedValue([sess({ session_id: 's-idle', visitor_id: 'visIdle' })] as any)
+    vi.mocked(api.getSessionMessages).mockResolvedValue([
+      { id: 'm1', role: 'user', content: '안녕하세요 질문이요', created_at: '2026-06-22T00:00:00Z' },
+      { id: 'm2', role: 'assistant', content: '네 도와드릴게요', created_at: '2026-06-22T00:00:01Z' },
+    ] as any)
+
+    renderHitl()
+    await userEvent.click(await screen.findByRole('button', { name: '내역 보기' }))
+
+    expect(await screen.findByText('안녕하세요 질문이요')).toBeInTheDocument()
+    expect(screen.getByText('네 도와드릴게요')).toBeInTheDocument()
+    expect(api.takeoverSession).not.toHaveBeenCalled()
+    // 다시 누르면 닫힌다
+    await userEvent.click(screen.getByRole('button', { name: '내역 닫기' }))
+    expect(screen.queryByText('안녕하세요 질문이요')).toBeNull()
+  })
+
   it('takeover가 409면 경고하고 새로고침하지 않는다', async () => {
     vi.mocked(api.listEscalations).mockResolvedValue([] as any)
     vi.mocked(api.listSessions).mockResolvedValue([sess({ session_id: 's-idle', visitor_id: 'visIdle' })] as any)
