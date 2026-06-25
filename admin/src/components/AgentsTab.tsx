@@ -1,5 +1,6 @@
 import { useState, useEffect, FormEvent } from 'react'
-import { listAgents, createAgent, deactivateAgent, changePassword } from '../api'
+import { listAgents, createAgent, changeAgentRole, deactivateAgent, changePassword, currentAgentRole } from '../api'
+import { HttpError } from '../mutator'
 import type { AgentOut } from '../generated/model'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -7,11 +8,16 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 
+const ROLE_LABEL: Record<string, string> = { admin: 'Admin', member: 'Member' }
+
 export default function AgentsTab() {
+  const isAdmin = currentAgentRole() === 'admin'
   const [agents, setAgents] = useState<AgentOut[]>([])
   const [newUsername, setNewUsername] = useState('')
+  const [newRole, setNewRole] = useState<'admin' | 'member'>('member')
   const [createdCred, setCreatedCred] = useState<{ username: string; password: string } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const [pwForm, setPwForm] = useState({ current: '', next: '', error: '', success: false })
 
   const load = async () => setAgents(await listAgents())
@@ -22,17 +28,32 @@ export default function AgentsTab() {
     e.preventDefault()
     if (!newUsername.trim()) return
     setLoading(true)
-    const data = await createAgent(newUsername.trim())
+    const data = await createAgent(newUsername.trim(), newRole)
     setCreatedCred({ username: data.username, password: data.temp_password })
     setNewUsername('')
     await load()
     setLoading(false)
   }
 
+  const handleRole = async (a: AgentOut, role: 'admin' | 'member') => {
+    setError('')
+    try {
+      await changeAgentRole(a.id, role)
+      await load()
+    } catch (e) {
+      setError(e instanceof HttpError && e.status === 409 ? '마지막 Admin은 강등할 수 없습니다.' : '역할 변경에 실패했습니다.')
+    }
+  }
+
   const handleDeactivate = async (id: string) => {
     if (!confirm('비활성화하시겠습니까?')) return
-    await deactivateAgent(id)
-    await load()
+    setError('')
+    try {
+      await deactivateAgent(id)
+      await load()
+    } catch (e) {
+      setError(e instanceof HttpError && e.status === 409 ? '마지막 Admin은 비활성화할 수 없습니다.' : '비활성화에 실패했습니다.')
+    }
   }
 
   const handleChangePassword = async (e: FormEvent) => {
@@ -57,26 +78,45 @@ export default function AgentsTab() {
         </Card>
       )}
 
-      <div className="space-y-2">
-        <h2 className="text-sm font-semibold">팀원 추가</h2>
-        <form onSubmit={handleCreate} className="flex gap-2">
-          <Input className="flex-1" placeholder="사용자명" value={newUsername} onChange={e => setNewUsername(e.target.value)} />
-          <Button type="submit" disabled={loading}>추가</Button>
-        </form>
-      </div>
+      {isAdmin && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold">팀원 추가</h2>
+          <form onSubmit={handleCreate} className="flex gap-2">
+            <Input className="flex-1" placeholder="사용자명" value={newUsername} onChange={e => setNewUsername(e.target.value)} />
+            <select className="rounded-md border border-input bg-background px-2 text-sm" value={newRole}
+              onChange={e => setNewRole(e.target.value as 'admin' | 'member')} aria-label="역할">
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select>
+            <Button type="submit" disabled={loading}>추가</Button>
+          </form>
+        </div>
+      )}
 
       <div className="space-y-2">
         <h2 className="text-sm font-semibold">팀원 목록</h2>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        {!isAdmin && <p className="text-xs text-muted-foreground">팀원 관리는 Admin만 할 수 있습니다.</p>}
         <Table>
           <TableHeader>
-            <TableRow><TableHead>사용자명</TableHead><TableHead>상태</TableHead><TableHead>작업</TableHead></TableRow>
+            <TableRow><TableHead>사용자명</TableHead><TableHead>역할</TableHead><TableHead>상태</TableHead>{isAdmin && <TableHead>작업</TableHead>}</TableRow>
           </TableHeader>
           <TableBody>
             {agents.map(a => (
               <TableRow key={a.id}>
                 <TableCell>{a.username}</TableCell>
+                <TableCell><Badge variant={a.role === 'admin' ? 'default' : 'secondary'}>{ROLE_LABEL[a.role] || a.role}</Badge></TableCell>
                 <TableCell><Badge variant={a.is_active ? 'success' : 'secondary'}>{a.is_active ? '활성' : '비활성'}</Badge></TableCell>
-                <TableCell>{a.is_active && <Button size="sm" variant="destructive" onClick={() => handleDeactivate(a.id)}>비활성화</Button>}</TableCell>
+                {isAdmin && (
+                  <TableCell className="flex gap-2">
+                    {a.is_active && (
+                      <Button size="sm" variant="outline" onClick={() => handleRole(a, a.role === 'admin' ? 'member' : 'admin')}>
+                        {a.role === 'admin' ? 'Member로' : 'Admin으로'}
+                      </Button>
+                    )}
+                    {a.is_active && <Button size="sm" variant="destructive" onClick={() => handleDeactivate(a.id)}>비활성화</Button>}
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>

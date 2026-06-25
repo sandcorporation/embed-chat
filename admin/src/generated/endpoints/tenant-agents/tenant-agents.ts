@@ -10,14 +10,18 @@ import type {
   AgentLoginIn,
   AgentLoginOut,
   AgentOut,
+  AgentRoleIn,
   AppsTenantsApiAgentLogin401,
   AppsTenantsApiAgentLogout200,
   AppsTenantsApiAgentLogoutAll200,
   AppsTenantsApiAgentRefresh401,
   AppsTenantsApiAgentSignup400,
   AppsTenantsApiAgentSignup409,
+  AppsTenantsApiChangeAgentRole400,
+  AppsTenantsApiChangeAgentRole409,
   AppsTenantsApiChangePassword200,
   AppsTenantsApiChangePassword400,
+  AppsTenantsApiDeactivateAgent409,
   ChangePasswordIn
 } from '../../model';
 
@@ -348,13 +352,20 @@ export type appsTenantsApiDeactivateAgentResponse200 = {
   data: AgentOut
   status: 200
 }
+
+export type appsTenantsApiDeactivateAgentResponse409 = {
+  data: AppsTenantsApiDeactivateAgent409
+  status: 409
+}
     
 export type appsTenantsApiDeactivateAgentResponseSuccess = (appsTenantsApiDeactivateAgentResponse200) & {
   headers: Headers;
 };
-;
+export type appsTenantsApiDeactivateAgentResponseError = (appsTenantsApiDeactivateAgentResponse409) & {
+  headers: Headers;
+};
 
-export type appsTenantsApiDeactivateAgentResponse = (appsTenantsApiDeactivateAgentResponseSuccess)
+export type appsTenantsApiDeactivateAgentResponse = (appsTenantsApiDeactivateAgentResponseSuccess | appsTenantsApiDeactivateAgentResponseError)
 
 export const getAppsTenantsApiDeactivateAgentUrl = (agentId: string,) => {
 
@@ -372,6 +383,55 @@ export const appsTenantsApiDeactivateAgent = async (agentId: string, options?: R
     method: 'PATCH'
     
     
+  }
+);}
+
+
+/**
+ * @summary Change Agent Role
+ */
+export type appsTenantsApiChangeAgentRoleResponse200 = {
+  data: AgentOut
+  status: 200
+}
+
+export type appsTenantsApiChangeAgentRoleResponse400 = {
+  data: AppsTenantsApiChangeAgentRole400
+  status: 400
+}
+
+export type appsTenantsApiChangeAgentRoleResponse409 = {
+  data: AppsTenantsApiChangeAgentRole409
+  status: 409
+}
+    
+export type appsTenantsApiChangeAgentRoleResponseSuccess = (appsTenantsApiChangeAgentRoleResponse200) & {
+  headers: Headers;
+};
+export type appsTenantsApiChangeAgentRoleResponseError = (appsTenantsApiChangeAgentRoleResponse400 | appsTenantsApiChangeAgentRoleResponse409) & {
+  headers: Headers;
+};
+
+export type appsTenantsApiChangeAgentRoleResponse = (appsTenantsApiChangeAgentRoleResponseSuccess | appsTenantsApiChangeAgentRoleResponseError)
+
+export const getAppsTenantsApiChangeAgentRoleUrl = (agentId: string,) => {
+
+
+  
+
+  return `/api/tenant/agents/${agentId}/role`
+}
+
+export const appsTenantsApiChangeAgentRole = async (agentId: string,
+    agentRoleIn: AgentRoleIn, options?: RequestInit): Promise<appsTenantsApiChangeAgentRoleResponse> => {
+  
+  return customInstance<appsTenantsApiChangeAgentRoleResponse>(getAppsTenantsApiChangeAgentRoleUrl(agentId),
+  {      
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      agentRoleIn,)
   }
 );}
 

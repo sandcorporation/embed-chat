@@ -148,6 +148,10 @@ class AgentCreateIn(Schema):
     role: str | None = None  # 미지정 시 Member(ADR-0025)
 
 
+class AgentRoleIn(Schema):
+    role: str
+
+
 class AgentCreatedOut(Schema):
     id: str
     username: str
@@ -255,6 +259,15 @@ def _get_tenant_from_auth(auth_obj):
     return auth_obj
 
 
+def _is_last_active_admin(agent) -> bool:
+    """이 agent가 조직의 마지막 활성 Admin인지 — 비활성화·강등 차단용(lockout 방지, issue 210)."""
+    if agent.role != TenantAgent.ROLE_ADMIN or not agent.is_active:
+        return False
+    return not TenantAgent.objects.filter(
+        tenant_id=agent.tenant_id, role=TenantAgent.ROLE_ADMIN, is_active=True
+    ).exclude(id=agent.id).exists()
+
+
 @agent_router.get("/", response=list[AgentOut], auth=_dual_auth)
 def list_agents(request):
     tenant = _get_tenant_from_auth(request.auth)
@@ -283,16 +296,34 @@ def create_agent(request, body: AgentCreateIn):
     }
 
 
-@agent_router.patch("/{agent_id}/deactivate", response={200: AgentOut}, auth=_dual_auth)
+@agent_router.patch("/{agent_id}/deactivate", response={200: AgentOut, 409: dict}, auth=_dual_auth)
 def deactivate_agent(request, agent_id: str):
     from django.shortcuts import get_object_or_404
     from apps.tenants.permissions import require_permission, AGENTS_MANAGE
     require_permission(request.auth, AGENTS_MANAGE)
     tenant = _get_tenant_from_auth(request.auth)
     agent = get_object_or_404(TenantAgent, id=agent_id, tenant=tenant)
+    if _is_last_active_admin(agent):
+        return 409, {"detail": "마지막 Admin은 비활성화할 수 없습니다."}
     agent.is_active = False
     agent.save()
-    return {"id": str(agent.id), "username": agent.username, "is_active": agent.is_active, "role": agent.role}
+    return 200, {"id": str(agent.id), "username": agent.username, "is_active": agent.is_active, "role": agent.role}
+
+
+@agent_router.patch("/{agent_id}/role", response={200: AgentOut, 400: dict, 409: dict}, auth=_dual_auth)
+def change_agent_role(request, agent_id: str, body: AgentRoleIn):
+    from django.shortcuts import get_object_or_404
+    from apps.tenants.permissions import require_permission, AGENTS_MANAGE
+    require_permission(request.auth, AGENTS_MANAGE)
+    tenant = _get_tenant_from_auth(request.auth)
+    agent = get_object_or_404(TenantAgent, id=agent_id, tenant=tenant)
+    if body.role not in (TenantAgent.ROLE_ADMIN, TenantAgent.ROLE_MEMBER):
+        return 400, {"detail": "유효하지 않은 역할입니다."}
+    if body.role == TenantAgent.ROLE_MEMBER and _is_last_active_admin(agent):
+        return 409, {"detail": "마지막 Admin은 강등할 수 없습니다."}
+    agent.role = body.role
+    agent.save(update_fields=["role"])
+    return 200, {"id": str(agent.id), "username": agent.username, "is_active": agent.is_active, "role": agent.role}
 
 
 @agent_router.post("/me/change-password", response={200: dict, 400: dict}, auth=tenant_agent_auth)

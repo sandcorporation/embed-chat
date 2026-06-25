@@ -101,3 +101,65 @@ def test_member_cannot_change_slug(client, tenant_member_token):
     r = client.patch("/api/tenant/slug/", {"slug": "my-shop"}, content_type="application/json",
                      **_hdr(tenant_member_token))
     assert r.status_code == 403
+
+
+# ── 역할 변경 + last-admin 가드 (issue 210) ──────────────────────────────────
+
+def _make_agent(tenant, username, role):
+    from apps.tenants.models import TenantAgent
+    a = TenantAgent(tenant=tenant, username=username, role=role)
+    a.set_password("x")
+    a.save()
+    return a
+
+
+@pytest.mark.django_db
+def test_admin_promotes_member_to_admin(client, tenant_agent_token, tenant_with_key):
+    tenant, _ = tenant_with_key
+    m = _make_agent(tenant, "m", "member")
+    r = client.patch(f"{AGENTS}{m.id}/role", {"role": "admin"}, content_type="application/json",
+                     **_hdr(tenant_agent_token))
+    assert r.status_code == 200
+    m.refresh_from_db()
+    assert m.role == "admin"
+
+
+@pytest.mark.django_db
+def test_member_cannot_change_roles(client, tenant_member_token, tenant_with_key):
+    tenant, _ = tenant_with_key
+    other = _make_agent(tenant, "o", "member")
+    r = client.patch(f"{AGENTS}{other.id}/role", {"role": "admin"}, content_type="application/json",
+                     **_hdr(tenant_member_token))
+    assert r.status_code == 403
+
+
+@pytest.mark.django_db
+def test_cannot_demote_last_admin(client, tenant_agent_token, tenant_with_key):
+    from apps.tenants.models import TenantAgent
+    tenant, _ = tenant_with_key
+    admin = TenantAgent.objects.get(tenant=tenant, role="admin")  # 픽스처 agent = 유일 Admin
+    r = client.patch(f"{AGENTS}{admin.id}/role", {"role": "member"}, content_type="application/json",
+                     **_hdr(tenant_agent_token))
+    assert r.status_code == 409
+    admin.refresh_from_db()
+    assert admin.role == "admin"  # 그대로
+
+
+@pytest.mark.django_db
+def test_cannot_deactivate_last_admin(client, tenant_agent_token, tenant_with_key):
+    from apps.tenants.models import TenantAgent
+    tenant, _ = tenant_with_key
+    admin = TenantAgent.objects.get(tenant=tenant, role="admin")
+    r = client.patch(f"{AGENTS}{admin.id}/deactivate", **_hdr(tenant_agent_token))
+    assert r.status_code == 409
+
+
+@pytest.mark.django_db
+def test_can_demote_admin_when_another_admin_exists(client, tenant_agent_token, tenant_with_key):
+    from apps.tenants.models import TenantAgent
+    tenant, _ = tenant_with_key
+    admin1 = TenantAgent.objects.get(tenant=tenant, role="admin")
+    _make_agent(tenant, "admin2", "admin")
+    r = client.patch(f"{AGENTS}{admin1.id}/role", {"role": "member"}, content_type="application/json",
+                     **_hdr(tenant_agent_token))
+    assert r.status_code == 200

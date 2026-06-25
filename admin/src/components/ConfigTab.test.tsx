@@ -39,6 +39,7 @@ async function save() {
 beforeEach(() => {
   vi.clearAllMocks()
   mockConfig()
+  vi.mocked(api.currentAgentRole).mockReturnValue('admin')  // 기본은 Admin(전 컨트롤 노출)
 })
 
 describe('ConfigTab — 세부 탭', () => {
@@ -442,5 +443,15 @@ describe('ConfigTab — 주제범위 제어', () => {
     await save()
     expect(screen.getByText(/응대 범위를 입력하세요/)).toBeInTheDocument()
     expect(api.updateTenantConfig).not.toHaveBeenCalled()
+  })
+})
+
+describe('ConfigTab — 역할 게이팅 (issue 210)', () => {
+  it('Member는 Slug 변경·API KEY 재발급 컨트롤을 보지 못한다', async () => {
+    vi.mocked(api.currentAgentRole).mockReturnValue('member')
+    renderConfig('security')
+    expect(await screen.findByText('Slug 변경은 Admin만 할 수 있습니다.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Slug 저장/ })).toBeNull()
+    expect(screen.queryByText('API KEY 재발급')).toBeNull()
   })
 })

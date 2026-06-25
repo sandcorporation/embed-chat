@@ -222,9 +222,13 @@ arm64 이미지를 빌드해 GHCR에 올리면, A1의 Jenkins가 `release` 브�
 
 ## 7. 사용 흐름
 
-### Tenant 발급 (Operator)
-1. Admin UI에서 Operator로 로그인 → **Tenant 추가** → `TENANT_KEY`와 초기 상담원 임시 비밀번호가 **1회** 표시됨.
-2. `TENANT_KEY`는 DB에 해시만 저장되므로 분실 시 재발급. Tenant 서버가 HMAC 신원검증 API 호출/팀원 생성에만 사용(브라우저 비노출).
+### Tenant 가입·발급
+- **Self-Signup(기본)**: 어드민 로그인 화면의 **"새 조직 만들기"**에서 조직 이름·username·password로 직접 가입하면 Tenant와 그 조직의 **첫 Tenant Admin**이 생기고 즉시 로그인됩니다(Operator 불필요, ADR-0025). 조직 이름은 전역 unique한 로그인 식별자(대소문자 무시)이며, 공개 챗봇 URL용 Slug는 가입 후 설정 탭에서 따로 정합니다.
+- **Operator 프로비저닝(공존)**: Operator로 로그인 → **Tenant 추가**로도 발급 가능 → `TENANT_KEY`와 초기 Admin 임시 비밀번호가 **1회** 표시. `TENANT_KEY`는 해시만 저장(분실 시 재발급), HMAC 신원검증 API·팀원 생성에만 사용(브라우저 비노출).
+
+### 권한 (Tenant Admin / Tenant Member)
+- TenantAgent는 **Admin / Member** 역할을 가집니다(권한 비트 기반, ADR-0025). **Admin은 전 권한**, **Member는 팀원 관리·`TENANT_KEY` 회전·Slug 변경만 제외한 전부**(문서·HITL·프롬프트/HITL 설정·Provider 키·조회 등 일상 운영은 다 가능).
+- **팀원 탭**: Admin이 팀원을 생성(역할 지정)·승격/강등·비활성화. **마지막 활성 Admin은 비활성화·강등 불가**(lockout 방지). Admin 전체가 사라지는 사고는 `TENANT_KEY`로 새 Admin을 만들어 복구(break-glass). Member에겐 팀원 관리·키 재발급·Slug 변경 컨트롤이 숨겨집니다.
 
 ### Tenant 운영 (TenantAgent)
 1. 어드민 UI 로그인 → **설정 탭**에서 Tenant Slug, (선택) LLM·Embedding Provider 키, HITL 토글, 브랜드 텍스트, 신원검증 등을 설정.

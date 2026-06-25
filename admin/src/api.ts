@@ -28,6 +28,7 @@ import {
   appsTenantsApiAgentLogoutAll,
   appsTenantsApiListAgents,
   appsTenantsApiCreateAgent,
+  appsTenantsApiChangeAgentRole,
   appsTenantsApiDeactivateAgent,
   appsTenantsApiChangePassword,
 } from './generated/endpoints/tenant-agents/tenant-agents'
@@ -123,11 +124,25 @@ export async function agentLogoutAll() {
 export async function listAgents() {
   return (await appsTenantsApiListAgents()).data
 }
-export async function createAgent(username: string) {
-  return (await appsTenantsApiCreateAgent({ username })).data
+export async function createAgent(username: string, role: 'admin' | 'member' = 'member') {
+  return (await appsTenantsApiCreateAgent({ username, role })).data
+}
+export async function changeAgentRole(agentId: string, role: 'admin' | 'member') {
+  return (await appsTenantsApiChangeAgentRole(agentId, { role })).data
 }
 export async function deactivateAgent(agentId: string) {
   return (await appsTenantsApiDeactivateAgent(agentId)).data
+}
+// 현재 로그인한 TenantAgent의 역할 — Access Token(JWT)의 role 클레임에서 읽어 UI 게이팅에 쓴다.
+export function currentAgentRole(): 'admin' | 'member' | null {
+  const tok = getAccess('agent')
+  if (!tok) return null
+  try {
+    const payload = JSON.parse(atob(tok.split('.')[1]))
+    return payload.role ?? null
+  } catch {
+    return null
+  }
 }
 export async function changePassword(currentPassword: string, newPassword: string) {
   try {
