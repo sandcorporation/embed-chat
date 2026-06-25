@@ -77,6 +77,21 @@ describe('HitlTab — 세션 콘솔', () => {
     expect(screen.queryByText('안녕하세요 질문이요')).toBeNull()
   })
 
+  it('주기적으로 presence를 서버 진실원천과 재조정한다(놓친 disconnect 델타 자가보정)', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(api.listEscalations).mockResolvedValue([] as any)
+      vi.mocked(api.listSessions).mockResolvedValue([sess({ session_id: 's-idle', visitor_id: 'visIdle' })] as any)
+
+      renderHitl()
+      // 초기 refresh + 주기 재조정(15s) 1회 → listSessions가 2회 이상 호출된다
+      await vi.advanceTimersByTimeAsync(16000)
+      expect(vi.mocked(api.listSessions).mock.calls.length).toBeGreaterThanOrEqual(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('takeover가 409면 경고하고 새로고침하지 않는다', async () => {
     vi.mocked(api.listEscalations).mockResolvedValue([] as any)
     vi.mocked(api.listSessions).mockResolvedValue([sess({ session_id: 's-idle', visitor_id: 'visIdle' })] as any)
