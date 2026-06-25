@@ -12,6 +12,19 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 os.environ.setdefault("TASKIQ_INMEMORY", "1")  # taskiq chat 태스크를 인라인 실행(issue 190)
 
 
+@pytest.fixture(autouse=True)
+def _clear_signup_rate_limit():
+    """공유 Redis의 가입 IP 레이트리밋 키를 테스트마다 정리 — 테스트 독립성 보장(issue 211)."""
+    try:
+        from apps.chat.sse import get_redis_client
+        r = get_redis_client()
+        for k in r.scan_iter("signup:rl:*"):
+            r.delete(k)
+    except Exception:
+        pass
+    yield
+
+
 
 
 # ── Celery eager execution ────────────────────────────────────────────────────

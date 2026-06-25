@@ -89,6 +89,9 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 CHAT_RATE_LIMIT_PER_VISITOR = int(os.environ.get("CHAT_RATE_LIMIT_PER_VISITOR", "20"))
 CHAT_RATE_LIMIT_PER_TENANT = int(os.environ.get("CHAT_RATE_LIMIT_PER_TENANT", "300"))
 
+# 공개 Self-Signup 레이트리밋 — IP당 윈도우(기본 1시간) 1회(성공 가입만 소비, ADR-0025)
+SIGNUP_RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("SIGNUP_RATE_LIMIT_WINDOW_SECONDS", "3600"))
+
 # Event pipeline (Transactional Outbox + EventBus). 단일 글로벌 내구 스트림(테스트는 격리).
 EVENTS_TOPIC = os.environ.get("EVENTS_TOPIC", "events.session")
 

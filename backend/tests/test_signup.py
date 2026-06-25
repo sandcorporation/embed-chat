@@ -56,8 +56,9 @@ def test_signup_then_login_is_case_insensitive_on_org_name(client):
 
 @pytest.mark.django_db
 def test_signup_duplicate_org_name_returns_409(client):
+    # 두 가입은 서로 다른 IP에서 — 레이트리밋(같은 IP 1회)이 아니라 중복 이름(409)을 검증하려는 것.
     client.post(SIGNUP, {"tenant_name": "Dup", "username": "a", "password": "pw12345678"},
-                content_type="application/json")
+                content_type="application/json", HTTP_X_FORWARDED_FOR="192.0.2.1")
     r = client.post(SIGNUP, {"tenant_name": " dup ", "username": "b", "password": "pw12345678"},
-                    content_type="application/json")
+                    content_type="application/json", HTTP_X_FORWARDED_FOR="192.0.2.2")
     assert r.status_code == 409
