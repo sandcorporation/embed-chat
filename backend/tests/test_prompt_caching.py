@@ -154,3 +154,81 @@ async def test_graph_volatile_in_trailing_not_system(tenant_with_key, fake_chat_
     assert "홍길동" not in system           # 휘발성은 안정 prefix에 없다
     assert "홍길동" in trailing             # trailing 턴에 실린다
     assert "UNTRUSTED_DATA" in trailing     # 격리 유지
+
+
+# ── Issue 202: 나머지 그래프 플로우 (폴백·영업시간 외·주제범위 ON) ────────────
+
+@pytest.mark.django_db(transaction=True)
+async def test_graph_system_prefix_stable_on_source_fallback(tenant_with_key, fake_chat_llm):
+    """원문 폴백(2번째 call_llm, RAG 증가)에서도 두 call의 system prefix byte-동일, RAG는 trailing에만."""
+    from apps.rag.graph_store import GraphStore
+    from apps.rag.ingesters import get_embeddings
+    from apps.agent.graph import run_chat_agent_async
+    from apps.agent.nodes import HITLResponse
+    from apps.chat.models import ChatSession
+
+    tenant, _ = tenant_with_key
+
+    def _seed():
+        gs = GraphStore(str(tenant.id))
+        fact = "이 모니터는 1920 x 1080 FHD 해상도를 지원합니다."
+        gs.ensure_vector_index(dimensions=1024)
+        emb = get_embeddings([fact], provider=gs._embedding_provider())[0]
+        gs.upsert_text_unit("u-res", fact, emb, source_document_id="d1", chunk_index=0)
+    await adb(_seed)()
+    # context_sufficient=False → source_search → 2번째 call_llm
+    fake_chat_llm.override = lambda m: HITLResponse(
+        response="죄송합니다.", needs_hitl=False, hitl_reason="",
+        context_sufficient=False, in_scope=True)
+
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-fb")
+    await run_chat_agent_async(session, "지원 해상도 알려줘")
+
+    calls = _chat_calls(fake_chat_llm.captured)
+    assert len(calls) == 2, f"폴백이면 call_llm 2회여야: {len(calls)}"
+    assert calls[0][0].content == calls[1][0].content      # system prefix 두 call 동일
+    assert "1920" in calls[1][-1].content                  # 보강된 RAG는 trailing
+    assert "1920" not in calls[1][0].content               # system엔 없다
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_graph_offhours_notice_in_trailing_not_system(tenant_with_key, fake_chat_llm, monkeypatch):
+    """영업시간 외 운영 안내는 trailing 턴에만, system prefix 불변."""
+    from apps.tenants import business_hours
+    from apps.agent.graph import run_chat_agent_async
+    from apps.chat.models import ChatSession
+
+    monkeypatch.setattr(business_hours, "is_open", lambda config, now: False)
+    tenant, _ = tenant_with_key  # hitl_enabled 기본 True → 시간 외 운영 안내 주입
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-oh")
+    await run_chat_agent_async(session, "안녕")
+
+    calls = _chat_calls(fake_chat_llm.captured)
+    assert "운영 안내" in calls[0][-1].content       # 안내는 trailing
+    assert "운영 안내" not in calls[0][0].content    # system prefix엔 없다
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_graph_system_prefix_stable_with_topic_scope_on(tenant_with_key, fake_chat_llm):
+    """주제범위 ON: scope 지침(테넌트 불변)이 안정 prefix에 포함되고 모든 턴에서 byte-동일(캐싱 안 깨짐)."""
+    from apps.tenants.models import TenantConfig
+    from apps.agent.graph import run_chat_agent_async
+    from apps.chat.models import ChatSession
+
+    tenant, _ = tenant_with_key
+
+    def _enable():
+        c = TenantConfig.objects.get(tenant=tenant)
+        c.topic_scope_enabled = True
+        c.scope_description = "주문·배송 문의"
+        c.save()
+    await adb(_enable)()
+
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-sc")
+    await run_chat_agent_async(session, "배송 문의요")
+    await run_chat_agent_async(session, "또 질문이요")
+
+    prefixes = _chat_prefixes(fake_chat_llm.captured)
+    assert len(prefixes) >= 2
+    assert len(set(prefixes)) == 1, f"scope ON 턴 간 prefix 달라짐: {set(prefixes)}"
+    assert "주문·배송 문의" in prefixes[0]    # scope 지침이 안정 prefix에 들어감
