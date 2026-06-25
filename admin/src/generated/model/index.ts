@@ -7,6 +7,7 @@
 
 export * from './actionOut';
 export * from './agentCreateIn';
+export * from './agentCreateInRole';
 export * from './agentCreatedOut';
 export * from './agentLoginIn';
 export * from './agentLoginOut';

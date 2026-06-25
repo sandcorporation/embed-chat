@@ -287,8 +287,22 @@ def tenant_agent_token(tenant_with_key):
     from apps.tenants.auth import create_tenant_agent_token
 
     tenant, _ = tenant_with_key
-    agent = TenantAgent(tenant=tenant, username="agent")
+    # 역할 도입 전 전권 agent에 대응 — 기본 픽스처는 Admin(마이그레이션 백필과 동일).
+    agent = TenantAgent(tenant=tenant, username="agent", role=TenantAgent.ROLE_ADMIN)
     agent.set_password("agentpass")
+    agent.save()
+    return create_tenant_agent_token(agent)
+
+
+@pytest.fixture
+def tenant_member_token(tenant_with_key):
+    """Tenant Member 자격 토큰 — Admin 전용 가드 검증용."""
+    from apps.tenants.models import TenantAgent
+    from apps.tenants.auth import create_tenant_agent_token
+
+    tenant, _ = tenant_with_key
+    agent = TenantAgent(tenant=tenant, username="member", role=TenantAgent.ROLE_MEMBER)
+    agent.set_password("memberpass")
     agent.save()
     return create_tenant_agent_token(agent)
 

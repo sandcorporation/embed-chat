@@ -62,12 +62,18 @@ class Tenant(models.Model):
         return new_key
 
 class TenantAgent(models.Model):
+    ROLE_ADMIN = "admin"
+    ROLE_MEMBER = "member"
+    ROLE_CHOICES = [(ROLE_ADMIN, "Admin"), (ROLE_MEMBER, "Member")]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="agents")
     if TYPE_CHECKING:
         tenant_id: uuid.UUID  # FK _id 접근자 — django-types가 추론 못 함
     username = models.CharField(max_length=150)
     password_hash = models.CharField(max_length=255)
+    # 권한 등급(ADR-0025). 신규 agent는 기본 Member, self-signup·기존 백필은 Admin.
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default=ROLE_MEMBER)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

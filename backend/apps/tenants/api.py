@@ -140,16 +140,19 @@ class AgentOut(Schema):
     id: str
     username: str
     is_active: bool
+    role: str
 
 
 class AgentCreateIn(Schema):
     username: str
+    role: str | None = None  # 미지정 시 Member(ADR-0025)
 
 
 class AgentCreatedOut(Schema):
     id: str
     username: str
     is_active: bool
+    role: str
     temp_password: str
 
 
@@ -241,22 +244,26 @@ def _get_tenant_from_auth(auth_obj):
 def list_agents(request):
     tenant = _get_tenant_from_auth(request.auth)
     return [
-        {"id": str(a.id), "username": a.username, "is_active": a.is_active}
+        {"id": str(a.id), "username": a.username, "is_active": a.is_active, "role": a.role}
         for a in TenantAgent.objects.filter(tenant=tenant)
     ]
 
 
 @agent_router.post("/", response={201: AgentCreatedOut}, auth=_dual_auth)
 def create_agent(request, body: AgentCreateIn):
+    from apps.tenants.permissions import require_permission, AGENTS_MANAGE
+    require_permission(request.auth, AGENTS_MANAGE)
     tenant = _get_tenant_from_auth(request.auth)
+    role = body.role if body.role in (TenantAgent.ROLE_ADMIN, TenantAgent.ROLE_MEMBER) else TenantAgent.ROLE_MEMBER
     temp_password = secrets.token_urlsafe(16)
-    agent = TenantAgent(tenant=tenant, username=body.username)
+    agent = TenantAgent(tenant=tenant, username=body.username, role=role)
     agent.set_password(temp_password)
     agent.save()
     return 201, {
         "id": str(agent.id),
         "username": agent.username,
         "is_active": agent.is_active,
+        "role": agent.role,
         "temp_password": temp_password,
     }
 
@@ -264,11 +271,13 @@ def create_agent(request, body: AgentCreateIn):
 @agent_router.patch("/{agent_id}/deactivate", response={200: AgentOut}, auth=_dual_auth)
 def deactivate_agent(request, agent_id: str):
     from django.shortcuts import get_object_or_404
+    from apps.tenants.permissions import require_permission, AGENTS_MANAGE
+    require_permission(request.auth, AGENTS_MANAGE)
     tenant = _get_tenant_from_auth(request.auth)
     agent = get_object_or_404(TenantAgent, id=agent_id, tenant=tenant)
     agent.is_active = False
     agent.save()
-    return {"id": str(agent.id), "username": agent.username, "is_active": agent.is_active}
+    return {"id": str(agent.id), "username": agent.username, "is_active": agent.is_active, "role": agent.role}
 
 
 @agent_router.post("/me/change-password", response={200: dict, 400: dict}, auth=tenant_agent_auth)
@@ -327,7 +336,7 @@ def create_tenant(request, body: TenantIn):
     raw_key = secrets.token_urlsafe(32)
     tenant = Tenant.objects.create_with_key(name=body.name, raw_key=raw_key)
     temp_password = secrets.token_urlsafe(16)
-    agent = TenantAgent(tenant=tenant, username="admin")
+    agent = TenantAgent(tenant=tenant, username="admin", role=TenantAgent.ROLE_ADMIN)
     agent.set_password(temp_password)
     agent.save()
     return 201, {
@@ -569,6 +578,8 @@ def provider_quick_setup(request, body: QuickSetupIn):
 
 @tenant_router.post("/reset-key", response={200: ResetKeyOut})
 def reset_tenant_key(request):
+    from apps.tenants.permissions import require_permission, TENANT_KEY_ROTATE
+    require_permission(request.auth, TENANT_KEY_ROTATE)
     tenant = request.auth.tenant
     new_key = tenant.reset_key()
     return 200, {"new_tenant_key": new_key}
@@ -578,7 +589,9 @@ def reset_tenant_key(request):
 def update_slug(request, body: SlugIn):
     from ninja.errors import HttpError
     from apps.tenants.slug import is_valid_slug, normalize_slug
+    from apps.tenants.permissions import require_permission, SLUG_CHANGE
 
+    require_permission(request.auth, SLUG_CHANGE)
     slug = normalize_slug(body.slug)   # NFC + trim. 한글/대문자 보존, 검증·저장의 단일 기준.
     if not is_valid_slug(slug):
         raise HttpError(400, "Invalid slug format")

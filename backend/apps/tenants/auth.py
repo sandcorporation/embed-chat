@@ -57,6 +57,7 @@ def create_tenant_agent_token(agent) -> str:
         "sub": str(agent.id),
         "tenant_id": str(agent.tenant_id),
         "type": "tenant_agent",
+        "role": agent.role,  # UI 게이팅용(백엔드 authz는 DB의 agent.role로 판정)
         "exp": expire,
     }
     return jwt.encode(payload, settings.JWT_SIGNING_KEY, algorithm=ALGORITHM)

@@ -4,7 +4,9 @@
  * Embed Chat API
  * OpenAPI spec version: 1.0.0
  */
+import type { AgentCreateInRole } from './agentCreateInRole';
 
 export interface AgentCreateIn {
+  role?: AgentCreateInRole;
   username: string;
 }

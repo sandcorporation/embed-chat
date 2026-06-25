@@ -66,7 +66,7 @@ def _second_tenant_token():
     from apps.tenants.auth import create_tenant_agent_token
 
     t2 = Tenant.objects.create_with_key(name="Other Co", raw_key=secrets.token_urlsafe(32))
-    agent = TenantAgent(tenant=t2, username="agent2")
+    agent = TenantAgent(tenant=t2, username="agent2", role=TenantAgent.ROLE_ADMIN)  # slug 변경은 Admin
     agent.set_password("pass")
     agent.save()
     return t2, create_tenant_agent_token(agent)

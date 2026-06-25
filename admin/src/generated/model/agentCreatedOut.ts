@@ -8,6 +8,7 @@
 export interface AgentCreatedOut {
   id: string;
   is_active: boolean;
+  role: string;
   temp_password: string;
   username: string;
 }
