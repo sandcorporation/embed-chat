@@ -201,6 +201,7 @@ async def _aoneshot_route(state: dict, schema) -> tuple:
     if refused:
         final["response"] = final_response
         final["needs_hitl"] = False  # 범위 밖은 상담원 escalation하지 않는다
+        final["context_sufficient"] = True  # 거절은 종단 — 원문 폴백 재호출(중복 거절)을 막는다
         await apublish_token(sid, final_response)
         await apublish_done(sid)
         return final, final_response
@@ -242,10 +243,11 @@ async def _astream_and_route(state: dict, schema) -> tuple:
     response = final.get("response") or ""
     refused, final_response = _scope_gate(state, final.get("in_scope", True), response)
     if refused:
-        # 백스톱: 모델 응답을 무시하고 결정적 거절을 발행(스트리밍은 위에서 억제됨)
+        # 백스톱: 모델 응답을 무시하고 결정적 거절을 발행(스트리밍은 위에서 억제됨). 거절은 종단이라
+        # context_sufficient=True로 둬 원문 폴백 재호출(거절 중복 publish)을 막는다.
         await apublish_token(sid, final_response)
         await apublish_done(sid)
-        return {**final, "response": final_response, "needs_hitl": False}, final_response
+        return {**final, "response": final_response, "needs_hitl": False, "context_sufficient": True}, final_response
     if streaming:
         if published > 0:  # 흘린 게 있을 때만 done(빈 응답=needs_hitl 무-멘트는 무발행)
             await apublish_done(sid)
