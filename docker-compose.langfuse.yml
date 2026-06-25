@@ -17,6 +17,7 @@ services:
       langfuse-postgres: { condition: service_healthy }
       langfuse-clickhouse: { condition: service_healthy }
       langfuse-minio: { condition: service_healthy }
+      langfuse-minio-init: { condition: service_completed_successfully }
       langfuse-redis: { condition: service_healthy }
     env_file: langfuse.env
     environment: &langfuse-env
@@ -54,6 +55,7 @@ services:
       langfuse-postgres: { condition: service_healthy }
       langfuse-clickhouse: { condition: service_healthy }
       langfuse-minio: { condition: service_healthy }
+      langfuse-minio-init: { condition: service_completed_successfully }
       langfuse-redis: { condition: service_healthy }
     env_file: langfuse.env
     environment: *langfuse-env
@@ -129,6 +131,21 @@ services:
       resources:
         limits:
           memory: 512M
+
+  # MinIO 이벤트 버킷 생성(one-shot). 이게 없으면 Langfuse ingestion이 S3 업로드 시 "bucket does not
+  # exist" 500을 내고 트레이스가 조용히 유실된다(공식 self-host compose의 버킷 init 대응). mc mb -p는
+  # 멱등 — 이미 있으면 no-op. web/worker는 이 init 완료 후 기동한다.
+  langfuse-minio-init:
+    image: minio/mc
+    restart: "no"
+    depends_on:
+      langfuse-minio: { condition: service_healthy }
+    environment:
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    entrypoint:
+      - sh
+      - -c
+      - "mc alias set lf http://langfuse-minio:9000 minio $$MINIO_ROOT_PASSWORD && mc mb -p lf/langfuse"
 
 volumes:
   langfuse_pg:
