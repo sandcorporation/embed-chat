@@ -26,6 +26,7 @@ export * from './appsMemoryApiDeleteMemoryEntry404';
 export * from './appsMemoryApiGetSessionCheckpoint200';
 export * from './appsMemoryApiGetSessionCheckpoint404';
 export * from './appsMemoryApiGetSessionMessages404';
+export * from './appsMemoryApiGetSessionRetrievals200';
 export * from './appsMemoryApiListSessionsParams';
 export * from './appsMemoryApiListVisitorsParams';
 export * from './appsRagApiGraphNeighbors200';

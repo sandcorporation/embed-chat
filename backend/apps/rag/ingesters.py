@@ -44,12 +44,15 @@ def get_embeddings(texts: List[str], provider=None) -> List[List[float]]:
     resp.raise_for_status()
     body = resp.json()
 
-    # 임베딩은 httpx 직접 호출이라 langchain 콜백이 못 잡는다 — 응답 usage를 수동 기록(usage 없으면 생략).
+    # 임베딩은 httpx 직접 호출이라 langchain 콜백이 못 잡는다 — 두 sink(TokenUsage DB + Langfuse
+    # generation)를 응답 usage에서 수동 기록한다(LLM이 콜백으로 둘 다 다는 것과 대칭, issue 203).
     from apps.usage.context import get_usage_context
     from apps.usage.recording import record_embedding_usage
+    from apps.usage.langfuse_client import record_embedding_langfuse
     ctx = get_usage_context()
     if ctx and ctx.tenant_id:
         record_embedding_usage(body, ctx.tenant_id, model)
+        record_embedding_langfuse(body, ctx.tenant_id, model, texts, session_id=ctx.session_id)
 
     return [d["embedding"] for d in body["data"]]
 

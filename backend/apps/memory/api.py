@@ -194,6 +194,22 @@ def get_session_checkpoint(request, session_id: str):
     return 200, checkpoint.get("channel_values", {})
 
 
+# 200 body: {"turns": [{user_message, chunks, chunk_count}, ...]} — 턴별 GraphRAG 검색 결과.
+# rag_chunks는 휴지 체크포인트에선 비지만 히스토리에 남아 있어, 테넌트가 검색 과정을 본다(issue 207).
+@session_router.get("/{session_id}/retrievals", response={200: dict, 404: DetailOut})
+def get_session_retrievals(request, session_id: str):
+    from apps.chat.models import ChatSession
+    from apps.agent.graph import session_retrievals
+
+    tenant = request.auth.tenant
+    try:
+        ChatSession.objects.get(id=session_id, tenant_id=tenant.id)
+    except ChatSession.DoesNotExist:
+        return 404, {"detail": "Not found"}
+
+    return 200, {"turns": session_retrievals(str(session_id))}
+
+
 @session_router.get("/{session_id}/messages/", response={200: List[SessionMessageOut], 404: DetailOut})
 def get_session_messages(request, session_id: str):
     from apps.chat.models import ChatSession, ChatMessage

@@ -6,6 +6,7 @@
  */
 import type {
   AppsMemoryApiGetSessionCheckpoint200,
+  AppsMemoryApiGetSessionRetrievals200,
   AppsMemoryApiListSessionsParams,
   DetailOut,
   SessionListItemOut,
@@ -135,6 +136,48 @@ export const getAppsMemoryApiGetSessionMessagesUrl = (sessionId: string,) => {
 export const appsMemoryApiGetSessionMessages = async (sessionId: string, options?: RequestInit): Promise<appsMemoryApiGetSessionMessagesResponse> => {
   
   return customInstance<appsMemoryApiGetSessionMessagesResponse>(getAppsMemoryApiGetSessionMessagesUrl(sessionId),
+  {      
+    ...options,
+    method: 'GET'
+    
+    
+  }
+);}
+
+
+/**
+ * @summary Get Session Retrievals
+ */
+export type appsMemoryApiGetSessionRetrievalsResponse200 = {
+  data: AppsMemoryApiGetSessionRetrievals200
+  status: 200
+}
+
+export type appsMemoryApiGetSessionRetrievalsResponse404 = {
+  data: DetailOut
+  status: 404
+}
+    
+export type appsMemoryApiGetSessionRetrievalsResponseSuccess = (appsMemoryApiGetSessionRetrievalsResponse200) & {
+  headers: Headers;
+};
+export type appsMemoryApiGetSessionRetrievalsResponseError = (appsMemoryApiGetSessionRetrievalsResponse404) & {
+  headers: Headers;
+};
+
+export type appsMemoryApiGetSessionRetrievalsResponse = (appsMemoryApiGetSessionRetrievalsResponseSuccess | appsMemoryApiGetSessionRetrievalsResponseError)
+
+export const getAppsMemoryApiGetSessionRetrievalsUrl = (sessionId: string,) => {
+
+
+  
+
+  return `/api/tenant/sessions/${sessionId}/retrievals`
+}
+
+export const appsMemoryApiGetSessionRetrievals = async (sessionId: string, options?: RequestInit): Promise<appsMemoryApiGetSessionRetrievalsResponse> => {
+  
+  return customInstance<appsMemoryApiGetSessionRetrievalsResponse>(getAppsMemoryApiGetSessionRetrievalsUrl(sessionId),
   {      
     ...options,
     method: 'GET'

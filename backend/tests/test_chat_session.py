@@ -170,6 +170,46 @@ def test_get_session_checkpoint_404_for_other_tenant(client, tenant_agent_token)
 
 
 @pytest.mark.django_db(transaction=True)
+async def test_get_session_retrievals_returns_turns(client, tenant_with_key, tenant_agent_token):
+    """GET /api/tenant/sessions/{id}/retrievals → 턴별 GraphRAG 검색 결과(히스토리에서 복원, issue 207)."""
+    from asgiref.sync import sync_to_async
+    from apps.agent.graph import run_chat_agent_async
+    from apps.chat.models import ChatSession
+    adb = sync_to_async
+
+    tenant, _ = tenant_with_key
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-retr-api")
+    await run_chat_agent_async(session, "안녕하세요")
+
+    resp = await adb(client.get)(
+        f"/api/tenant/sessions/{session.id}/retrievals",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "turns" in data and isinstance(data["turns"], list)
+    assert any(t.get("user_message") == "안녕하세요" for t in data["turns"])
+
+
+@pytest.mark.django_db
+def test_get_session_retrievals_404_for_other_tenant(client, tenant_agent_token):
+    """다른 Tenant의 session_id로 retrievals 조회 시 404를 반환한다."""
+    import secrets
+    from apps.tenants.models import Tenant
+    from apps.chat.models import ChatSession
+
+    raw_key2 = secrets.token_urlsafe(32)
+    other_tenant = Tenant.objects.create_with_key(name="OtherCo RT", raw_key=raw_key2)
+    other_session = ChatSession.objects.create(tenant_id=other_tenant.id, visitor_id="v-other-rt")
+
+    resp = client.get(
+        f"/api/tenant/sessions/{other_session.id}/retrievals",
+        HTTP_AUTHORIZATION=f"Bearer {tenant_agent_token}",
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.django_db(transaction=True)
 async def test_checkpoint_has_messages_but_not_lc_messages(tenant_with_key):
     """Checkpoint channel_values에 대화는 messages로만 남고 lc_messages(프롬프트 조립물)는 없다."""
     from asgiref.sync import sync_to_async
