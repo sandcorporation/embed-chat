@@ -3,6 +3,21 @@
 
 export const API_BASE: string = import.meta.env.VITE_API_BASE || ''
 
+export type ResolveResult = 'valid' | 'notfound' | 'error'
+
+/** 공개 위젯 진입 가드 — slug가 활성 Tenant로 해석되는지 확인(렌더 전 호출).
+ *  200=valid, 404=notfound(존재하지 않는 챗봇), 그 외/네트워크 오류=error(일시적). */
+export async function resolveTenant(slug: string): Promise<ResolveResult> {
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/resolve?slug=${encodeURIComponent(slug)}`)
+    if (res.ok) return 'valid'
+    if (res.status === 404) return 'notfound'
+    return 'error'
+  } catch {
+    return 'error'
+  }
+}
+
 /** ChatWidget이 쓰는 최소 EventSource 표면(실제 EventSource·mock 둘 다 만족). */
 export interface EventSourceLike {
   addEventListener(type: string, listener: (e: { data: string }) => void): void
