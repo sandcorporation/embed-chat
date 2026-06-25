@@ -29,8 +29,11 @@ export interface TenantConfigOut {
   ocr_provider_type: string;
   platform_default_providers_enabled: boolean;
   require_identity_verification: boolean;
+  scope_description: string;
+  scope_refusal_message: string;
   slug?: string;
   system_prompt: string;
+  topic_scope_enabled: boolean;
   webhook_type: string;
   webhook_url: string;
   welcome_message: string;

@@ -130,12 +130,14 @@ class _FakeChatLLM:
         result = self.complete_structured(provider, messages, schema)
         d = result.model_dump()
         cs = d.get("context_sufficient", True)
+        insc = d.get("in_scope", True)
         resp = d.get("response", "") or ""
-        yield {"context_sufficient": cs}                              # 제어 먼저
+        ctrl = {"context_sufficient": cs, "in_scope": insc}
+        yield dict(ctrl)                                              # 제어필드 먼저(in_scope 포함)
         if resp:
             mid = max(1, len(resp) // 2)
-            yield {"context_sufficient": cs, "response": resp[:mid]}  # response 자라남
-            yield {"context_sufficient": cs, "response": resp}
+            yield {**ctrl, "response": resp[:mid]}                    # response 자라남
+            yield {**ctrl, "response": resp}
         yield d                                                       # 최종(모든 필드)
 
     async def acomplete_structured(self, provider, messages, schema):
