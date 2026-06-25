@@ -6,10 +6,17 @@
 이 챗봇 플랫폼 자체를 운영하는 팀. 어드민 페이지 최상위 권한 보유. Tenant 계정 생성/정지, 전체 현황 모니터링 담당.
 
 **Tenant**
-챗봇을 자기 사이트에 embed해서 쓰는 B2B 계약 고객사. 자기 RAG Knowledge Base, Visitor Memory를 어드민 페이지에서 직접 관리.
+챗봇을 자기 사이트에 embed해서 쓰는 B2B 계약 고객사. 자기 RAG Knowledge Base, Visitor Memory를 어드민 페이지에서 직접 관리. `Tenant.name`은 표시명이자 **전역 unique한 조직 로그인 식별자**(어드민 로그인 시 `name + username`으로 조직을 특정한다 — 대소문자·공백 무관 충돌 처리). 공개 챗봇 URL용 Slug와는 별개다(name=로그인, slug=공개 URL).
 
 **TenantAgent**
-Tenant 조직 소속의 개별 상담원 계정. 고유한 username/password를 갖고, Tenant 어드민 UI에 개인 자격으로 로그인한다. HITL `EscalationClaim.claimed_by` 식별자로 사용되어 누가 어떤 세션을 담당하는지 추적한다. TENANT_KEY(서버사이드 시크릿)와 구분되며, TenantAgent는 조직 내 여러 명이 존재할 수 있다.
+Tenant 조직 소속의 개별 상담원 계정. 고유한 username/password를 갖고, Tenant 어드민 UI에 개인 자격으로 로그인한다. HITL `EscalationClaim.claimed_by` 식별자로 사용되어 누가 어떤 세션을 담당하는지 추적한다. TENANT_KEY(서버사이드 시크릿)와 구분되며, TenantAgent는 조직 내 여러 명이 존재할 수 있다. 각 TenantAgent는 하나의 **Role**(Tenant Admin / Tenant Member)을 가진다.
+
+**Tenant Admin / Tenant Member**
+TenantAgent의 권한 등급. **Tenant Admin**은 조직 내 모든 권한을 가진다(팀원 관리·TENANT_KEY 회전·Slug 변경 포함). **Tenant Member**는 일상 운영 권한 전체를 가지되 *조직 단위·되돌리기 어려운* 행위는 제외한다 — 팀원 관리, TENANT_KEY 회전, Slug 변경. 권한 검사는 역할이 아니라 **Permission** 단위로 이뤄지며, 역할은 그 권한 집합의 프리셋이다(추후 세분화 여지). 한 조직은 항상 최소 1명의 활성 Tenant Admin을 유지한다(마지막 Admin은 비활성화·강등 불가 — lockout 방지).
+_Avoid_: Operator(플랫폼 운영자 — Tenant 외부); "관리자"만으로 Operator/Tenant Admin 혼용 금지
+
+**Permission**
+authz의 최소 단위(권한 비트). 엔드포인트는 역할이 아니라 필요한 Permission으로 가드된다(예: 팀원 관리=`agents.manage`, 키 회전=`tenant_key.rotate`, Slug 변경=`slug.change`). Role은 Permission 묶음의 프리셋이라, 나중에 per-agent 세분화를 도입해도 가드 지점은 불변이다.
 
 **Visitor**
 Tenant 사이트에서 챗봇을 실제로 사용하는 최종 사용자. Tenant 시스템의 회원 ID일 수도 있고, 익명 사용자일 수도 있음.
@@ -32,7 +39,7 @@ _Avoid_: EmbedToken(per-session 단기 토큰 — 폐지됨); 토큰(해시는 �
 Tenant를 식별하는 서버사이드 전용 시크릿. 절대 브라우저에 노출되지 않음. 두 가지 용도로만 사용: (1) Tenant 서버가 Identity Verification HMAC API를 호출할 때, (2) TenantAgent 계정을 API로 생성할 때. 어드민 UI 로그인에는 사용하지 않음.
 
 **TenantAgent 자격증명**
-TenantAgent가 어드민 UI에 로그인할 때 사용하는 username/password. Operator가 Tenant를 생성하면 초기 TenantAgent의 username과 임시 password가 1회 화면에 표시된다. 이후 추가 TenantAgent 계정은 TENANT_KEY로 인증된 API 또는 어드민 UI "팀원" 탭에서 생성한다. 로그인 성공 시 Access Token + Refresh Token을 발급받아 어드민 UI 전 기능에 접근한다.
+TenantAgent가 어드민 UI에 로그인할 때 사용하는 `tenant_name + username + password`. Tenant는 **공개 Self-Signup**으로 직접 가입한다 — 조직 이름(unique)·username·password를 입력하면 Tenant와 그 조직의 **첫 Tenant Admin** TenantAgent가 생성된다(Operator 개입 없음). 이후 팀원(Tenant Member 등) 계정은 Tenant Admin이 어드민 UI "팀원" 탭에서, 또는 TENANT_KEY로 인증된 API로 생성한다(username + 임시 password). 로그인 성공 시 Access Token + Refresh Token을 발급받는다. (Operator가 Tenant를 직접 프로비저닝하는 경로도 공존한다.)
 
 **Access Token**
 어드민 UI(Operator·TenantAgent)가 API 호출에 쓰는 단수명 Bearer 자격증명. 탈취 시 피해를 줄이려 짧게(30분) 유지하며 브라우저 sessionStorage에만 둔다. 만료되면 Refresh Token으로 무중단 재발급한다.
