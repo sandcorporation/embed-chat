@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, ChangeEvent } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { listEscalations, claimEscalation, sendEscalationMessage, resolveEscalation, openEscalationStream, sendTypingIndicator, getEscalationMessages, listSessions, takeoverSession } from '../api'
+import { listEscalations, claimEscalation, sendEscalationMessage, resolveEscalation, openEscalationStream, sendTypingIndicator, getEscalationMessages, getSessionMessages, listSessions, takeoverSession } from '../api'
 import type { StreamHandle } from '../api'
 import type { EscalationOut, SessionListItemOut } from '../generated/model'
 import { Input } from '@/components/ui/input'
@@ -108,6 +108,21 @@ function EscalationCard({ esc, onUpdate, incomingMessage }: { esc: EscalationOut
   )
 }
 
+// 다른 세션의 채팅 내역을 takeover 없이 읽기 전용으로 펼친다(getSessionMessages는 테넌트 스코프).
+function SessionHistoryInline({ sessionId }: { sessionId: string }) {
+  const [messages, setMessages] = useState<ChatMsg[] | null>(null)
+  useEffect(() => {
+    getSessionMessages(sessionId).then(d => setMessages(Array.isArray(d) ? (d as ChatMsg[]) : []))
+  }, [sessionId])
+  return (
+    <div className="mt-2 max-h-60 overflow-y-auto rounded-md bg-muted/40 p-2.5">
+      {messages === null
+        ? <p className="py-2 text-center text-xs text-muted-foreground">불러오는 중...</p>
+        : <ChatHistory messages={messages} />}
+    </div>
+  )
+}
+
 // 세션 콘솔(ADR-0017): 상단 = 진행 중 상담(escalation 카드, claim/message/resolve 보존),
 // 하단 = 다른 세션 목록(활성 먼저) + 임의 takeover. /tenant/hitl/:escalationId는 단독 딥링크.
 export default function HitlTab() {
@@ -119,7 +134,16 @@ export default function HitlTab() {
   const [loading, setLoading] = useState(true)
   const [incomingBySession, setIncomingBySession] = useState<Record<string, ChatMsg>>({})
   const [takingOver, setTakingOver] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState<Set<string>>(new Set())
   const esRef = useRef<StreamHandle | null>(null)
+
+  const toggleHistory = (sessionId: string) => {
+    setHistoryOpen(prev => {
+      const n = new Set(prev)
+      if (n.has(sessionId)) n.delete(sessionId); else n.add(sessionId)
+      return n
+    })
+  }
 
   const refresh = () => {
     Promise.all([listEscalations(), listSessions()]).then(([es, ss]) => {
@@ -204,16 +228,23 @@ export default function HitlTab() {
             <ul className="space-y-1.5">
               {otherSessions.map(s => {
                 const isActive = activeIds.has(s.session_id)
+                const open = historyOpen.has(s.session_id)
                 return (
                   <li key={s.session_id}
-                    className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
-                    <span className="font-medium">{s.visitor_id}</span>
-                    <Badge variant={isActive ? 'success' : 'secondary'}>{isActive ? '접속중' : '유휴'}</Badge>
-                    <span className="ml-auto text-xs text-muted-foreground">{new Date(s.last_activity).toLocaleString()}</span>
-                    <Button size="sm" variant="outline" disabled={takingOver === s.session_id}
-                      onClick={() => handleTakeover(s.session_id)}>
-                      {takingOver === s.session_id ? '연결 중…' : '상담 시작'}
-                    </Button>
+                    className="rounded-md border border-border bg-card px-3 py-2 text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{s.visitor_id}</span>
+                      <Badge variant={isActive ? 'success' : 'secondary'}>{isActive ? '접속중' : '유휴'}</Badge>
+                      <span className="ml-auto text-xs text-muted-foreground">{new Date(s.last_activity).toLocaleString()}</span>
+                      <Button size="sm" variant="ghost" onClick={() => toggleHistory(s.session_id)}>
+                        {open ? '내역 닫기' : '내역 보기'}
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={takingOver === s.session_id}
+                        onClick={() => handleTakeover(s.session_id)}>
+                        {takingOver === s.session_id ? '연결 중…' : '상담 시작'}
+                      </Button>
+                    </div>
+                    {open && <SessionHistoryInline sessionId={s.session_id} />}
                   </li>
                 )
               })}
