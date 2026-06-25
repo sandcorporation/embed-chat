@@ -19,13 +19,17 @@ describe('SessionDetail — 대화 흐름 안의 검색 근거 (issue 207)', () 
       { id: 'a1', role: 'assistant', content: '1920x1080입니다', created_at: '2026-06-22T00:00:01Z' },
     ] as any)
     vi.mocked(api.getSessionRetrievals).mockResolvedValue([
-      { user_message: '해상도 알려줘', chunks: ['이 모니터는 1920 x 1080 FHD 해상도를 지원합니다.'], chunk_count: 1 },
+      { user_message: '해상도 알려줘', chunks: ['이 모니터는 1920 x 1080 FHD 해상도를 지원합니다.'], chunk_count: 1,
+        nodes: ['local_search', 'call_llm', 'source_search', 'call_llm', 'save_messages'] },
     ])
     render(<SessionDetail sessionId="s1" onBack={() => {}} />)
 
     // 기본 '대화 내역' 탭에 질문·답변과 함께 검색 근거 토글이 인라인으로 있다(별도 탭 아님)
     expect(await screen.findByText('해상도 알려줘')).toBeInTheDocument()
     expect(screen.getByText('1920x1080입니다')).toBeInTheDocument()
+    // 실행 노드 흐름이 보인다(질문과 답변 사이)
+    expect(screen.getByText('source_search')).toBeInTheDocument()
+    expect(screen.getAllByText('call_llm').length).toBeGreaterThanOrEqual(1)
     const toggle = screen.getByRole('button', { name: /검색된 근거 1개/ })
 
     await userEvent.click(toggle)
@@ -38,7 +42,7 @@ describe('SessionDetail — 대화 흐름 안의 검색 근거 (issue 207)', () 
       { id: 'a1', role: 'assistant', content: '답변A', created_at: '2026-06-22T00:00:01Z' },
     ] as any)
     vi.mocked(api.getSessionRetrievals).mockResolvedValue([
-      { user_message: '질문A', chunks: ['근거A'], chunk_count: 1 },
+      { user_message: '질문A', chunks: ['근거A'], chunk_count: 1, nodes: ['local_search', 'save_messages'] },
     ])
     render(<SessionDetail sessionId="s2" onBack={() => {}} />)
 

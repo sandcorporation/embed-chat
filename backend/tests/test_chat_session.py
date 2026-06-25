@@ -189,6 +189,9 @@ async def test_get_session_retrievals_returns_turns(client, tenant_with_key, ten
     data = resp.json()
     assert "turns" in data and isinstance(data["turns"], list)
     assert any(t.get("user_message") == "안녕하세요" for t in data["turns"])
+    # 턴마다 실행 노드 흐름이 함께 온다
+    assert all(isinstance(t.get("nodes"), list) for t in data["turns"])
+    assert any("local_search" in t.get("nodes", []) for t in data["turns"])
 
 
 @pytest.mark.django_db

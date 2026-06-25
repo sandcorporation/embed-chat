@@ -74,13 +74,19 @@ def _create_checkpointer():
     return saver, conn
 
 
+_PSEUDO_NODES = {"__input__", "__start__", "__interrupt__"}
+
+
 def session_retrievals(thread_id: str) -> list[dict]:
-    """체크포인트 히스토리에서 턴별 GraphRAG 검색 결과를 복원한다(테넌트 가시성, issue 207).
+    """체크포인트 히스토리에서 턴별 GraphRAG 검색 결과 + 실행 노드 흐름을 복원한다(테넌트 가시성, 207).
 
     rag_chunks는 종단 노드에서 _clear_transient로 비워져 *휴지(최신)* 체크포인트엔 없지만, 히스토리의
     중간 체크포인트(검색 직후)엔 그대로 남아 있다 — 새 저장·스키마 변경 없이 이미 적재된 데이터를
-    노출만 한다. 각 턴(=input 경계)마다 그 턴의 최대 검색 셋과 질문을 돌려준다(검색 직후 peak를 캡처,
-    종단 clear 이전). 슬림 체크포인트·prefix 캐시 설계는 불변(그래프 상태/프롬프트 안 건드림).
+    노출만 한다. 각 턴(=input 경계)마다 {user_message, chunks, chunk_count, nodes}를 돌려준다.
+
+    nodes: 그 턴에 실행된 LangGraph 노드 순서. 메타데이터엔 노드명이 없어, 체크포인트의 versions_seen
+    (노드별 채널 소비 버전)을 직전 스텝과 비교해 새로 갱신된 노드 = 방금 실행된 노드로 역산한다(그래프는
+    순차 실행이라 스텝당 1개). 그래프/상태/프롬프트는 안 건드린다 — 슬림 체크포인트·prefix 캐시 불변.
     """
     saver, conn = _create_checkpointer()
     try:
@@ -90,12 +96,21 @@ def session_retrievals(thread_id: str) -> list[dict]:
 
     turns: list[dict] = []
     cur = None
+    prev_seen: dict = {}
     for t in reversed(rows):  # 히스토리는 최신순 → 오래된→최신으로 순회
-        cv = t.checkpoint.get("channel_values", {})
+        cp = t.checkpoint
+        cv = cp.get("channel_values", {})
         md = t.metadata or {}
         if md.get("source") == "input":  # 새 턴 경계(매 invoke가 input 체크포인트를 남김)
-            cur = {"user_message": cv.get("user_message"), "chunks": [], "chunk_count": 0}
+            cur = {"user_message": cv.get("user_message"), "chunks": [], "chunk_count": 0, "nodes": []}
             turns.append(cur)
+        # 실행 노드 역산: versions_seen에서 직전 대비 시그니처가 바뀐 실제 노드를 순서대로 수집
+        for node, chans in (cp.get("versions_seen") or {}).items():
+            sig = tuple(sorted(chans.items())) if isinstance(chans, dict) else str(chans)
+            if prev_seen.get(node) != sig:
+                prev_seen[node] = sig
+                if cur is not None and node not in _PSEUDO_NODES:
+                    cur["nodes"].append(node)
         if cur is None:
             continue
         if cv.get("user_message"):

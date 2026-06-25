@@ -12,11 +12,23 @@ const ROLE_BUBBLE: Record<string, string> = {
   human_agent: 'self-start bg-violet-500 text-white',
 }
 
-// 한 턴의 GraphRAG 검색 근거 — 질문과 답변 사이에 접이식으로(원인→결과 추적). 기본 접힘.
-function RetrievalBlock({ turn }: { turn: RetrievalTurn }) {
+// 한 턴의 실행 추적 — 질문과 답변 사이에 끼워 인과를 보여준다(원인→결과). 실행 노드 흐름은 항상
+// 보이는 압축 경로로, 검색 근거(청크)는 접이식으로(기본 접힘).
+function TurnTrace({ turn }: { turn: RetrievalTurn }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="self-stretch py-0.5">
+      {turn.nodes?.length > 0 && (
+        <div className="mb-0.5 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+          <span>실행</span>
+          {turn.nodes.map((n, i) => (
+            <Fragment key={i}>
+              {i > 0 && <span className="opacity-40">→</span>}
+              <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{n}</span>
+            </Fragment>
+          ))}
+        </div>
+      )}
       <button
         onClick={() => setOpen(o => !o)}
         className="text-[11px] text-muted-foreground hover:text-foreground"
@@ -68,7 +80,7 @@ export function ChatHistory({ messages, retrievals }: { messages: SessionMessage
             </div>
             {m.created_at && <span className="mt-0.5 text-[10px] text-muted-foreground">{new Date(m.created_at).toLocaleString()}</span>}
           </div>
-          {turnByIdx[i] && <RetrievalBlock turn={turnByIdx[i]} />}
+          {turnByIdx[i] && <TurnTrace turn={turnByIdx[i]} />}
         </Fragment>
       ))}
       <div ref={bottomRef} />

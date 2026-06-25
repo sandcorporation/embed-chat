@@ -238,7 +238,7 @@ export async function getSessionCheckpoint(sessionId: string) {
     throw e
   }
 }
-export type RetrievalTurn = { user_message: string; chunks: string[]; chunk_count: number }
+export type RetrievalTurn = { user_message: string; chunks: string[]; chunk_count: number; nodes: string[] }
 export async function getSessionRetrievals(sessionId: string): Promise<RetrievalTurn[] | null> {
   try {
     const data = (await appsMemoryApiGetSessionRetrievals(sessionId)).data as { turns?: RetrievalTurn[] }
