@@ -56,6 +56,7 @@ import {
 import {
   appsMemoryApiGetSessionMessages,
   appsMemoryApiGetSessionCheckpoint,
+  appsMemoryApiGetSessionRetrievals,
   appsMemoryApiListSessions,
   appsMemoryApiTakeoverSession,
 } from './generated/endpoints/sessions/sessions'
@@ -232,6 +233,16 @@ export async function takeoverSession(
 export async function getSessionCheckpoint(sessionId: string) {
   try {
     return (await appsMemoryApiGetSessionCheckpoint(sessionId)).data
+  } catch (e) {
+    if (e instanceof HttpError && e.status === 404) return null
+    throw e
+  }
+}
+export type RetrievalTurn = { user_message: string; chunks: string[]; chunk_count: number }
+export async function getSessionRetrievals(sessionId: string): Promise<RetrievalTurn[] | null> {
+  try {
+    const data = (await appsMemoryApiGetSessionRetrievals(sessionId)).data as { turns?: RetrievalTurn[] }
+    return data?.turns ?? []
   } catch (e) {
     if (e instanceof HttpError && e.status === 404) return null
     throw e

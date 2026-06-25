@@ -74,6 +74,39 @@ def _create_checkpointer():
     return saver, conn
 
 
+def session_retrievals(thread_id: str) -> list[dict]:
+    """체크포인트 히스토리에서 턴별 GraphRAG 검색 결과를 복원한다(테넌트 가시성, issue 207).
+
+    rag_chunks는 종단 노드에서 _clear_transient로 비워져 *휴지(최신)* 체크포인트엔 없지만, 히스토리의
+    중간 체크포인트(검색 직후)엔 그대로 남아 있다 — 새 저장·스키마 변경 없이 이미 적재된 데이터를
+    노출만 한다. 각 턴(=input 경계)마다 그 턴의 최대 검색 셋과 질문을 돌려준다(검색 직후 peak를 캡처,
+    종단 clear 이전). 슬림 체크포인트·prefix 캐시 설계는 불변(그래프 상태/프롬프트 안 건드림).
+    """
+    saver, conn = _create_checkpointer()
+    try:
+        rows = list(saver.list({"configurable": {"thread_id": thread_id}}))
+    finally:
+        conn.close()
+
+    turns: list[dict] = []
+    cur = None
+    for t in reversed(rows):  # 히스토리는 최신순 → 오래된→최신으로 순회
+        cv = t.checkpoint.get("channel_values", {})
+        md = t.metadata or {}
+        if md.get("source") == "input":  # 새 턴 경계(매 invoke가 input 체크포인트를 남김)
+            cur = {"user_message": cv.get("user_message"), "chunks": [], "chunk_count": 0}
+            turns.append(cur)
+        if cur is None:
+            continue
+        if cv.get("user_message"):
+            cur["user_message"] = cv.get("user_message")
+        rc = cv.get("rag_chunks") or []
+        if len(rc) > cur["chunk_count"]:  # 그 턴의 peak 검색 셋(clear 이전)
+            cur["chunks"] = list(rc)
+            cur["chunk_count"] = len(rc)
+    return [tn for tn in turns if tn["user_message"]]
+
+
 def build_graph(checkpointer=None, hitl_enabled=True):
     """hitl_enabled 불리언으로 토폴로지+call_llm 스키마를 다르게 컴파일한다(issue 88).
 

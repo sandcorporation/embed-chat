@@ -147,3 +147,29 @@ async def test_no_source_fallback_when_graph_answers(tenant_with_key, fake_chat_
     cv = (await adb(_read_cv)(session.id))["channel_values"]
     assert cv.get("source_text_tried") is False
     assert cv.get("rag_chunks") == []
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_session_retrievals_recovers_chunks_from_history(tenant_with_key, fake_chat_llm):
+    """휴지 체크포인트는 rag_chunks를 비우지만, session_retrievals는 히스토리에서 턴별 검색 결과를
+    복원한다 — 테넌트가 어드민에서 검색 과정을 보게 한다(issue 207, 체크포인트 슬림화는 불변)."""
+    from apps.agent.graph import run_chat_agent_async, session_retrievals
+    from apps.chat.models import ChatSession
+
+    tenant, _ = tenant_with_key
+    await adb(_seed_text_unit)(tenant)
+    fake_chat_llm.override = _fake_1920
+
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-retr")
+    await run_chat_agent_async(session, "지원하는 모니터의 해상도")
+
+    # 휴지 체크포인트엔 비어 있다(슬림화 불변)
+    cv = (await adb(_read_cv)(session.id))["channel_values"]
+    assert cv.get("rag_chunks") == []
+    # 그러나 히스토리에서 복원된다
+    turns = await adb(session_retrievals)(str(session.id))
+    assert len(turns) >= 1
+    last = turns[-1]
+    assert last["user_message"] == "지원하는 모니터의 해상도"
+    assert last["chunk_count"] >= 1
+    assert any("1920" in c for c in last["chunks"])
