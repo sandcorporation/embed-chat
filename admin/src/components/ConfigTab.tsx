@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { getTenantConfig, updateTenantConfig, resetTenantKey, updateTenantSlug, fetchProviderModels, quickSetupOpenAI } from '../api'
+import { getTenantConfig, updateTenantConfig, resetTenantKey, updateTenantSlug, fetchProviderModels, quickSetupOpenAI, currentAgentRole } from '../api'
 import type { TenantConfigOut } from '../generated/model'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -46,6 +46,7 @@ export default function ConfigTab() {
     model_id: '', system_prompt: '', agent_display_name: '상담원',
     webhook_url: '', webhook_type: '', welcome_message: '',
   } as unknown as TenantConfigOut)
+  const isAdmin = currentAgentRole() === 'admin'  // Slug 변경·키 재발급은 Admin 전용(ADR-0025)
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [newKey, setNewKey] = useState<string | null>(null)
@@ -529,14 +530,20 @@ export default function ConfigTab() {
         <div className="space-y-6">
           <div className="space-y-2">
             <Label>Tenant Slug (공개 챗봇 URL)</Label>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">/chatbot/</span>
-              <Input aria-label="Tenant Slug" className="w-64" value={slug} onChange={e => setSlug(e.target.value)}
-                placeholder="우리가게 · abc-shop" />
-              <span className="text-sm text-muted-foreground">/</span>
-              <Button size="sm" variant="outline" onClick={handleSaveSlug}>{slugSaved ? '✓ 저장됨' : 'Slug 저장'}</Button>
-            </div>
-            <p className={hint}>손님이 접속하는 공개 챗봇 주소의 일부예요. 한글·영문·숫자·하이픈을 쓸 수 있어요(예: 우리가게). 변경하면 사이트에 박아둔 기존 임베드 URL이 끊깁니다.</p>
+            {isAdmin ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">/chatbot/</span>
+                  <Input aria-label="Tenant Slug" className="w-64" value={slug} onChange={e => setSlug(e.target.value)}
+                    placeholder="우리가게 · abc-shop" />
+                  <span className="text-sm text-muted-foreground">/</span>
+                  <Button size="sm" variant="outline" onClick={handleSaveSlug}>{slugSaved ? '✓ 저장됨' : 'Slug 저장'}</Button>
+                </div>
+                <p className={hint}>손님이 접속하는 공개 챗봇 주소의 일부예요. 한글·영문·숫자·하이픈을 쓸 수 있어요(예: 우리가게). 변경하면 사이트에 박아둔 기존 임베드 URL이 끊깁니다.</p>
+              </>
+            ) : (
+              <p className={hint}>Slug 변경은 Admin만 할 수 있습니다.</p>
+            )}
             {slug && (
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">
@@ -561,6 +568,7 @@ export default function ConfigTab() {
             </label>
             <p className={hint}>켜면 식별 방문자는 HMAC 해시가 있어야 연결됩니다(위조 방지). 익명은 영향 없음. 모르면 꺼두세요.</p>
           </div>
+          {isAdmin && (
           <div className="space-y-3 border-t border-border pt-6">
             <div>
               <h3 className="text-sm font-semibold">API KEY 재발급</h3>
@@ -586,6 +594,7 @@ export default function ConfigTab() {
               </div>
             )}
           </div>
+          )}
         </div>
       )}
 

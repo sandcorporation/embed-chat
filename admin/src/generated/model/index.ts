@@ -7,10 +7,12 @@
 
 export * from './actionOut';
 export * from './agentCreateIn';
+export * from './agentCreateInRole';
 export * from './agentCreatedOut';
 export * from './agentLoginIn';
 export * from './agentLoginOut';
 export * from './agentOut';
+export * from './agentRoleIn';
 export * from './appsChatApiSendMessage202';
 export * from './appsChatApiSendMessage404';
 export * from './appsChatApiSendMessage429';
@@ -40,8 +42,13 @@ export * from './appsTenantsApiAgentLogin401';
 export * from './appsTenantsApiAgentLogout200';
 export * from './appsTenantsApiAgentLogoutAll200';
 export * from './appsTenantsApiAgentRefresh401';
+export * from './appsTenantsApiAgentSignup400';
+export * from './appsTenantsApiAgentSignup409';
+export * from './appsTenantsApiChangeAgentRole400';
+export * from './appsTenantsApiChangeAgentRole409';
 export * from './appsTenantsApiChangePassword200';
 export * from './appsTenantsApiChangePassword400';
+export * from './appsTenantsApiDeactivateAgent409';
 export * from './appsTenantsApiLogin401';
 export * from './appsTenantsApiOperatorLogout200';
 export * from './appsTenantsApiOperatorLogoutAll200';

@@ -23,10 +23,12 @@ import {
 } from './generated/endpoints/tenant/tenant'
 import {
   appsTenantsApiAgentLogin,
+  appsTenantsApiAgentSignup,
   appsTenantsApiAgentLogout,
   appsTenantsApiAgentLogoutAll,
   appsTenantsApiListAgents,
   appsTenantsApiCreateAgent,
+  appsTenantsApiChangeAgentRole,
   appsTenantsApiDeactivateAgent,
   appsTenantsApiChangePassword,
 } from './generated/endpoints/tenant-agents/tenant-agents'
@@ -106,6 +108,11 @@ export async function tenantAgentLogin(tenantName: string, username: string, pas
   setAccess('agent', data.access_token)
   return data
 }
+export async function tenantSignup(tenantName: string, username: string, password: string) {
+  const data = (await appsTenantsApiAgentSignup({ tenant_name: tenantName, username, password })).data as { access_token: string }
+  setAccess('agent', data.access_token)  // 가입 즉시 로그인
+  return data
+}
 export async function agentLogout() {
   await appsTenantsApiAgentLogout()
   clearAccess('agent')
@@ -117,11 +124,25 @@ export async function agentLogoutAll() {
 export async function listAgents() {
   return (await appsTenantsApiListAgents()).data
 }
-export async function createAgent(username: string) {
-  return (await appsTenantsApiCreateAgent({ username })).data
+export async function createAgent(username: string, role: 'admin' | 'member' = 'member') {
+  return (await appsTenantsApiCreateAgent({ username, role })).data
+}
+export async function changeAgentRole(agentId: string, role: 'admin' | 'member') {
+  return (await appsTenantsApiChangeAgentRole(agentId, { role })).data
 }
 export async function deactivateAgent(agentId: string) {
   return (await appsTenantsApiDeactivateAgent(agentId)).data
+}
+// 현재 로그인한 TenantAgent의 역할 — Access Token(JWT)의 role 클레임에서 읽어 UI 게이팅에 쓴다.
+export function currentAgentRole(): 'admin' | 'member' | null {
+  const tok = getAccess('agent')
+  if (!tok) return null
+  try {
+    const payload = JSON.parse(atob(tok.split('.')[1]))
+    return payload.role ?? null
+  } catch {
+    return null
+  }
 }
 export async function changePassword(currentPassword: string, newPassword: string) {
   try {

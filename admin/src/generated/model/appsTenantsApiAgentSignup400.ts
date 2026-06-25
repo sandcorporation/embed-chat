@@ -5,9 +5,4 @@
  * OpenAPI spec version: 1.0.0
  */
 
-export interface AgentOut {
-  id: string;
-  is_active: boolean;
-  role: string;
-  username: string;
-}
+export type AppsTenantsApiAgentSignup400 = { [key: string]: unknown };

@@ -16,6 +16,17 @@
       },
       "AgentCreateIn": {
         "properties": {
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
           "username": {
             "title": "Username",
             "type": "string"
@@ -37,6 +48,10 @@
             "title": "Is Active",
             "type": "boolean"
           },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
           "temp_password": {
             "title": "Temp Password",
             "type": "string"
@@ -50,6 +65,7 @@
           "id",
           "username",
           "is_active",
+          "role",
           "temp_password"
         ],
         "title": "AgentCreatedOut",
@@ -101,6 +117,10 @@
             "title": "Is Active",
             "type": "boolean"
           },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
           "username": {
             "title": "Username",
             "type": "string"
@@ -109,9 +129,23 @@
         "required": [
           "id",
           "username",
-          "is_active"
+          "is_active",
+          "role"
         ],
         "title": "AgentOut",
+        "type": "object"
+      },
+      "AgentRoleIn": {
+        "properties": {
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "AgentRoleIn",
         "type": "object"
       },
       "ChangePasswordIn": {
@@ -2090,6 +2124,63 @@
         ]
       }
     },
+    "/api/tenant/agents/auth/signup": {
+      "post": {
+        "description": "공개 가입(ADR-0025) — 조직 이름·username·password로 Tenant + 첫 Tenant Admin 생성 후 즉시 로그인.",
+        "operationId": "apps_tenants_api_agent_signup",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentLoginIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentLoginOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Agent Signup",
+        "tags": [
+          "tenant-agents"
+        ]
+      }
+    },
     "/api/tenant/agents/me/change-password": {
       "post": {
         "operationId": "apps_tenants_api_change_password",
@@ -2165,6 +2256,18 @@
               }
             },
             "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           }
         },
         "security": [
@@ -2173,6 +2276,77 @@
           }
         ],
         "summary": "Deactivate Agent",
+        "tags": [
+          "tenant-agents"
+        ]
+      }
+    },
+    "/api/tenant/agents/{agent_id}/role": {
+      "patch": {
+        "operationId": "apps_tenants_api_change_agent_role",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRoleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "DualAuth": []
+          }
+        ],
+        "summary": "Change Agent Role",
         "tags": [
           "tenant-agents"
         ]

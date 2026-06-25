@@ -4,6 +4,7 @@ import uuid
 from typing import TYPE_CHECKING
 from django.contrib.auth.hashers import make_password, check_password as django_check_password
 from django.db import models
+from django.db.models.functions import Lower
 from django.contrib.auth.models import AbstractUser
 
 
@@ -35,6 +36,10 @@ class Tenant(models.Model):
 
     class Meta:
         db_table = "tenants"
+        # 조직 이름 = 전역 unique 로그인 식별자(대소문자 무시 — ADR-0025)
+        constraints = [
+            models.UniqueConstraint(Lower("name"), name="uq_tenant_name_ci"),
+        ]
 
     @classmethod
     def verify_key(cls, raw_key: str) -> "Tenant | None":
@@ -62,12 +67,18 @@ class Tenant(models.Model):
         return new_key
 
 class TenantAgent(models.Model):
+    ROLE_ADMIN = "admin"
+    ROLE_MEMBER = "member"
+    ROLE_CHOICES = [(ROLE_ADMIN, "Admin"), (ROLE_MEMBER, "Member")]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="agents")
     if TYPE_CHECKING:
         tenant_id: uuid.UUID  # FK _id 접근자 — django-types가 추론 못 함
     username = models.CharField(max_length=150)
     password_hash = models.CharField(max_length=255)
+    # 권한 등급(ADR-0025). 신규 agent는 기본 Member, self-signup·기존 백필은 Admin.
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default=ROLE_MEMBER)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

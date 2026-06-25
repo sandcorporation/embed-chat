@@ -5,9 +5,6 @@
  * OpenAPI spec version: 1.0.0
  */
 
-export interface AgentOut {
-  id: string;
-  is_active: boolean;
+export interface AgentRoleIn {
   role: string;
-  username: string;
 }
