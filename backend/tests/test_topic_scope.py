@@ -161,6 +161,41 @@ async def test_off_topic_answered_when_toggle_off(tenant_with_key, fake_chat_llm
     assert answer == "파란색은 차가운 색입니다."
 
 
+@pytest.mark.django_db(transaction=True)
+async def test_off_topic_refusal_published_once_even_when_context_insufficient(
+    tenant_with_key, fake_chat_llm, monkeypatch
+):
+    """범위 밖 + context_sufficient=False여도 거절은 1번만 publish된다(원문 폴백 재호출로 중복 금지).
+
+    거절은 종단이라 source_search 폴백을 타면 안 된다 — 안 그러면 거절이 두 번 흘러 위젯에 중복 렌더된다.
+    """
+    from apps.agent import nodes
+    from apps.agent.graph import run_chat_agent_async
+    from apps.agent.nodes import HITLResponse
+    from apps.chat.models import ChatSession
+
+    tenant, _ = tenant_with_key
+    await adb(_enable_scope)(tenant, hitl=True)
+    fake_chat_llm.override = lambda m: HITLResponse(
+        response="파란색은 일반지식 답입니다.", needs_hitl=False, hitl_reason="",
+        context_sufficient=False, in_scope=False)  # 근거 없음 + 범위 밖
+
+    tokens = []
+    async def _atok(sid, content):
+        tokens.append(content)
+    async def _adone(sid):
+        pass
+    monkeypatch.setattr(nodes, "apublish_token", _atok)
+    monkeypatch.setattr(nodes, "apublish_done", _adone)
+
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-once")
+    answer = await run_chat_agent_async(session, "파란색 설명해줘")
+
+    assert "주문·배송·반품 문의" in answer                       # 거절
+    refusals = [t for t in tokens if "관련 문의를 도와드려요" in t]
+    assert len(refusals) == 1, f"거절이 {len(refusals)}번 publish됨(중복): {tokens}"
+
+
 # ── 커스텀 거절 문구 (issue 198) ─────────────────────────────────────────────
 
 def test_custom_refusal_message_used_when_set():
