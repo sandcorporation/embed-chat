@@ -19,6 +19,41 @@ def _capture_publish(monkeypatch, tokens, dones):
     monkeypatch.setattr(nodes, "apublish_done", _adone)
 
 
+# ── 구조화 출력 스트리밍 회귀 가드 ──────────────────────────────────────────────
+# 버그: astream_structured가 with_structured_output에 **Pydantic 클래스**를 넘기면
+# PydanticOutputParser가 붙어 최종 객체 1개만 yield → 토큰 스트리밍이 죽는다(gpt-4o-mini 등 모델
+# 무관, 라이브 LLM으로 확인). dict json-schema를 넘기면 JsonOutputParser가 누적 dict를 점진 yield.
+# 실제 부분 스트리밍은 라이브 LLM 행동이라 Fake(astream_structured 대체)로는 단위 검증 불가 —
+# 아래 두 테스트가 그 회귀를 막는 핵심 변환·옵션을 잠근다.
+
+def test_streaming_schema_is_streamable_dict_not_pydantic():
+    """_streaming_schema는 Pydantic이 아니라 dict json-schema를 반환한다(JsonOutputParser 부분 스트리밍).
+    제어필드(context_sufficient)가 response보다 먼저 + 모든 속성 required + additionalProperties false."""
+    from apps.agent.llm import _streaming_schema
+    from apps.agent.nodes import HITLResponse, PlainResponse
+    for schema in (HITLResponse, PlainResponse):
+        js = _streaming_schema(schema)
+        assert isinstance(js, dict) and js.get("type") == "object"
+        props = list(js["properties"].keys())
+        assert props.index("context_sufficient") < props.index("response"), props
+        assert set(js["required"]) == set(props)
+        assert js["additionalProperties"] is False
+
+
+def test_structured_stream_kwargs_strict_json_schema_except_anthropic():
+    """OpenAI 계열은 strict json_schema(부분 스트리밍+필드순서 보장), Anthropic은 기본(미지원)."""
+    from apps.agent.llm import _structured_stream_kwargs
+
+    class _P:
+        def __init__(self, t):
+            self.type = t
+
+    assert _structured_stream_kwargs(_P("openai")) == {"method": "json_schema", "strict": True}
+    assert _structured_stream_kwargs(_P("")) == {"method": "json_schema", "strict": True}
+    assert _structured_stream_kwargs(_P("custom")) == {"method": "json_schema", "strict": True}
+    assert _structured_stream_kwargs(_P("anthropic")) == {}
+
+
 @pytest.mark.django_db(transaction=True)
 async def test_chat_answer_streams_token_deltas(tenant_with_key, fake_chat_llm, monkeypatch):
     """종단 패스에서 응답이 토큰 델타로 여러 번 publish되고 누적이 전체와 일치한다(실시간)."""
