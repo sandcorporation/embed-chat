@@ -328,9 +328,13 @@ def change_agent_role(request, agent_id: str, body: AgentRoleIn):
 
 @agent_router.post("/me/change-password", response={200: dict, 400: dict}, auth=tenant_agent_auth)
 def change_password(request, body: ChangePasswordIn):
+    from apps.tenants.password_policy import password_policy_error
     agent = request.auth
     if not agent.check_password(body.current_password):
         return 400, {"detail": "현재 비밀번호가 올바르지 않습니다."}
+    pw_err = password_policy_error(body.new_password)
+    if pw_err:
+        return 400, {"detail": pw_err}
     agent.set_password(body.new_password)
     agent.save()
     revoke_all(agent)  # 비번 변경 시 기존 모든 세션의 refresh 폐기(침해 대응)

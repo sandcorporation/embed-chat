@@ -18,7 +18,7 @@ export default function AgentsTab() {
   const [createdCred, setCreatedCred] = useState<{ username: string; password: string } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [pwForm, setPwForm] = useState({ current: '', next: '', error: '', success: false })
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '', error: '', success: false })
 
   const load = async () => setAgents(await listAgents())
 
@@ -58,12 +58,16 @@ export default function AgentsTab() {
 
   const handleChangePassword = async (e: FormEvent) => {
     e.preventDefault()
+    if (pwForm.next !== pwForm.confirm) {
+      setPwForm(f => ({ ...f, error: '새 비밀번호가 일치하지 않습니다.', success: false }))
+      return
+    }
     try {
       await changePassword(pwForm.current, pwForm.next)
-      setPwForm({ current: '', next: '', error: '', success: true })
+      setPwForm({ current: '', next: '', confirm: '', error: '', success: true })
       setTimeout(() => setPwForm(f => ({ ...f, success: false })), 2000)
     } catch (err) {
-      setPwForm(f => ({ ...f, error: err instanceof Error ? err.message : String(err) }))
+      setPwForm(f => ({ ...f, error: err instanceof Error ? err.message : String(err), success: false }))
     }
   }
 
@@ -128,6 +132,8 @@ export default function AgentsTab() {
         <form onSubmit={handleChangePassword} className="flex max-w-sm flex-col gap-2">
           <Input type="password" placeholder="현재 비밀번호" value={pwForm.current} onChange={e => setPwForm(f => ({ ...f, current: e.target.value }))} />
           <Input type="password" placeholder="새 비밀번호" value={pwForm.next} onChange={e => setPwForm(f => ({ ...f, next: e.target.value }))} />
+          <Input type="password" placeholder="새 비밀번호 확인" value={pwForm.confirm} onChange={e => setPwForm(f => ({ ...f, confirm: e.target.value }))} />
+          <p className="text-xs text-muted-foreground">8자 이상(영문·숫자·특수문자 3종) 또는 10자 이상(2종 이상)</p>
           {pwForm.error && <p className="text-sm text-destructive">{pwForm.error}</p>}
           <Button type="submit" className="self-start">{pwForm.success ? '✓ 변경됨' : '변경'}</Button>
         </form>

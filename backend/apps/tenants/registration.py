@@ -24,10 +24,15 @@ def normalize_org_name(name: str) -> str:
 
 @transaction.atomic
 def register_tenant(name: str, username: str, password: str) -> tuple[Tenant, TenantAgent]:
+    from apps.tenants.password_policy import password_policy_error
+
     name = normalize_org_name(name)
     username = (username or "").strip()
     if not name or not username or not password:
         raise InvalidSignup("조직 이름·username·password는 비울 수 없습니다.")
+    pw_err = password_policy_error(password)
+    if pw_err:
+        raise InvalidSignup(pw_err)
     if Tenant.objects.filter(name__iexact=name).exists():  # 친절한 사전 검사(DB는 backstop)
         raise DuplicateOrgName(name)
 

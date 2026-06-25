@@ -148,7 +148,11 @@ export async function changePassword(currentPassword: string, newPassword: strin
   try {
     return (await appsTenantsApiChangePassword({ current_password: currentPassword, new_password: newPassword })).data
   } catch (e) {
-    throw new Error('현재 비밀번호가 올바르지 않습니다.')
+    // 백엔드가 사유를 detail로 준다(현재 비번 오류 / 비밀번호 정책 위반 등) — 그대로 노출.
+    if (e instanceof HttpError && e.body && typeof e.body === 'object' && 'detail' in e.body) {
+      throw new Error(String((e.body as { detail: unknown }).detail))
+    }
+    throw new Error('비밀번호 변경에 실패했습니다.')
   }
 }
 
