@@ -447,7 +447,8 @@ def _validate_changed_provider(config, body, kind):
     if not changed or not new_type:
         return
     eff_key = (new_key_raw if key_changed else (decrypt_secret(stored_enc) if stored_enc else "")) or ""
-    validate_provider(kind, new_type, new_base, eff_key, model)
+    # tenant_id로 검증 임베딩 프로브도 사용량 기록(issue 204) — embed 분기만 기록한다.
+    validate_provider(kind, new_type, new_base, eff_key, model, tenant_id=config.tenant_id)
 
 
 @tenant_router.patch("/config/", response={200: TenantConfigOut, 400: dict})

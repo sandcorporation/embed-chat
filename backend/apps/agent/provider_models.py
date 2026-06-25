@@ -67,11 +67,14 @@ def list_provider_models(kind: str, type: str, base_url: str, api_key: str) -> l
         raise ProviderError(f"모델 조회 실패: {e}") from e
 
 
-def validate_provider(kind: str, type: str, base_url: str, api_key: str, model: str) -> None:
+def validate_provider(kind: str, type: str, base_url: str, api_key: str, model: str, tenant_id=None) -> None:
     """provider 연결을 실제 기능 호출로 검증한다. 실패 시 ProviderError.
 
     kind=embed는 1-텍스트 임베딩 호출(provider 실제 용도), kind=llm은 모델 목록 조회로
     연결+키를 확인한다. 특정 model 상장 여부는 강제하지 않는다(연결성만 검증).
+
+    tenant_id가 주어지면(어드민 저장 경로) 검증 임베딩 프로브도 사용량으로 기록한다 — OpenAI엔
+    과금되지만 어디에도 안 잡히던 갭을 닫는다(TokenUsage + Langfuse, issue 204).
     """
     if kind == "embed":
         try:
@@ -84,6 +87,15 @@ def validate_provider(kind: str, type: str, base_url: str, api_key: str, model: 
             r.raise_for_status()
         except httpx.HTTPError as e:
             raise ProviderError(f"임베딩 Provider 검증 실패: {e}") from e
+        if tenant_id:
+            try:
+                body = r.json()
+            except Exception:
+                body = {}
+            from apps.usage.recording import record_embedding_usage
+            from apps.usage.langfuse_client import record_embedding_langfuse
+            record_embedding_usage(body, tenant_id, model)
+            record_embedding_langfuse(body, tenant_id, model, ["ok"], call_type="embedding")
         return
     # llm → 목록 조회 성공으로 연결 검증(실패 시 ProviderError 전파)
     list_provider_models(kind, type, base_url, api_key)

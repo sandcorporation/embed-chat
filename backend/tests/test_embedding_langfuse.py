@@ -104,3 +104,47 @@ def test_get_embeddings_emits_both_sinks(monkeypatch, tenant_with_key):
     assert TokenUsage.objects.filter(tenant_id=tenant.id, call_type="embedding").count() == 1
     assert len(fake.generations) == 1
     assert fake.generations[0]["usage_details"] == {"input": 5}
+
+
+# ── Issue 204: validate_provider 검증 프로브도 계측 ────────────────────────────
+
+class _ProbeResp:
+    status_code = 200
+
+    def json(self):
+        return {"data": [{"embedding": [0.1]}], "usage": {"prompt_tokens": 1, "total_tokens": 1}}
+
+    def raise_for_status(self):
+        pass
+
+
+@pytest.mark.django_db
+def test_validate_embed_probe_records_both_sinks(monkeypatch, tenant_with_key):
+    """validate_provider("embed", tenant_id=...) → 검증 임베딩이 TokenUsage + Langfuse에 기록된다."""
+    from apps.agent import provider_models
+    from apps.usage import langfuse_client
+    from apps.usage.models import TokenUsage
+
+    tenant, _ = tenant_with_key
+    monkeypatch.setattr(provider_models.httpx, "post", lambda *a, **k: _ProbeResp())
+    fake = _FakeLangfuse()
+    monkeypatch.setattr(langfuse_client, "get_langfuse_client", lambda: fake)
+
+    provider_models.validate_provider(
+        "embed", "openai", "https://x/v1", "sk", "text-embedding-3-small", tenant_id=str(tenant.id))
+
+    assert TokenUsage.objects.filter(tenant_id=tenant.id, call_type="embedding").count() == 1
+    assert len(fake.generations) == 1
+
+
+def test_validate_embed_without_tenant_does_not_record(monkeypatch):
+    """tenant_id 없이 검증하면(연결성만) 기록하지 않는다 — 기존 동작 보존."""
+    from apps.agent import provider_models
+    from apps.usage import langfuse_client
+
+    monkeypatch.setattr(provider_models.httpx, "post", lambda *a, **k: _ProbeResp())
+    fake = _FakeLangfuse()
+    monkeypatch.setattr(langfuse_client, "get_langfuse_client", lambda: fake)
+
+    provider_models.validate_provider("embed", "openai", "https://x/v1", "sk", "m")  # tenant_id 없음
+    assert len(fake.generations) == 0
