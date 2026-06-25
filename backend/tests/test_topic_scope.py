@@ -159,3 +159,51 @@ async def test_off_topic_answered_when_toggle_off(tenant_with_key, fake_chat_llm
     session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-off")
     answer = await run_chat_agent_async(session, "파란색 설명해줘")
     assert answer == "파란색은 차가운 색입니다."
+
+
+# ── 커스텀 거절 문구 (issue 198) ─────────────────────────────────────────────
+
+def test_custom_refusal_message_used_when_set():
+    from apps.agent.scope import scope_decision
+
+    refused, final = scope_decision(
+        enabled=True, scope_description="주문 문의", in_scope=False,
+        model_response="파란색...", refusal_message="저희는 쇼핑 문의만 받아요!")
+    assert refused is True
+    assert final == "저희는 쇼핑 문의만 받아요!"
+
+
+def test_blank_custom_falls_back_to_standard():
+    from apps.agent.scope import scope_decision
+
+    refused, final = scope_decision(
+        enabled=True, scope_description="주문 문의", in_scope=False,
+        model_response="...", refusal_message="   ")
+    assert refused is True
+    assert "주문 문의" in final          # 표준 템플릿으로 폴백
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_custom_refusal_message_end_to_end(tenant_with_key, fake_chat_llm):
+    """config.scope_refusal_message가 있으면 거절이 그 문구로 나간다."""
+    from apps.tenants.models import TenantConfig
+    from apps.agent.graph import run_chat_agent_async
+    from apps.agent.nodes import HITLResponse
+    from apps.chat.models import ChatSession
+
+    tenant, _ = tenant_with_key
+
+    def _set():
+        cfg = TenantConfig.objects.get(tenant=tenant)
+        cfg.topic_scope_enabled = True
+        cfg.scope_description = "주문·배송 문의"
+        cfg.scope_refusal_message = "저희는 OO 쇼핑 관련 문의만 도와드려요."
+        cfg.save()
+    await adb(_set)()
+    fake_chat_llm.override = lambda m: HITLResponse(
+        response="파란색은...", needs_hitl=False, hitl_reason="",
+        context_sufficient=True, in_scope=False)
+
+    session = await adb(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-custom")
+    answer = await run_chat_agent_async(session, "파란색 설명해줘")
+    assert answer == "저희는 OO 쇼핑 관련 문의만 도와드려요."

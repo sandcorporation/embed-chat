@@ -157,6 +157,8 @@ class TenantConfig(models.Model):
     # 기본 OFF(opt-in)라 기존 테넌트 동작은 무변경. 빈 scope_description이면 fail-open(작동 안 함).
     topic_scope_enabled = models.BooleanField(default=False)
     scope_description = models.TextField(blank=True, default="")
+    # 비우면 scope_description 인용 표준 거절 템플릿, 채우면 이 문구로 거절(issue 198).
+    scope_refusal_message = models.TextField(blank=True, default="")
     agent_display_name = models.CharField(max_length=100, default="상담원")
     webhook_url = models.URLField(blank=True, default="")
     webhook_type = models.CharField(max_length=10, choices=WEBHOOK_TYPE_CHOICES, blank=True, default="")

@@ -32,6 +32,7 @@ class ChatState(TypedDict):
     operational_notice: str
     topic_scope_enabled: bool
     scope_description: str
+    scope_refusal_message: str
 
 
 def _route_after_llm(state: ChatState) -> str:
@@ -160,6 +161,7 @@ def _load_chat_inputs(session, user_message: str):
         "operational_notice": operational_notice,
         "topic_scope_enabled": config.topic_scope_enabled,
         "scope_description": config.scope_description or "",
+        "scope_refusal_message": config.scope_refusal_message or "",
     }
     return initial_state, effective_hitl, provider
 
