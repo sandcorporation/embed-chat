@@ -158,6 +158,9 @@ export default function HitlTab() {
 
   useEffect(() => {
     refresh()
+    // presence 델타(ephemeral pub/sub)는 콘솔 미구독 순간(탭 전환·재연결·배포)에 놓칠 수 있다.
+    // 자가치유 진실원천(active_sessions, TTL 20s)을 주기적으로 재조정해 stale "접속중"을 자동 보정한다.
+    const reconcile = setInterval(refresh, 15000)
     esRef.current = openEscalationStream((event) => {
       if (event.type === 'visitor_message') {
         const msg: ChatMsg = { role: 'user', content: event.content, created_at: new Date().toISOString() }
@@ -170,7 +173,7 @@ export default function HitlTab() {
         refresh() // hitl_new/claimed/resolved 등 → 목록 갱신
       }
     })
-    return () => esRef.current?.close()
+    return () => { clearInterval(reconcile); esRef.current?.close() }
   }, [])
 
   if (loading) return <p className="text-sm text-muted-foreground">로딩 중...</p>
