@@ -30,6 +30,8 @@ class ChatState(TypedDict):
     context_sufficient: bool
     source_text_tried: bool
     operational_notice: str
+    topic_scope_enabled: bool
+    scope_description: str
 
 
 def _route_after_llm(state: ChatState) -> str:
@@ -156,6 +158,8 @@ def _load_chat_inputs(session, user_message: str):
         "context_sufficient": True,
         "source_text_tried": False,
         "operational_notice": operational_notice,
+        "topic_scope_enabled": config.topic_scope_enabled,
+        "scope_description": config.scope_description or "",
     }
     return initial_state, effective_hitl, provider
 

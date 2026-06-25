@@ -32,10 +32,20 @@ _CONTEXT_SUFFICIENT_DESC = (
 )
 
 
-# 필드 순서: context_sufficient를 response보다 **먼저** 둔다 — 스트리밍 시 라우팅(폴백) 신호가
-# 응답 앞에 도착해, 노드가 흘리기 전에 종단 여부를 판정할 수 있다(PRD-chat-token-streaming).
+# in_scope: 사용자 질문이 봇의 응대 범위 안인가(주제범위 제어 — PRD-topic-scope-enforcement). 인사·
+# 메타 같은 대화 턴도 true, 명백한 범위 밖만 false. 제어필드라 response보다 앞에 둬 스트리밍 시 먼저
+# 도착하게 한다(노드가 거절을 선판정해 off-topic 응답을 안 흘림). 토글 OFF면 무시된다(기본 true).
+_IN_SCOPE_DESC = (
+    "사용자 질문이 이 어시스턴트의 응대 범위 안이면 true. 인사·감사·범위 안내 같은 대화 턴도 true. "
+    "명백히 범위 밖(무관한 일반지식·타 도메인)이면 false."
+)
+
+
+# 필드 순서: 제어필드(context_sufficient·in_scope)를 response보다 **먼저** 둔다 — 스트리밍 시 라우팅·
+# 스코프 신호가 응답 앞에 도착해, 노드가 흘리기 전에 종단/거절을 판정할 수 있다(PRD-chat-token-streaming).
 class HITLResponse(BaseModel):
     context_sufficient: bool = Field(default=True, description=_CONTEXT_SUFFICIENT_DESC)
+    in_scope: bool = Field(default=True, description=_IN_SCOPE_DESC)
     response: str
     needs_hitl: bool
     hitl_reason: str = ""
@@ -44,6 +54,7 @@ class HITLResponse(BaseModel):
 class PlainResponse(BaseModel):
     """HITL-OFF Tenant용 구조화 출력 — needs_hitl 필드가 없어 escalation을 표현할 수 없다."""
     context_sufficient: bool = Field(default=True, description=_CONTEXT_SUFFICIENT_DESC)
+    in_scope: bool = Field(default=True, description=_IN_SCOPE_DESC)
     response: str
 
 
@@ -140,7 +151,13 @@ def _user_turn_content(state: dict) -> str:
 
 def _assemble_lc_messages(state: dict) -> list:
     """캐시 친화 LLM 입력을 조립한다(안정 prefix=테넌트-불변 system, 휘발성은 마지막 턴)."""
-    system_content = state["system_prompt"] + _ANTI_DISCLOSURE
+    from apps.agent.scope import scope_instruction
+
+    system_content = (
+        state["system_prompt"]
+        + scope_instruction(state.get("topic_scope_enabled", False), state.get("scope_description", ""))
+        + _ANTI_DISCLOSURE
+    )
 
     lc_messages: list[BaseMessage] = [SystemMessage(content=system_content)]
     for msg in state.get("messages", []):
@@ -162,15 +179,35 @@ def _will_fallback_dict(state: dict, d: dict) -> bool:
     return (not d.get("context_sufficient", True)) and not state.get("source_text_tried", False)
 
 
+def _scope_gate(state: dict, in_scope: bool, model_response: str) -> tuple:
+    """주제범위 백스톱 — state의 토글·범위·거절문구로 (refused, final_response)를 판정(PRD-topic-scope)."""
+    from apps.agent.scope import scope_decision
+    return scope_decision(
+        enabled=state.get("topic_scope_enabled", False),
+        scope_description=state.get("scope_description", ""),
+        in_scope=in_scope,
+        model_response=model_response,
+        refusal_message=state.get("scope_refusal_message", ""),
+    )
+
+
 async def _aoneshot_route(state: dict, schema) -> tuple:
     """킬스위치(CHAT_STREAMING_ENABLED=False) 경로 — 단일 호출·one-shot publish(async)."""
     sid = state["session_id"]
     lc_messages = _assemble_lc_messages(state)
     result = await llm_boundary.acomplete_structured(get_chat_provider(), lc_messages, schema)
-    if result.response and not _will_source_fallback(state, result):
-        await apublish_token(sid, result.response)
+    refused, final_response = _scope_gate(state, getattr(result, "in_scope", True), result.response or "")
+    final = result.model_dump()
+    if refused:
+        final["response"] = final_response
+        final["needs_hitl"] = False  # 범위 밖은 상담원 escalation하지 않는다
+        await apublish_token(sid, final_response)
         await apublish_done(sid)
-    return result.model_dump(), (result.response or "")
+        return final, final_response
+    if final_response and not _will_source_fallback(state, result):
+        await apublish_token(sid, final_response)
+        await apublish_done(sid)
+    return final, final_response
 
 
 async def _astream_and_route(state: dict, schema) -> tuple:
@@ -187,17 +224,28 @@ async def _astream_and_route(state: dict, schema) -> tuple:
     lc_messages = _assemble_lc_messages(state)
     published = 0
     streaming = None  # None=미결정, True=흘림, False=억제
+    scope_refused = False  # in_scope=False면 off-topic 응답을 흘리지 않도록 일찍 억제
     final: dict = {}
     async for chunk in llm_boundary.astream_structured(get_chat_provider(), lc_messages, schema):
         final.update(chunk)
+        if not scope_refused and "in_scope" in chunk:
+            scope_refused = _scope_gate(state, chunk.get("in_scope", True), "")[0]
         if streaming is None and "context_sufficient" in chunk:
             streaming = not _will_fallback_dict(state, chunk)
+        if scope_refused:
+            streaming = False  # 범위 밖이면 모델 응답 델타를 흘리지 않는다(거절로 덮음)
         if streaming:
             resp = chunk.get("response") or ""
             if len(resp) > published:
                 await apublish_token(sid, resp[published:])
                 published = len(resp)
     response = final.get("response") or ""
+    refused, final_response = _scope_gate(state, final.get("in_scope", True), response)
+    if refused:
+        # 백스톱: 모델 응답을 무시하고 결정적 거절을 발행(스트리밍은 위에서 억제됨)
+        await apublish_token(sid, final_response)
+        await apublish_done(sid)
+        return {**final, "response": final_response, "needs_hitl": False}, final_response
     if streaming:
         if published > 0:  # 흘린 게 있을 때만 done(빈 응답=needs_hitl 무-멘트는 무발행)
             await apublish_done(sid)
