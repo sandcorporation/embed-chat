@@ -414,3 +414,33 @@ describe('ConfigTab — 공개 URL(slug) 복원·복사', () => {
     expect(screen.queryByRole('button', { name: /URL 복사/ })).toBeNull()
   })
 })
+
+describe('ConfigTab — 주제범위 제어', () => {
+  it('토글을 켜면 응대 범위·거절 문구 입력이 나타난다', async () => {
+    renderConfig('general')
+    const toggle = await screen.findByLabelText('주제범위 제어')
+    expect(screen.queryByLabelText('응대 범위')).toBeNull()
+    await userEvent.click(toggle)
+    expect(screen.getByLabelText('응대 범위')).toBeInTheDocument()
+    expect(screen.getByLabelText('거절 문구')).toBeInTheDocument()
+  })
+
+  it('토글+범위+거절문구를 저장 payload에 담는다', async () => {
+    renderConfig('general')
+    await userEvent.click(await screen.findByLabelText('주제범위 제어'))
+    await userEvent.type(screen.getByLabelText('응대 범위'), '주문·배송 문의')
+    await userEvent.type(screen.getByLabelText('거절 문구'), '쇼핑만 도와드려요')
+    await save()
+    await waitFor(() => expect(api.updateTenantConfig).toHaveBeenCalledWith(expect.objectContaining({
+      topic_scope_enabled: true, scope_description: '주문·배송 문의', scope_refusal_message: '쇼핑만 도와드려요',
+    })))
+  })
+
+  it('범위 없이 켜고 저장하면 막고 안내하며 저장을 호출하지 않는다', async () => {
+    renderConfig('general')
+    await userEvent.click(await screen.findByLabelText('주제범위 제어'))
+    await save()
+    expect(screen.getByText(/응대 범위를 입력하세요/)).toBeInTheDocument()
+    expect(api.updateTenantConfig).not.toHaveBeenCalled()
+  })
+})

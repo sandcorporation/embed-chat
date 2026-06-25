@@ -65,6 +65,7 @@ export default function ConfigTab() {
   const [oneShotBusy, setOneShotBusy] = useState(false)
   const [showProviderAdvanced, setShowProviderAdvanced] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [scopeError, setScopeError] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [holidayInput, setHolidayInput] = useState('')
 
@@ -137,7 +138,12 @@ export default function ConfigTab() {
   }, [])
 
   const handleSave = async () => {
-    setSaveError('')
+    setSaveError(''); setScopeError('')
+    // 주제범위 제어를 켜려면 응대 범위가 있어야 한다(빈 채로 켜면 백엔드가 400으로 막는다 — 미리 안내).
+    if (config.topic_scope_enabled && !(config.scope_description || '').trim()) {
+      setScopeError('주제범위 제어를 켜려면 응대 범위를 입력하세요.')
+      return
+    }
     try {
       await updateTenantConfig(config)
       setSaved(true)
@@ -206,6 +212,36 @@ export default function ConfigTab() {
             <Input value={config.agent_display_name}
               onChange={e => setConfig(c => ({ ...c, agent_display_name: e.target.value }))} placeholder="상담원" />
             <p className={hint}>사람 상담원으로 전환됐을 때 손님에게 보일 이름이에요.</p>
+          </div>
+
+          {/* ── 주제범위 제어 ── */}
+          <div className="space-y-2 border-t border-border pt-6">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" className="h-4 w-4 rounded border-input" aria-label="주제범위 제어"
+                checked={!!config.topic_scope_enabled}
+                onChange={e => setConfig(c => ({ ...c, topic_scope_enabled: e.target.checked }))} />
+              주제범위 제어 (응대 범위 밖 질문 거절)
+            </label>
+            <p className={hint}>켜면 봇이 아래 "응대 범위" 밖 질문(예: 일반 상식)을 정중히 거절해요. 끄면 무엇이든 답합니다.</p>
+            {config.topic_scope_enabled && (
+              <div className="space-y-4 border-l-2 border-border pl-3 pt-2">
+                <div className="space-y-2">
+                  <Label>응대 범위</Label>
+                  <Textarea aria-label="응대 범위" value={config.scope_description || ''}
+                    onChange={e => setConfig(c => ({ ...c, scope_description: e.target.value }))}
+                    placeholder="예: 주문·배송·반품·상품 문의" />
+                  <p className={hint}>봇이 답해도 되는 주제예요. 이 범위 밖 질문은 거절합니다. (켜려면 필수)</p>
+                  {scopeError && <p className={errorCls}>{scopeError}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label>거절 문구 (선택)</Label>
+                  <Input aria-label="거절 문구" value={config.scope_refusal_message || ''}
+                    onChange={e => setConfig(c => ({ ...c, scope_refusal_message: e.target.value }))}
+                    placeholder="비우면 응대 범위를 인용한 표준 문구로 거절" />
+                  <p className={hint}>범위 밖 질문에 보낼 거절 메시지예요. 비우면 자동으로 만들어 줍니다.</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
