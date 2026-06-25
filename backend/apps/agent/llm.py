@@ -71,6 +71,34 @@ def complete_text(provider, messages) -> str:
     return cast(str, build_llm_client(provider).invoke(messages, config=_usage_config()).content)
 
 
+def _streaming_schema(schema) -> dict:
+    """Pydantic 스키마를 스트리밍 친화(JsonOutputParser) json-schema dict로 변환한다.
+
+    with_structured_output에 **Pydantic 클래스**를 주면 PydanticOutputParser가 붙어 최종 객체 1개만
+    yield한다 — 부분 Pydantic은 검증 불가라 토큰 스트리밍이 죽는다(gpt-4o-mini 등 모델 무관). **dict
+    스키마**를 주면 JsonOutputParser가 누적 dict를 점진 yield해 response가 자라며 흐른다. OpenAI strict
+    json_schema는 모든 속성 required + additionalProperties:false를 요구하므로 보정한다. 속성 정의 순서
+    (context_sufficient 먼저)는 보존돼, strict 모드에서 제어필드가 먼저 도착한다(라우팅 선판정).
+    """
+    js = schema.model_json_schema()
+    js["required"] = list(js.get("properties", {}).keys())
+    js["additionalProperties"] = False
+    js.setdefault("title", getattr(schema, "__name__", "Response"))
+    return js
+
+
+def _structured_stream_kwargs(provider) -> dict:
+    """스트리밍 구조화 출력의 with_structured_output kwargs.
+
+    OpenAI 계열(openai/custom/플랫폼기본 OpenRouter)은 strict json_schema가 부분 스트리밍 + 필드 순서
+    (제어필드 먼저)를 보장한다. Anthropic은 json_schema 미지원이라 기본(tool calling)으로 — 부분
+    스트리밍은 되지만 순서 미보장이라 필요 시 노드가 one-shot으로 저하한다(회귀 없음).
+    """
+    if provider.type == PROVIDER_ANTHROPIC:
+        return {}
+    return {"method": "json_schema", "strict": True}
+
+
 def stream_structured(provider, messages, schema):
     """구조화 출력을 토큰 단위로 스트리밍한다 — 누적 dict를 점진 yield한다.
 
@@ -79,7 +107,9 @@ def stream_structured(provider, messages, schema):
     호출부는 항상 dict를 받는다(아직 안 온 필드는 키 부재 — Pydantic 기본값 함정 회피).
     """
     messages = _mark_cache_breakpoint(provider, messages)
-    client = build_llm_client(provider).with_structured_output(schema)
+    client = build_llm_client(provider).with_structured_output(
+        _streaming_schema(schema), **_structured_stream_kwargs(provider)
+    )
     for chunk in client.stream(messages, config=_usage_config()):
         if isinstance(chunk, dict):
             yield chunk
@@ -134,7 +164,9 @@ async def acomplete_structured(provider, messages, schema: type[T]) -> T:
 async def astream_structured(provider, messages, schema):
     """구조화 출력을 async로 토큰 스트리밍한다 — 누적 dict를 점진 yield(stream_structured의 async 대응)."""
     messages = _mark_cache_breakpoint(provider, messages)
-    client = build_llm_client(provider).with_structured_output(schema)
+    client = build_llm_client(provider).with_structured_output(
+        _streaming_schema(schema), **_structured_stream_kwargs(provider)
+    )
     async for chunk in client.astream(messages, config=_usage_config()):
         if isinstance(chunk, dict):
             yield chunk
