@@ -6,7 +6,13 @@ client로 교체해 발행 payload를 검증한다(CLAUDE.md). TokenUsage(DB)는
 import pytest
 
 
-class _FakeGen:
+class _FakeGenCtx:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
     def end(self):
         pass
 
@@ -16,15 +22,27 @@ class _FakeGen:
 
 class _FakeLangfuse:
     def __init__(self):
-        self.generations = []
+        self.generations = []       # start_as_current_generation kwargs
+        self.spans = []             # start_as_current_span kwargs
+        self.trace_updates = []     # update_current_trace kwargs
 
-    def start_generation(self, **kw):
+    def start_as_current_generation(self, **kw):
         self.generations.append(kw)
-        return _FakeGen()
+        return _FakeGenCtx()
+
+    def start_as_current_span(self, **kw):
+        self.spans.append(kw)
+        return _FakeGenCtx()
+
+    def update_current_trace(self, **kw):
+        self.trace_updates.append(kw)
 
 
 class _RaisingLangfuse:
-    def start_generation(self, **kw):
+    def start_as_current_generation(self, **kw):
+        raise RuntimeError("langfuse down")
+
+    def start_as_current_span(self, **kw):
         raise RuntimeError("langfuse down")
 
 
@@ -148,3 +166,71 @@ def test_validate_embed_without_tenant_does_not_record(monkeypatch):
 
     provider_models.validate_provider("embed", "openai", "https://x/v1", "sk", "m")  # tenant_id 없음
     assert len(fake.generations) == 0
+
+
+# ── Issue 205: per-tenant 1급 필터 (tenant 태그 + native sessionId) ────────────
+
+def test_embedding_generation_tagged_with_tenant(monkeypatch):
+    """임베딩 generation의 트레이스에 tenant 태그가 붙는다(1급 필터)."""
+    from apps.usage import langfuse_client
+
+    fake = _FakeLangfuse()
+    monkeypatch.setattr(langfuse_client, "get_langfuse_client", lambda: fake)
+    langfuse_client.record_embedding_langfuse(_RESP, "tnt-9", "m", ["x"])
+
+    assert any("tenant:tnt-9" in (u.get("tags") or []) for u in fake.trace_updates)
+
+
+def test_usage_config_sets_native_tags_and_session():
+    """LLM 경로(_usage_config)가 langchain→Langfuse native 필드 키(tenant 태그·sessionId)를 넣는다."""
+    from apps.agent.llm import _usage_config
+    from apps.usage.context import set_usage_context
+
+    set_usage_context("tnt-7", "chat", session_id="sess-7")
+    md = _usage_config()["metadata"]
+    assert "tenant:tnt-7" in md.get("langfuse_tags", [])
+    assert md.get("langfuse_session_id") == "sess-7"
+
+
+# ── Issue 206: GraphRAG 검색 관찰성 (Langfuse retrieval span) ──────────────────
+
+def test_records_retrieval_span_with_chunks_and_tenant(monkeypatch):
+    from apps.usage import langfuse_client
+
+    fake = _FakeLangfuse()
+    monkeypatch.setattr(langfuse_client, "get_langfuse_client", lambda: fake)
+    langfuse_client.record_retrieval_langfuse(
+        "graphrag_local_search", "해상도?", ["1920x1080", "FHD"], "tnt-3", session_id="s3")
+
+    assert len(fake.spans) == 1
+    sp = fake.spans[0]
+    assert sp["name"] == "graphrag_local_search"
+    assert sp["metadata"]["chunk_count"] == 2
+    assert any("tenant:tnt-3" in (u.get("tags") or []) for u in fake.trace_updates)
+
+
+def test_retrieval_noop_and_exception_safe(monkeypatch):
+    from apps.usage import langfuse_client
+
+    monkeypatch.setattr(langfuse_client, "get_langfuse_client", lambda: None)
+    langfuse_client.record_retrieval_langfuse("x", "q", [], "t")          # 미설정 → no-op
+    monkeypatch.setattr(langfuse_client, "get_langfuse_client", lambda: _RaisingLangfuse())
+    langfuse_client.record_retrieval_langfuse("x", "q", [], "t")          # 예외 → 비차단
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_graph_emits_local_search_retrieval_span(tenant_with_key, fake_chat_llm, monkeypatch):
+    """빌드된 그래프 구동 시 local_search가 Langfuse retrieval span으로 발행된다."""
+    from asgiref.sync import sync_to_async
+    from apps.usage import langfuse_client
+    from apps.agent.graph import run_chat_agent_async
+    from apps.chat.models import ChatSession
+
+    fake = _FakeLangfuse()
+    monkeypatch.setattr(langfuse_client, "get_langfuse_client", lambda: fake)
+
+    tenant, _ = tenant_with_key
+    session = await sync_to_async(ChatSession.objects.create)(tenant_id=tenant.id, visitor_id="v-rag")
+    await run_chat_agent_async(session, "안녕")
+
+    assert "graphrag_local_search" in [s["name"] for s in fake.spans]

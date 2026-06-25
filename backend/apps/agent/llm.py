@@ -28,7 +28,14 @@ def _usage_config() -> dict:
     ctx = get_usage_context()
     metadata = {}
     if ctx and ctx.tenant_id:
-        metadata = {"tenant_id": ctx.tenant_id, "call_type": ctx.call_type, "session_id": ctx.session_id}
+        from apps.usage.langfuse_client import tenant_tag
+        # langfuse_tags·langfuse_session_id 키는 Langfuse langchain 연동이 native 트레이스 필드로
+        # 매핑한다 — per-tenant 태그 필터·세션 그룹을 1급으로(issue 205).
+        metadata = {
+            "tenant_id": ctx.tenant_id, "call_type": ctx.call_type, "session_id": ctx.session_id,
+            "langfuse_tags": [tenant_tag(ctx.tenant_id), f"call_type:{ctx.call_type}"],
+            "langfuse_session_id": str(ctx.session_id) if ctx.session_id else None,
+        }
     return {"callbacks": callbacks, "metadata": metadata}
 
 

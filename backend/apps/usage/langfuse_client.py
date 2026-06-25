@@ -51,11 +51,18 @@ def get_langfuse_client():
         return None
 
 
-def record_embedding_langfuse(resp_json: dict, tenant_id, model: str, inputs, call_type: str = "embedding") -> None:
+def tenant_tag(tenant_id) -> str:
+    """Langfuse 1급 필터용 tenant 태그 — LLM·임베딩 트레이스가 공유한다(issue 205)."""
+    return f"tenant:{tenant_id}"
+
+
+def record_embedding_langfuse(resp_json: dict, tenant_id, model: str, inputs,
+                              call_type: str = "embedding", session_id=None) -> None:
     """임베딩 응답을 Langfuse generation으로 발행한다(LLM 호출과 대칭, deep module).
 
     미설정/무tenant면 no-op, 발행 예외는 흡수한다(임베딩/인제스션/chat를 절대 안 깸 — best-effort).
     토큰은 응답 usage(provider 실측)에서 읽고, 입력 텍스트는 LANGFUSE_CAPTURE_CONTENT off면 마스킹한다.
+    트레이스에 tenant 태그(+ 있으면 native sessionId)를 달아 per-tenant 필터를 1급으로 만든다(issue 205).
     """
     if not tenant_id:
         return
@@ -66,13 +73,45 @@ def record_embedding_langfuse(resp_json: dict, tenant_id, model: str, inputs, ca
         usage = (resp_json or {}).get("usage") or {}
         total = int(usage.get("total_tokens") or usage.get("prompt_tokens") or 0)
         payload_input = inputs if _capture_content() else "[REDACTED]"
-        gen = client.start_generation(
+        with client.start_as_current_generation(
             name="embedding",
             model=model,
             input=payload_input,
             usage_details={"input": total},
             metadata={"tenant_id": str(tenant_id), "call_type": call_type},
-        )
-        gen.end()
+        ):
+            client.update_current_trace(
+                tags=[tenant_tag(tenant_id)],
+                session_id=str(session_id) if session_id else None,
+            )
+    except Exception:
+        pass
+
+
+def record_retrieval_langfuse(name: str, query: str, chunks, tenant_id, session_id=None) -> None:
+    """GraphRAG 검색을 Langfuse span으로 발행한다 — 어떤 청크가 검색됐는지 트레이스에서 보되,
+    체크포인트는 슬림 유지(rag_chunks는 _clear_transient로 비움 — 불변, issue 206).
+
+    미설정/무tenant면 no-op, 발행 예외는 흡수한다(검색·그래프를 절대 안 깸 — best-effort). 본문은
+    LANGFUSE_CAPTURE_CONTENT off면 마스킹한다. tenant 태그·session으로 세션 단위로 묶인다.
+    """
+    if not tenant_id:
+        return
+    client = get_langfuse_client()
+    if client is None:
+        return
+    try:
+        chunks = list(chunks or [])
+        capture = _capture_content()
+        with client.start_as_current_span(
+            name=name,
+            input=(query if capture else "[REDACTED]"),
+            output=(chunks if capture else f"[{len(chunks)} chunks]"),
+            metadata={"tenant_id": str(tenant_id), "chunk_count": len(chunks)},
+        ):
+            client.update_current_trace(
+                tags=[tenant_tag(tenant_id)],
+                session_id=str(session_id) if session_id else None,
+            )
     except Exception:
         pass

@@ -52,7 +52,7 @@ def get_embeddings(texts: List[str], provider=None) -> List[List[float]]:
     ctx = get_usage_context()
     if ctx and ctx.tenant_id:
         record_embedding_usage(body, ctx.tenant_id, model)
-        record_embedding_langfuse(body, ctx.tenant_id, model, texts)
+        record_embedding_langfuse(body, ctx.tenant_id, model, texts, session_id=ctx.session_id)
 
     return [d["embedding"] for d in body["data"]]
 

@@ -86,8 +86,23 @@ def _local_search_sync(state: dict) -> dict:
     return {"rag_chunks": chunks}
 
 
+def _observe_retrieval(name: str, state: dict, result: dict) -> None:
+    """검색 결과를 Langfuse retrieval span으로 관찰한다(가드형, issue 206).
+
+    rag_chunks는 종단에서 _clear_transient로 비워 체크포인트를 슬림 유지한다 — 그래서 검색 결과는
+    여기 span으로 남겨 트레이스에서 본다(체크포인트 동작 불변). 미설정/예외는 record 측에서 흡수.
+    """
+    from apps.usage.langfuse_client import record_retrieval_langfuse
+    record_retrieval_langfuse(
+        name, state.get("user_message", ""), result.get("rag_chunks") or [],
+        state.get("tenant_id"), session_id=state.get("session_id"),
+    )
+
+
 async def local_search_node(state: dict) -> dict:
-    return await sync_to_async(_local_search_sync)(state)
+    result = await sync_to_async(_local_search_sync)(state)
+    _observe_retrieval("graphrag_local_search", state, result)
+    return result
 
 
 SOURCE_TOP_K = 4  # 폴백 1회당 끌어올 원문 청크 수(토큰 통제)
@@ -116,7 +131,9 @@ def _source_search_sync(state: dict) -> dict:
 
 
 async def source_search_node(state: dict) -> dict:
-    return await sync_to_async(_source_search_sync)(state)
+    result = await sync_to_async(_source_search_sync)(state)
+    _observe_retrieval("graphrag_source_search", state, result)
+    return result
 
 
 def _untrusted_block(state: dict) -> str:
