@@ -41,6 +41,8 @@ export * from './appsTenantsApiAgentLogin401';
 export * from './appsTenantsApiAgentLogout200';
 export * from './appsTenantsApiAgentLogoutAll200';
 export * from './appsTenantsApiAgentRefresh401';
+export * from './appsTenantsApiAgentSignup400';
+export * from './appsTenantsApiAgentSignup409';
 export * from './appsTenantsApiChangePassword200';
 export * from './appsTenantsApiChangePassword400';
 export * from './appsTenantsApiLogin401';

@@ -23,6 +23,7 @@ import {
 } from './generated/endpoints/tenant/tenant'
 import {
   appsTenantsApiAgentLogin,
+  appsTenantsApiAgentSignup,
   appsTenantsApiAgentLogout,
   appsTenantsApiAgentLogoutAll,
   appsTenantsApiListAgents,
@@ -104,6 +105,11 @@ export async function deleteTenant(id: string) {
 export async function tenantAgentLogin(tenantName: string, username: string, password: string) {
   const data = (await appsTenantsApiAgentLogin({ tenant_name: tenantName, username, password })).data as { access_token: string }
   setAccess('agent', data.access_token)
+  return data
+}
+export async function tenantSignup(tenantName: string, username: string, password: string) {
+  const data = (await appsTenantsApiAgentSignup({ tenant_name: tenantName, username, password })).data as { access_token: string }
+  setAccess('agent', data.access_token)  // 가입 즉시 로그인
   return data
 }
 export async function agentLogout() {

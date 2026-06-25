@@ -190,8 +190,9 @@ _dual_auth = _make_agent_auth()
 @agent_router.post("/auth/login", response={200: AgentLoginOut, 401: dict}, auth=None)
 def agent_login(request, body: AgentLoginIn, response: HttpResponse):
     try:
+        # 조직 이름은 전역 unique·대소문자 무시 로그인 식별자(ADR-0025)
         agent = TenantAgent.objects.select_related("tenant").get(
-            tenant__name=body.tenant_name, username=body.username, is_active=True
+            tenant__name__iexact=body.tenant_name.strip(), username=body.username, is_active=True
         )
     except TenantAgent.DoesNotExist:
         return 401, {"detail": "Invalid credentials"}
@@ -201,6 +202,20 @@ def agent_login(request, body: AgentLoginIn, response: HttpResponse):
         return 401, {"detail": "Invalid credentials"}
     set_refresh_cookie(response, agent, issue_session(agent))
     return 200, {"access_token": create_tenant_agent_token(agent)}
+
+
+@agent_router.post("/auth/signup", response={201: AgentLoginOut, 400: dict, 409: dict}, auth=None)
+def agent_signup(request, body: AgentLoginIn, response: HttpResponse):
+    """공개 가입(ADR-0025) — 조직 이름·username·password로 Tenant + 첫 Tenant Admin 생성 후 즉시 로그인."""
+    from apps.tenants.registration import register_tenant, DuplicateOrgName, InvalidSignup
+    try:
+        _tenant, agent = register_tenant(body.tenant_name, body.username, body.password)
+    except DuplicateOrgName:
+        return 409, {"detail": "이미 사용 중인 조직 이름입니다."}
+    except InvalidSignup as e:
+        return 400, {"detail": str(e)}
+    set_refresh_cookie(response, agent, issue_session(agent))
+    return 201, {"access_token": create_tenant_agent_token(agent)}
 
 
 @agent_router.post("/auth/refresh", response={200: AgentLoginOut, 401: dict}, auth=None)

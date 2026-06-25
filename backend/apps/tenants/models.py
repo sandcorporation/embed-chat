@@ -4,6 +4,7 @@ import uuid
 from typing import TYPE_CHECKING
 from django.contrib.auth.hashers import make_password, check_password as django_check_password
 from django.db import models
+from django.db.models.functions import Lower
 from django.contrib.auth.models import AbstractUser
 
 
@@ -35,6 +36,10 @@ class Tenant(models.Model):
 
     class Meta:
         db_table = "tenants"
+        # 조직 이름 = 전역 unique 로그인 식별자(대소문자 무시 — ADR-0025)
+        constraints = [
+            models.UniqueConstraint(Lower("name"), name="uq_tenant_name_ci"),
+        ]
 
     @classmethod
     def verify_key(cls, raw_key: str) -> "Tenant | None":

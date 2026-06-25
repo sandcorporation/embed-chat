@@ -2111,6 +2111,63 @@
         ]
       }
     },
+    "/api/tenant/agents/auth/signup": {
+      "post": {
+        "description": "공개 가입(ADR-0025) — 조직 이름·username·password로 Tenant + 첫 Tenant Admin 생성 후 즉시 로그인.",
+        "operationId": "apps_tenants_api_agent_signup",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentLoginIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentLoginOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Agent Signup",
+        "tags": [
+          "tenant-agents"
+        ]
+      }
+    },
     "/api/tenant/agents/me/change-password": {
       "post": {
         "operationId": "apps_tenants_api_change_password",

@@ -14,6 +14,8 @@ import type {
   AppsTenantsApiAgentLogout200,
   AppsTenantsApiAgentLogoutAll200,
   AppsTenantsApiAgentRefresh401,
+  AppsTenantsApiAgentSignup400,
+  AppsTenantsApiAgentSignup409,
   AppsTenantsApiChangePassword200,
   AppsTenantsApiChangePassword400,
   ChangePasswordIn
@@ -243,6 +245,55 @@ export const appsTenantsApiAgentRefresh = async ( options?: RequestInit): Promis
     method: 'POST'
     
     
+  }
+);}
+
+
+/**
+ * 공개 가입(ADR-0025) — 조직 이름·username·password로 Tenant + 첫 Tenant Admin 생성 후 즉시 로그인.
+ * @summary Agent Signup
+ */
+export type appsTenantsApiAgentSignupResponse201 = {
+  data: AgentLoginOut
+  status: 201
+}
+
+export type appsTenantsApiAgentSignupResponse400 = {
+  data: AppsTenantsApiAgentSignup400
+  status: 400
+}
+
+export type appsTenantsApiAgentSignupResponse409 = {
+  data: AppsTenantsApiAgentSignup409
+  status: 409
+}
+    
+export type appsTenantsApiAgentSignupResponseSuccess = (appsTenantsApiAgentSignupResponse201) & {
+  headers: Headers;
+};
+export type appsTenantsApiAgentSignupResponseError = (appsTenantsApiAgentSignupResponse400 | appsTenantsApiAgentSignupResponse409) & {
+  headers: Headers;
+};
+
+export type appsTenantsApiAgentSignupResponse = (appsTenantsApiAgentSignupResponseSuccess | appsTenantsApiAgentSignupResponseError)
+
+export const getAppsTenantsApiAgentSignupUrl = () => {
+
+
+  
+
+  return `/api/tenant/agents/auth/signup`
+}
+
+export const appsTenantsApiAgentSignup = async (agentLoginIn: AgentLoginIn, options?: RequestInit): Promise<appsTenantsApiAgentSignupResponse> => {
+  
+  return customInstance<appsTenantsApiAgentSignupResponse>(getAppsTenantsApiAgentSignupUrl(),
+  {      
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      agentLoginIn,)
   }
 );}
 
