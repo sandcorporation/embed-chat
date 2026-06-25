@@ -168,7 +168,7 @@ def test_change_password_revokes_all_agent_sessions(client, tenant_with_key):
 
     client.post(
         "/api/tenant/agents/me/change-password",
-        {"current_password": "secret123", "new_password": "newpass456"},
+        {"current_password": "secret123", "new_password": "newpass456!"},
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {access}",
     )

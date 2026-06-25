@@ -208,16 +208,24 @@ def agent_login(request, body: AgentLoginIn, response: HttpResponse):
     return 200, {"access_token": create_tenant_agent_token(agent)}
 
 
-@agent_router.post("/auth/signup", response={201: AgentLoginOut, 400: dict, 409: dict}, auth=None)
+@agent_router.post("/auth/signup", response={201: AgentLoginOut, 400: dict, 409: dict, 429: dict}, auth=None)
 def agent_signup(request, body: AgentLoginIn, response: HttpResponse):
-    """공개 가입(ADR-0025) — 조직 이름·username·password로 Tenant + 첫 Tenant Admin 생성 후 즉시 로그인."""
+    """공개 가입(ADR-0025) — 조직 이름·username·password로 Tenant + 첫 Tenant Admin 생성 후 즉시 로그인.
+
+    남용 방지: IP당 1시간 1회(성공 가입만 슬롯 소비 — 실패는 안 막음).
+    """
     from apps.tenants.registration import register_tenant, DuplicateOrgName, InvalidSignup
+    from apps.tenants.signup_rate_limit import client_ip, signup_allowed, mark_signup
+    ip = client_ip(request)
+    if not signup_allowed(ip):
+        return 429, {"detail": "가입은 IP당 1시간에 1회만 가능합니다. 잠시 후 다시 시도해 주세요."}
     try:
         _tenant, agent = register_tenant(body.tenant_name, body.username, body.password)
     except DuplicateOrgName:
         return 409, {"detail": "이미 사용 중인 조직 이름입니다."}
     except InvalidSignup as e:
         return 400, {"detail": str(e)}
+    mark_signup(ip)  # 성공 시에만 기록
     set_refresh_cookie(response, agent, issue_session(agent))
     return 201, {"access_token": create_tenant_agent_token(agent)}
 
@@ -328,9 +336,13 @@ def change_agent_role(request, agent_id: str, body: AgentRoleIn):
 
 @agent_router.post("/me/change-password", response={200: dict, 400: dict}, auth=tenant_agent_auth)
 def change_password(request, body: ChangePasswordIn):
+    from apps.tenants.password_policy import password_policy_error
     agent = request.auth
     if not agent.check_password(body.current_password):
         return 400, {"detail": "현재 비밀번호가 올바르지 않습니다."}
+    pw_err = password_policy_error(body.new_password)
+    if pw_err:
+        return 400, {"detail": pw_err}
     agent.set_password(body.new_password)
     agent.save()
     revoke_all(agent)  # 비번 변경 시 기존 모든 세션의 refresh 폐기(침해 대응)

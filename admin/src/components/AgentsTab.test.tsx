@@ -45,4 +45,18 @@ describe('AgentsTab — 역할 관리/게이팅 (issue 210)', () => {
     expect(screen.queryByRole('button', { name: '추가' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Admin으로' })).toBeNull()
   })
+
+  it('비밀번호 변경 시 확인이 일치하지 않으면 막는다 (issue 211)', async () => {
+    vi.mocked(api.currentAgentRole).mockReturnValue('admin')
+    render(<AgentsTab />)
+
+    await screen.findByText('owner')
+    await userEvent.type(screen.getByPlaceholderText('현재 비밀번호'), 'old')
+    await userEvent.type(screen.getByPlaceholderText('새 비밀번호'), 'Newpass1!')
+    await userEvent.type(screen.getByPlaceholderText('새 비밀번호 확인'), 'different')
+    await userEvent.click(screen.getByRole('button', { name: '변경' }))
+
+    expect(await screen.findByText('새 비밀번호가 일치하지 않습니다.')).toBeInTheDocument()
+    expect(api.changePassword).not.toHaveBeenCalled()
+  })
 })
