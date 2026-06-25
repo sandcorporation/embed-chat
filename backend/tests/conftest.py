@@ -94,9 +94,14 @@ class _FakeChatLLM:
         self.override = None  # callable(messages) -> schema instance
         self.extraction = None  # optional GraphExtraction override (GraphRAG 추출용)
         self.last_provider = None  # 마지막 호출에 전달된 LLMProvider(라우팅 검증용)
+        # 그래프가 LLM에 보낸 messages를 호출별로 (schema_name, messages)로 기록한다 — 프롬프트 캐싱
+        # 안정 prefix를 그래프 종단에서 검증하기 위함(issue 201). stream/astream/acomplete는 모두
+        # complete_structured를 경유하므로 여기 한 곳에서 잡힌다.
+        self.captured: list[tuple[str, list]] = []
 
     def complete_structured(self, provider, messages, schema):
         self.last_provider = provider
+        self.captured.append((schema.__name__, list(messages)))
         # GraphRAG Entity/관계 추출 스키마는 결정적 그래프를 반환
         if schema.__name__ == "GraphExtraction":
             if self.extraction is not None:
