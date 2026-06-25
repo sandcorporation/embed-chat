@@ -14,6 +14,7 @@ beforeEach(() => {
   vi.mocked(api.listMemories).mockResolvedValue([] as any)
   vi.mocked(api.getSessionMessages).mockResolvedValue([] as any)
   vi.mocked(api.getSessionCheckpoint).mockResolvedValue(null as any)
+  vi.mocked(api.getSessionRetrievals).mockResolvedValue([] as any)
 })
 
 function at(path: string) {
