@@ -77,6 +77,22 @@ async def stream(request, slug: str, visitor_id: str = "", hash: str = ""):
     return response
 
 
+@chat_router.get("/resolve", response={200: dict, 404: dict}, auth=None)
+def resolve_widget(request, slug: str):
+    """공개 위젯 진입 가드 — slug가 활성 Tenant로 해석되면 200(+공개 브랜드), 아니면 404.
+
+    위젯이 렌더 전에 호출해, 유효하지 않은 slug면 챗 셸 대신 not-found를 띄운다(EventSource는 HTTP
+    상태를 못 읽어 404와 일시 오류를 구분 못 하므로, 사전 검증이 필요하다).
+    """
+    from apps.tenants.models import Tenant
+
+    tenant = Tenant.resolve_slug(slug)
+    if not tenant:
+        return 404, {"detail": "Not found"}
+    config = getattr(tenant, "config", None)
+    return 200, {"brand_name": (config.brand_name if config else "")}
+
+
 @chat_router.post("/message", response={202: dict, 404: dict, 429: dict})
 async def send_message(request, body: MessageIn):
     from django.conf import settings

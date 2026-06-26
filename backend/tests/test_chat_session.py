@@ -49,6 +49,24 @@ def test_stream_unknown_slug_rejected(client):
 
 
 @pytest.mark.django_db
+def test_resolve_404_for_unknown_slug(client):
+    """위젯 진입 가드 — 존재하지 않는 slug는 404 (유효하지 않은 챗봇 페이지를 띄우게)."""
+    resp = client.get("/api/chat/resolve?slug=no-such-shop")
+    assert resp.status_code == 404
+
+
+@pytest.mark.django_db
+def test_resolve_200_for_valid_slug(client, tenant_with_key):
+    """활성 Tenant의 slug는 200 + 공개 브랜드."""
+    tenant, _ = tenant_with_key
+    tenant.slug = "myshop"
+    tenant.save(update_fields=["slug"])
+    resp = client.get("/api/chat/resolve?slug=myshop")
+    assert resp.status_code == 200
+    assert "brand_name" in resp.json()
+
+
+@pytest.mark.django_db
 def test_stream_missing_visitor_id_rejected(client, tenant_with_key):
     """visitor_id 없이 연결하면 거부된다 (위젯이 Anonymous Visitor ID를 보장)."""
     tenant, _ = tenant_with_key
