@@ -169,6 +169,55 @@ def test_escalation_sse_stream_rejects_invalid_token(client):
     assert resp.status_code == 401
 
 
+@pytest.mark.django_db(transaction=True)
+async def test_escalation_stream_delivers_visitor_message_live(tenant_with_key):
+    """hitl 채널에 발행된 visitor_message가 연결된 콘솔 스트림으로 라이브 전달된다(issue 212).
+
+    sync 블로킹 스트림이 uvicorn ASGI에서 라이브 전달을 못 하던 버그의 regression — async 전환 후 통과.
+    """
+    import asyncio
+    import json
+    from django.test import AsyncClient
+    from asgiref.sync import sync_to_async
+    from apps.tenants.models import TenantAgent
+    from apps.tenants.auth import create_tenant_agent_token
+    from apps.chat.sse import publish_visitor_message
+
+    tenant, _ = tenant_with_key
+
+    def _agent():
+        a = TenantAgent(tenant=tenant, username="live-stream", role=TenantAgent.ROLE_ADMIN)
+        a.set_password("pass")
+        a.save()
+        return a
+    agent = await sync_to_async(_agent)()
+    token = create_tenant_agent_token(agent)
+
+    resp = await AsyncClient().get(f"/api/tenant/escalations/stream?token={token}")
+    assert resp.status_code == 200
+
+    async def read_until_visitor():
+        async for chunk in resp.streaming_content:
+            text = chunk.decode()
+            if "visitor_message" in text:  # keepalive(`: keepalive`)는 건너뛴다
+                data_line = next(l for l in text.splitlines() if l.startswith("data:"))
+                return json.loads(data_line[len("data:"):].strip())
+        return None
+
+    task = asyncio.ensure_future(read_until_visitor())
+    # pub/sub은 구독 전 발행이 유실되므로, 구독 확립을 보장하려 짧게 반복 발행한다.
+    for _ in range(6):
+        await asyncio.sleep(0.3)
+        await sync_to_async(publish_visitor_message)(str(tenant.id), "sess-live", "상담원님 안녕하세요")
+        if task.done():
+            break
+    data = await asyncio.wait_for(task, timeout=5)
+
+    assert data["type"] == "visitor_message"
+    assert data["session_id"] == "sess-live"
+    assert data["content"] == "상담원님 안녕하세요"
+
+
 @pytest.mark.django_db
 def test_typing_indicator_publishes_sse_event(client, tenant_with_key, tenant_agent_token, redis_subscribe):
     """POST /api/tenant/escalations/{id}/typing → Redis에 typing 이벤트가 발행된다."""

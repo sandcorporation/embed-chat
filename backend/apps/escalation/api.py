@@ -196,38 +196,50 @@ def resolve_escalation(request, escalation_id: str):
 
 
 @escalation_router.get("/stream", auth=None)
-def escalation_stream(request, token: str):
-    from apps.chat.sse import get_redis_client
+async def escalation_stream(request, token: str):
+    """상담원 콘솔 SSE — hitl:{tenant} 채널을 async 구독해 라이브 이벤트를 전달한다(issue 212).
+
+    async 뷰 + async redis(get_async_redis_client) + async generator로 한다 — sync 블로킹 스트림은
+    uvicorn ASGI에서 streaming_content가 sync라 라이브 전달이 안 됐다(chat SSE의 async 전환과 동일 처리).
+    """
+    import json
+    import asyncio
+    from asgiref.sync import sync_to_async
+    from django.http import HttpResponse
+    from apps.chat.sse import get_async_redis_client
     from apps.tenants.auth import verify_tenant_agent_token
     from apps.tenants.models import TenantAgent
-    import json
 
     payload = verify_tenant_agent_token(token)
     if not payload:
-        from django.http import HttpResponse
         return HttpResponse(status=401)
     try:
-        agent = TenantAgent.objects.select_related("tenant").get(
-            id=payload["sub"], is_active=True
-        )
+        agent = await sync_to_async(
+            lambda: TenantAgent.objects.select_related("tenant").get(id=payload["sub"], is_active=True)
+        )()
     except TenantAgent.DoesNotExist:
-        from django.http import HttpResponse
         return HttpResponse(status=401)
 
     channel = f"hitl:{agent.tenant_id}"
 
-    def _event_generator():
-        r = get_redis_client()
+    async def _event_generator():
+        r = get_async_redis_client()
         pubsub = r.pubsub()
-        pubsub.subscribe(channel)
+        await pubsub.subscribe(channel)
         try:
-            for message in pubsub.listen():
-                if message["type"] == "message":
-                    data = json.loads(message["data"])
-                    yield f"event: {data.get('type', 'message')}\ndata: {json.dumps(data)}\n\n"
+            while True:
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message is None:
+                    yield ": keepalive\n\n"  # 프록시 idle 타임아웃 방지(주기 하트비트)
+                    continue
+                data = json.loads(message["data"])
+                yield f"event: {data.get('type', 'message')}\ndata: {json.dumps(data)}\n\n"
+        except (GeneratorExit, asyncio.CancelledError):
+            pass
         finally:
-            pubsub.unsubscribe(channel)
-            pubsub.close()
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+            await r.aclose()
 
     response = StreamingHttpResponse(_event_generator(), content_type="text/event-stream")  # pyright: ignore[reportArgumentType]
     response["Cache-Control"] = "no-cache"
